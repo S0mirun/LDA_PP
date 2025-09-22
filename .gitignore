@@ -5,7 +5,7 @@
 /LDA/src/*.o
 
 #outputs
-/outputs/*
+outputs/*
 
 #tmp
-/tmp/*
+tmp/*
