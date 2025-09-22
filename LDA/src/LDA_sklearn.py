@@ -45,8 +45,7 @@ class Setting: # セッティング
         # vq
         self.TARGET_ELEMENT = [
             "u [m/s]",
-            "vm [m/s]",
-            "r [deg/s]",
+            "vm [m/s]"
         ]
         self.dim_vec = len(self.TARGET_ELEMENT)
         self.K_EACH = 5
@@ -55,8 +54,8 @@ class Setting: # セッティング
         self.vq_log_dir = f"./outputs/{target_port}/{self.vq_trial_id}/"
         # segmentation
         self.PERIOD = 1
-        self.L_DOC = 100
-        self.DELTA_TS_SHIFT = 100
+        self.L_DOC = 30
+        self.DELTA_TS_SHIFT = 15
         self.sgmnt_id = f"PERIOD_{self.PERIOD}_L_DOC_{self.L_DOC}_DELTA_{self.DELTA_TS_SHIFT}"
         self.sgmnt_log_dir = f"{self.vq_log_dir}sgmntd/{self.sgmnt_id}/"
         # LDA
@@ -187,8 +186,8 @@ class LDAClustering:
                 save_dir=f"{self.ps.log_dir}sample_ts/{topic_str}/csv/",
                 header=[
                     "t [s]", "word",
-                    "u [m/s]", "vm [m/s]", "r [deg/s]", "r [rad/s]",
-                    "p_x [m]", "p_y [m]", "psi [rad]", "psi [deg]",
+                    "u [m/s]", "vm [m/s]",
+                    "p_x [m]", "p_y [m]", "gyro deg [rad]", "gyro deg [deg]",
                 ]
             )
             #
@@ -217,8 +216,7 @@ class LDAClustering:
                 t = 0.0
                 mnrv = multinominal_rvs[0]
                 word = mnrv2word(mnrv)
-                xi = self.decode(word)  # r in [deg/s]
-                zeta = np.zeros(3)  # psi in [rad]
+                zeta = np.zeros(3)  # gyro deg in [rad]
                 #
                 logger.reset()
                 #
@@ -227,8 +225,6 @@ class LDAClustering:
                     info =  \
                         [t]  \
                         + [word]  \
-                        + list(xi)  \
-                        + [np.deg2rad(xi[2])]  \
                         + list(zeta)  \
                         + [np.rad2deg(zeta[2])]
                     logger.append(info)
@@ -236,8 +232,6 @@ class LDAClustering:
                     t += DT
                     mnrv = multinominal_rvs[j+1]
                     word = mnrv2word(mnrv)
-                    xi = self.decode(word)  # r in [deg/s]
-                    zeta += R(zeta) @ np.array([xi[0], xi[1], np.deg2rad(xi[2])])
                 # save as csv
                 logger.save(fname=f"{ts_save_name}.csv", fig_flag=False,)
                 #
@@ -407,22 +401,6 @@ class LDAClustering:
             linewidth = 0.5,
         )
         # ax_v.legend()
-        # r
-        ax_r.set_xlabel("$t$ [s]")
-        ax_r.set_ylabel("$r$ [deg/s]")
-        ax_r.set_xlim(time_min, time_max)
-        ax_r.set_ylim(calc_ax_range(
-            data=original_ts_df["r [deg/s]"],
-            margin_rate=0.05,
-        ))
-        ax_r.plot(
-            original_ts_df["t [s]"],
-            original_ts_df["r [deg/s]"],
-            color = Colors.black,
-            linestyle = "solid",
-            linewidth = 0.5,
-        )
-        # ax_r.legend()
         #
         fig.align_labels()
         fig.tight_layout()
@@ -576,7 +554,7 @@ class LDAClustering:
     
     def save_train_trans(self):
         #
-        trian_log = np.array(self.lda_model.bound_log)
+        trian_log = np.array(self.lda_model.bound_)
         iter = trian_log[:, 0]
         perplexity = trian_log[:, 1]
         #
