@@ -27,7 +27,6 @@ port_name = [
     "_Yokkaichi_port1A",
     "_Yokkaichi_port2B"
 ]
-target_port = port_name[0]
 
 
 
@@ -112,8 +111,8 @@ class Segmentation:
                 "t [s]": "t (original) [s]",
                 "p_x [m]": "p_x (original) [m]",
                 "p_y [m]": "p_y (original) [m]",
-                "psi [deg]": "psi (original) [deg]",
-                "psi [rad]": "psi (original) [rad]",
+                "gyro deg [deg]": "gyro deg (original) [deg]",
+                "gyro deg [rad]": "gyro deg (original) [rad]",
             }
         )
         # time
@@ -121,33 +120,36 @@ class Segmentation:
         # position, heading
         df["p_x [m]"] = 0.0
         df["p_y [m]"] = 0.0
-        df["psi [rad]"] = 0.0
+        df["gyro deg [rad]"] = 0.0
         Ox = df.iloc[0, df.columns.get_loc("p_x (original) [m]")]
         Oy = df.iloc[0, df.columns.get_loc("p_y (original) [m]")]
-        theta = df.iloc[0, df.columns.get_loc("psi (original) [rad]")]
+        theta = df.iloc[0, df.columns.get_loc("gyro deg (original) [rad]")]
         for i in range(len(df)):
             px = df.iloc[i, df.columns.get_loc("p_x (original) [m]")]
             py = df.iloc[i, df.columns.get_loc("p_y (original) [m]")]
-            psi = df.iloc[i, df.columns.get_loc("psi (original) [rad]")]
-            p_nEF = transform_EF(px, py, psi, Ox, Oy, theta,)
+            gyro_deg = df.iloc[i, df.columns.get_loc("gyro deg (original) [rad]")]
+            p_nEF = transform_EF(px, py, gyro_deg, Ox, Oy, theta,)
             df.iloc[
                 i,
                 [
                     df.columns.get_loc("p_x [m]"),
                     df.columns.get_loc("p_y [m]"),
-                    df.columns.get_loc("psi [rad]"),
+                    df.columns.get_loc("gyro deg [rad]"),
                 ]
             ] = p_nEF
-            df["psi [deg]"] = np.rad2deg(df["psi [rad]"].values)
+            df["gyro deg [deg]"] = np.rad2deg(df["gyro deg [rad]"].values)
         #
         return df
 
 
 if __name__ == "__main__":
-    #
-    ps = ProblemSetting()
-    s = Segmentation(ps=ps)
-    #
-    s.main()
+    for port in port_name:
+        target_port = port
+        print("port name:    " + str(target_port))
+        #
+        ps = ProblemSetting()
+        s = Segmentation(ps=ps)
+        #
+        s.main()
     #
     print("\nDone\n")

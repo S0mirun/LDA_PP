@@ -29,8 +29,7 @@ port_name = [
     "_Yokkaichi_port1A",
     "_Yokkaichi_port2B"
 ]
-target_port = port_name[5]
-ORIGINAL_TS_DIR = f"./LDA/src/ts_data/original/csv/{target_port}/"
+#ORIGINAL_TS_DIR = f"./LDA/src/ts_data/original/csv/{target_port}/"
 
 
 
@@ -389,17 +388,22 @@ class VectorQuantization:
 
 
 if __name__ == "__main__":
-    ps = Setting()
-    vq = VectorQuantization(ps)
-    if PROFILE_FLAG:
-        fname = f"profile_log_{PRCSS_TYPE}_{str(N_PRCSS).zfill(4)}"
-        dir = f"{ps.log_dir}profile/"
-        os.makedirs(dir, exist_ok=True)
-        cProfile.run(
-            "vq.main()",
-            filename = f"{dir}{fname}.bf"
-        )
-        print("\nDone\n")
-    else:
-        vq.main()
+    for port in port_name:
+        target_port = port
+        ORIGINAL_TS_DIR = f"./LDA/src/ts_data/original/csv/{target_port}/"
+        print("target port:    " + str(target_port))
+        #
+        ps = Setting()
+        vq = VectorQuantization(ps)
+        if PROFILE_FLAG:
+            fname = f"profile_log_{PRCSS_TYPE}_{str(N_PRCSS).zfill(4)}"
+            dir = f"{ps.log_dir}profile/"
+            os.makedirs(dir, exist_ok=True)
+            cProfile.run(
+                "vq.main()",
+                filename = f"{dir}{fname}.bf"
+            )
+            print("\nDone\n")
+        else:
+            vq.main()
         print("\nDone\n")
