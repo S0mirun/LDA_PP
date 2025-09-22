@@ -1,0 +1,45 @@
+import glob
+import os
+
+import pandas as pd
+from utils.time_series_figure  \
+    import TimeSeries, make_traj_fig, make_ts_fig, make_traj_and_velo_fig
+import inspect
+
+DIR = os.path.dirname(__file__)
+RAW_TS_DIR = f"{DIR}/../../tmp/"
+
+csv_path = glob.glob(f"{RAW_TS_DIR}/*[A-C]/*")
+
+df = pd.read_csv(
+    csv_path[0],
+    encoding='shift-jis'
+    )
+
+#print(os.path.basename(csv_path[0]))
+
+df = pd.read_csv(
+    "/Users/tokudashintarou/Desktop/raw_data/888-送付データ/2-3_一次解析/1_2023_0216_PCC_着/1-運動/SEAiq_20230216_054631.xyz",
+    encoding="shift-jis"
+)
+
+#print(df)
+
+#print(TimeSeries.__module__)
+#print(TimeSeries.__init__.__code__.co_varnames)
+
+port_name = [
+    "_Osaka_port1A",
+    "_Osaka_port1B",
+    "_Tokyo_port2B",
+    "_Tokyo_port2C",
+    "_Yokkaichi_port1A",
+    "_Yokkaichi_port2B"
+]
+target_port = port_name[0]
+
+ORIGINAL_TS_DIR = f"./LDA/src/ts_data/original/csv/{target_port}/"
+path = glob.glob(f"{ORIGINAL_TS_DIR}/*.csv")
+
+print(os.path.exists(ORIGINAL_TS_DIR))
+print(len(path))

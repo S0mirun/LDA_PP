@@ -1,0 +1,11 @@
+#LDA
+/LDA/src/ts_data/*
+/LDA/src/*.so
+/LDA/src/*.mod
+/LDA/src/*.o
+
+#outputs
+/outputs/*
+
+#tmp
+/tmp/*
