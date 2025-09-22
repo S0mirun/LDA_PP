@@ -5,7 +5,9 @@
 /LDA/src/*.o
 
 #outputs
-outputs/*
+/outputs/*
+!/outputs/.gitkeep
 
 #tmp
-tmp/*
+/tmp/*
+!/tmp/.gitkeep
