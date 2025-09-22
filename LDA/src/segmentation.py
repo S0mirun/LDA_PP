@@ -17,7 +17,7 @@ from utils.read_ts_info_table import read_ship_shape
 #
 N_PRCSS = 2
 #
-DT = 1.0  # [s]
+DT = 60.0  # [s]
 #
 port_name = [
     "_Osaka_port1A",
@@ -44,8 +44,8 @@ class ProblemSetting:
         self.vq_log_dir = f"./outputs/{target_port}/{self.vq_id}/"
         # segmentation
         self.PERIOD = 1  # [time step], in terms of DT, period of downsampling
-        self.L_DOC = 100  # minimum of time steps of a segment, in terms of DT * self.PERIOD
-        self.DELTA_TS_SHIFT = 100  # num of time steps shifted to the start of the next doc
+        self.L_DOC = 30  # minimum of time steps of a segment, in terms of DT * self.PERIOD
+        self.DELTA_TS_SHIFT = 15  # num of time steps shifted to the start of the next doc
         #
         self.trial_id = f"PERIOD_{self.PERIOD}_L_DOC_{self.L_DOC}_DELTA_{self.DELTA_TS_SHIFT}"
         self.log_dir = f"{self.vq_log_dir}sgmntd/{self.trial_id}/"
