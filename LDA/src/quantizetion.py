@@ -29,7 +29,7 @@ port_name = [
     "_Yokkaichi_port1A",
     "_Yokkaichi_port2B"
 ]
-#ORIGINAL_TS_DIR = f"./LDA/src/ts_data/original/csv/{target_port}/"
+
 
 
 

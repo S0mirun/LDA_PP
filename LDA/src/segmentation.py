@@ -29,7 +29,6 @@ port_name = [
 ]
 
 
-
 class ProblemSetting:
     def __init__(self) -> None:
         # vq
