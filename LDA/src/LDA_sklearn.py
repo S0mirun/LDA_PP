@@ -553,18 +553,33 @@ class LDAClustering:
         print(f"\nTrained model loaded: {self.ps.lda_id}\n")
     
     def save_train_trans(self):
-        #
-        trian_log = np.array(self.lda_model.bound_)
-        iter = trian_log[:, 0]
-        perplexity = trian_log[:, 1]
-        #
-        os.makedirs(f"{self.ps.log_dir}train_trans/", exist_ok=True)
-        # save as csv
-        self.train_trans_df = pd.DataFrame({
-            "iter": iter,
-            "perp": perplexity,
-        })
-        self.train_trans_df.to_csv(f"{self.ps.log_dir}train_trans/train_trans_{self.ps.lda_id}.csv")
+        n_iter = getattr(self.lda_model, "n_iter_", None)
+        final_bound = float(getattr(self.lda_model, "bound_", float("nan")))
+
+        X_eval = None
+        for name in ("X_valid", "X_train", "X"):
+            if hasattr(self, name) and getattr(self, name) is not None:
+                X_eval = getattr(self, name)
+                break
+
+        try:
+            perp = float(self.lda_model.perplexity(X_eval)) if X_eval is not None else float("nan")
+        except Exception:
+            perp = float("nan")
+
+        out_dir = os.path.join(self.ps.log_dir, "train_trans")
+        os.makedirs(out_dir, exist_ok=True)
+
+        self.train_trans_df = pd.DataFrame([{
+            "iter": n_iter if n_iter is not None else -1,
+            "perp": perp,
+            "bound": final_bound,
+        }])
+
+        out_path = os.path.join(out_dir, f"train_trans_{self.ps.lda_id}.csv")
+        self.train_trans_df.to_csv(out_path, index=False)
+        print(f"[save_train_trans] wrote: {out_path} (iter={n_iter}, perp={perp:.6g}, bound={final_bound:.6g})")
+
     
     def make_train_trans_fig(self):
         #
