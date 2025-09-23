@@ -37,7 +37,7 @@ port_name = [
 ]
 target_port = port_name[0]
 ORIGINAL_TS_DIR = f"./LDA/src/ts_data/original/csv/{target_port}"
-DT = 1.0  # [s]
+DT = 60.0  # [s]
 
 
 class Setting: # セッティング
@@ -89,7 +89,7 @@ class LDAClustering:
     def __init__(self, ps):
         self.ps = ps
 
-    def main(self): # ここを順に実行していく
+    def main(self):
         #
         logging.basicConfig(
             filename=f"{self.ps.log_dir}gensim.log",
@@ -216,7 +216,8 @@ class LDAClustering:
                 t = 0.0
                 mnrv = multinominal_rvs[0]
                 word = mnrv2word(mnrv)
-                zeta = np.zeros(3)  # gyro deg in [rad]
+                xi = self.decode(word) #u, vm
+                zeta = np.zeros(3)  # p_x, p_y, gyro deg
                 #
                 logger.reset()
                 #
@@ -225,6 +226,7 @@ class LDAClustering:
                     info =  \
                         [t]  \
                         + [word]  \
+                        + list(xi)  \
                         + list(zeta)  \
                         + [np.rad2deg(zeta[2])]
                     logger.append(info)
