@@ -410,8 +410,15 @@ class LDAClustering:
         save_fig(f"{self.tp_trans_log_dir}fig/", f"tp_trans_{ts_name}_{self.ps.lda_id}")
     
     def read_codebook(self):
-        codebook_float = pd.read_csv(f"{self.ps.vq_log_dir}codebook.csv", index_col=0)
-        self.codebook = codebook_float.astype({"code": str})
+        df = pd.read_csv(f"{self.ps.vq_log_dir}codebook.csv", index_col=0).astype({"code": str})
+        self.codebook = df
+        self.codebook["_key"] = self.codebook["code"].map(self._norm_code)
+        cols = ["u","vm"] if {"u","vm"}.issubset(df.columns) else list(df.columns[1:3])
+        self.code2uv = {
+            key: df.loc[idx, cols].to_numpy(dtype=float)
+            for idx, key in enumerate(df["_key"])
+        }
+
     
     def make_vec_dist_figs_2D(self):
         set_rcParams()
@@ -609,8 +616,14 @@ class LDAClustering:
         save_fig(f"{self.ps.log_dir}train_trans/", f"train_trans_{self.ps.lda_id}")
     
     def decode(self, code):
-        vec = self.codebook.loc[self.codebook["code"]==code].values[0][1:]
-        return np.array(vec)
+        return self.code2uv[self._norm_code(code)]
+    
+    @staticmethod
+    def _norm_code(code):
+        s = str(code).strip()
+        if s.endswith(".0"):
+            s = s[:-2]
+        return s
     
     def make_dict(self):
         # read documents
@@ -635,9 +648,7 @@ class LDAClustering:
     def read_encoded_ts_from_path(self, path):
         doc_name = os.path.splitext(os.path.basename(path))[0]
         df = pd.read_csv(path, index_col=0)
-        doc_float = df["code"]
-        doc_int = doc_float.astype("int64").values.tolist()
-        doc = [str(w) for w in doc_int]
+        doc = df["code"].astype(str).tolist()
         return {doc_name: doc}
     
     def make_corpus(self):
