@@ -40,7 +40,7 @@ class ProblemSetting:
         self.K_EACH = 5
         self.n_code = self.K_EACH ** self.dim_vec
         self.vq_id = f"dim_vec_{str(self.dim_vec)}_n_code_{str(self.n_code)}"
-        self.vq_log_dir = f"./outputs/{target_port}/{self.vq_id}/"
+        self.vq_log_dir = f"./outputs//{self.vq_id}/"
         # segmentation
         self.PERIOD = 1  # [time step], in terms of DT, period of downsampling
         self.L_DOC = 30  # minimum of time steps of a segment, in terms of DT * self.PERIOD
@@ -142,13 +142,10 @@ class Segmentation:
 
 
 if __name__ == "__main__":
-    for port in port_name:
-        target_port = port
-        print("port name:    " + str(target_port))
-        #
-        ps = ProblemSetting()
-        s = Segmentation(ps=ps)
-        #
-        s.main()
+    #
+    ps = ProblemSetting()
+    s = Segmentation(ps=ps)
+    #
+    s.main()
     #
     print("\nDone\n")

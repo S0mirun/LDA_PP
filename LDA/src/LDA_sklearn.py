@@ -35,8 +35,7 @@ port_name = [
     "_Yokkaichi_port1A",
     "_Yokkaichi_port2B"
 ]
-target_port = port_name[0]
-ORIGINAL_TS_DIR = f"./LDA/src/ts_data/original/csv/{target_port}"
+ORIGINAL_TS_DIR = f"./LDA/src/ts_data/original/csv/"
 DT = 60.0  # [s]
 
 
@@ -51,7 +50,7 @@ class Setting: # セッティング
         self.K_EACH = 5
         self.n_code = self.K_EACH ** self.dim_vec
         self.vq_trial_id = f"dim_vec_{str(self.dim_vec)}_n_code_{str(self.n_code)}"
-        self.vq_log_dir = f"./outputs/{target_port}/{self.vq_trial_id}/"
+        self.vq_log_dir = f"./outputs/{self.vq_trial_id}/"
         # segmentation
         self.PERIOD = 1
         self.L_DOC = 30

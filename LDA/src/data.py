@@ -31,12 +31,12 @@ def preprocess():
     #
     for dir in glob.glob(f"{RAW_TS_DIR}/*[A-C]"):
         #
-        basename = os.path.basename(dir)
-        #
         for path in glob.glob(f"{dir}/*"):
             csv_path = path
             ts_id = os.path.basename(csv_path)
-            ts_id_str = os.path.splitext(ts_id)[0]
+            name= os.path.splitext(ts_id)[0]
+            date, num, port, port_num, rest = name.split("_", 4)
+            ts_id_str = f"{port}_{port_num}_{date}_{num}_{rest}.csv"
             raw_df = pd.read_csv(
                 csv_path,
                 skiprows=[0,1],
@@ -55,8 +55,8 @@ def preprocess():
 
             df = prepare_df(raw_df)
             log_dir = f"{DIR}/ts_data/original/"
-            os.makedirs(f"{log_dir}csv/{basename}/", exist_ok=True)
-            df.to_csv(os.path.join(f"{log_dir}/csv/{basename}/", ts_id))
+            os.makedirs(f"{log_dir}csv/", exist_ok=True)
+            df.to_csv(os.path.join(f"{log_dir}/csv/", f"{ts_id_str}"))
             #
             ts = TimeSeries(
                 df=df,
@@ -69,15 +69,15 @@ def preprocess():
                 ship_plot_step_period=100, alpha_ship_shape=0.5,
                 fig_size=(5, 5), legend_flag=True,
             )
-            save_fig(f"{log_dir}/fig/{basename}/traj/", f"{ts_id_str}_traj",)
+            save_fig(f"{log_dir}/fig/traj/", f"{ts_id_str}_traj",)
             make_ts_fig(ts_list=[ts], fig_size=(10, 5,))
-            save_fig(f"{log_dir}/fig/{basename}/state/", f"{ts_id_str}_state",)
+            save_fig(f"{log_dir}/fig/state/", f"{ts_id_str}_state",)
             make_traj_and_velo_fig(
                 ts_list=[ts],
                 ship_plot_step_period=100, alpha_ship_shape=0.5,
                 fig_size=(14, 7)
             )
-            save_fig(f"{log_dir}/fig/{basename}/traj_and_velo/", f"{ts_id_str}_traj_and_velo",)
+            save_fig(f"{log_dir}/fig/traj_and_velo/", f"{ts_id_str}_traj_and_velo",)
 
 def convert_coordinate(value):
     if value is None or value == '':
