@@ -59,15 +59,15 @@ class Setting: # セッティング
         self.sgmnt_log_dir = f"{self.vq_log_dir}sgmntd/{self.sgmnt_id}/"
         # LDA
         self.N_TOPIC = 5 # トピック数
-        self.KAPPA = 0.7
-        self.TAU0 = 10.0
-        self.MAX_ITER = 10
+        self.KAPPA = 0.9
+        self.TAU0 = 100.0
+        self.MAX_ITER = 400
         self.BATCH_SIZE = 128
         self.EVALUATE_EVERY = 1
         self.TOTAL_SAMPLES = 1e6
         self.PERP_TOL = 0.1
-        self.MEAN_CHANGE_TOL = 1e-3
-        self.MAX_DOC_UPDATE_ITER = 100
+        self.MEAN_CHANGE_TOL = 1e-5
+        self.MAX_DOC_UPDATE_ITER = 200
         self.RANDOM_STATE = 1521
         self.lda_id = f"N_{self.N_TOPIC}_SEED_{self.RANDOM_STATE}"
         #
