@@ -8,11 +8,11 @@ import re
 from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes, mark_inset
 import unicodedata
 
-from utils.ship_geometry import *
-from utils.time_series_figure  \
+from utils.LDA.ship_geometry import *
+from utils.LDA.time_series_figure  \
     import TimeSeries, make_traj_fig, make_ts_fig, make_traj_and_velo_fig
-from utils.visualization import *
-from utils.kml import kml_based_txt_to_csv
+from utils.LDA.visualization import *
+from utils.LDA.kml import kml_based_txt_to_csv
 
 
 DIR = os.path.dirname(__file__)
