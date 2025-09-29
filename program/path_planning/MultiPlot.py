@@ -46,24 +46,24 @@ class Traj:
 class RealTraj(Traj):
     def __init__(self):
         super().__init__()
-    # input_csvはcsvのデータを使える品質にして、土台を形成する
+    #
     def input_csv(self, filename_traj, filename_berth):
-        # check the existance of csv file（filename_trajとfilename_berthの存在を確認し、存在しなければエラーメッセージを出してプログラムを終了。）
+        # check the existance of csv file
         filelist = [filename_berth, filename_traj]
         for file in filelist:
-            if os.path.isfile(file) == True: #Pythonでファイルやディレクトリ（フォルダ）が存在するかどうかを確認をするには、os.path.isfile(), os.path.isdir(), os.path.exists()を使う。
+            if os.path.isfile(file) == True:
                 pass
             else:
                 print(file + ' does not exist.')
                 sys.exit()
-        #filename_trajからデータを読み込み、特定の列名でデータフレームdfに格納します。データのエンコーディングはshift-JISです。
+        #
         df = pd.read_csv(filename_traj
                         , header=None, skiprows=1
                         , names = ['date','time', 'latitude', 'longitude','GPS_psi', 'gyro_psi', 'GPS_u', 'log_u', 'wind_dir', 'wind_v']
                         , encoding='shift-JIS'
                          )
         
-            # initialize （データの開始日時と終了日時を取得し、1分ごとの日時範囲（TIME）を作成します。）
+        # initialize
         datetime_first = str(df['date'][0])         + ' ' + str(df['time'][0])
         datetime_last  = str(df['date'][len(df)-1]) + ' ' + str(df['time'][len(df)-1])
 
@@ -73,7 +73,7 @@ class RealTraj(Traj):
         , end = dt.datetime.strptime(datetime_last        , '%Y/%m/%d %H:%M:%S')
         , freq = '1min'
         )
-        step_len = len(TIME) #データの各列を初期化します。
+        step_len = len(TIME) 
         NORTH_LATITUDE_DECIMAL = np.zeros(step_len)
         EAST_LONGITUDE_DECIMAL = np.zeros(step_len)
         HEAD_ANGLE_GPS         = np.zeros(step_len)
@@ -83,14 +83,13 @@ class RealTraj(Traj):
         WIND_DIRECTION_DEG     = np.zeros(step_len)
         WIND_VELOCITY_MPS      = np.zeros(step_len)
 
-        # replace string in dataframe to zero(データフレーム内の文字列を数値に変換し、変換できない部分をゼロで埋めます。)
+        # replace string in dataframe to zero
         name = ['GPS_psi', 'gyro_psi', 'GPS_u', 'log_u', 'wind_dir', 'wind_v']
         for name in name:
-            df[name] = pd.to_numeric(df[name],errors= 'coerce').fillna(0) # errors='coerce' により、変換できない値は NaN に置き換えられます。fillna(0) により、NaN の値を 0 に置き換えます。
-            
-        # 以下はAISログのデータ品質を確保し、欠損データを補間することで、連続的なデータを生成することを目的    
-        # check the continuity of the AIS log, and interpolate loss(AISログの継続性を確認し、欠損データがあれば補間します。)
-        # check that AIS not act at 23:59. If not, append the last log to dataframe(AISログが23:59に動作していない場合、最後のログのデータフレームを作成し、元のデータフレームに追加します。)
+            df[name] = pd.to_numeric(df[name],errors= 'coerce').fillna(0)
+              
+        # check the continuity of the AIS log, and interpolate loss
+        # check that AIS not act at 23:59. If not, append the last log to dataframe
         if not df['time'][len(df)-1] == TIME[-1].strftime('%X'):
             df_last = pd.DataFrame(
                 data = {

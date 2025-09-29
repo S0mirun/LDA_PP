@@ -490,7 +490,7 @@ def convert_to_xy(df, lat_origin, lon_origin, theta_berth):
 
     xy_array = np.empty((len(lonlat_df), 2))
     for i in range(len(lonlat_df)):
-        longitude_point = lonlat_df.loc[lonlat_df.index[i], 'longitude'] #pandasの.locモジュール。locは、単独の値だけでなく範囲を指定して複数のデータを選択できる。locは行名と列名を指定する。
+        longitude_point = lonlat_df.loc[lonlat_df.index[i], 'longitude']
         latitude_point = lonlat_df.loc[lonlat_df.index[i], 'latitude']
         longitude_array = np.array([lon_origin, longitude_point])
         latitude_array = np.array([lat_origin, latitude_point])

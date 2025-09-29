@@ -15,22 +15,15 @@ import os
 from subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
 from MultiPlot import RealTraj
 
-#elements_list 0:停止、1:保針、2:横移動、3:斜航、4:その場回頭、5:変針(旋回)
+
+
 DIR = os.path.dirname(__file__)
+TMP_DIR = f"{DIR}/../../raw_datas/tmp"
 dirname =os.path.splitext(os.path.basename(__file__))[0]
 SAVE_DIR = f"{DIR}/outputs/{dirname}"
 os.makedirs(SAVE_DIR, exist_ok=True)
-
-def diff_centered(x):
-    res = (x[2:] - x[:-2])
-    res = ((res + 180) % 360 - 180) / 2
-    return res
-
-def diff_gyro_gps(gyro_angle, psi_angle):
-    difference_of_psi = gyro_angle - psi_angle
-    difference_of_psi = abs((difference_of_psi + 180) % 360 - 180)
-    return difference_of_psi
-
+#
+#elements_list 0:停止、1:保針、2:横移動、3:斜航、4:その場回頭、5:変針(旋回)
 EM_u1 = 0.5# 研究1にならい決定
 EM_u2 = 1.5# 研究1の舵きき最低速度にならい決定
 EM_lamda1 = 5 ###1分間に5度変針する角速度[deg/m]
@@ -49,20 +42,26 @@ PortList = [
         else_bay.port2
     ]
 all_data = []
+#
+def diff_centered(x):
+    res = (x[2:] - x[:-2])
+    res = ((res + 180) % 360 - 180) / 2
+    return res
+
+def diff_gyro_gps(gyro_angle, psi_angle):
+    difference_of_psi = gyro_angle - psi_angle
+    difference_of_psi = abs((difference_of_psi + 180) % 360 - 180)
+    return difference_of_psi
 
 for target_port in PortList:
-    files = glob.glob("tmp/" + target_port.name + "/*.csv")
+    files = glob.glob(f"{TMP_DIR}/{target_port.name}/*.csv")
     for file_i in range(len(files)):
         test_real = RealTraj()
-        test_real.input_csv(files[file_i], 'tmp/coordinates_of_port/' + target_port.name + '.csv')
-
-        # 角度の中心差分から角速度を得る
+        test_real.input_csv(files[file_i], f"{TMP_DIR}/coordinates_of_port/{target_port.name}.csv")
+        #
         test_real.diff_psi_raw = diff_centered(test_real.psi_raw)
-
-        # 中心差分を使用するため、elements 配列の長さを-2で調整
-        test_real.elements = np.empty(len(test_real.time) - 2, dtype='int') #ここでlen(test_real.time)-2しているので次でlen(test_real.elemets)としてよい
-
-# 2が横移動,3が斜航
+        test_real.elements = np.empty(len(test_real.time) - 2, dtype='int')
+        # classify
         for i in range(len(test_real.elements)):
             if test_real.u_knot[i+1] < EM_u1:
                 test_real.elements[i] = 0
@@ -83,12 +82,10 @@ for target_port in PortList:
                         test_real.elements[i] = 4
                     else:
                         test_real.elements[i] = 5
-
-        # 各ファイルのデータをリストに追加
-        #8/11 x,yを追加
+        #
         port_data = pd.DataFrame({
             'port' : target_port.name,
-            'time' : test_real.time[1:-1],  # 時間も調整
+            'time' : test_real.time[1:-1],
             'u' : test_real.u[1:-1],
             'knot' : test_real.u_knot[1:-1],
             'X' : test_real.X[1:-1],
@@ -111,8 +108,7 @@ for target_port in PortList:
         #
         all_data.append(port_data)
 
-# 全てのデータを1つのDataFrameに結合
 all_data_df = pd.concat(all_data, ignore_index=True)
-# まとめてCSVに出力。
+# save
 all_data_df.to_csv(os.path.join(SAVE_DIR, "all_ports_classified_elements_fixed.csv"), index=False)
 print(f"Output saved to {SAVE_DIR}")
