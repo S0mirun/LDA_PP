@@ -104,11 +104,12 @@ for target_port in PortList:
             ),
             index=False
         )
-        print(f"\nfinish    : {str(file_i)}{target_port.name}\n")
         #
         all_data.append(port_data)
+
+    print(f"\nfinish    : {target_port.name}\n")
 
 all_data_df = pd.concat(all_data, ignore_index=True)
 # save
 all_data_df.to_csv(os.path.join(SAVE_DIR, "all_ports_classified_elements_fixed.csv"), index=False)
-print(f"Output saved to {SAVE_DIR}")
+print("\nDone\n")
