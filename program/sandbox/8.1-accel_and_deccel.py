@@ -9,7 +9,7 @@ import coord_conv
 
 
 DIR = os.path.dirname(__file__)
-CSV_DIR = f"{DIR}/../Path_Planning/output/elements/20250927"
+CSV_DIR = f"{DIR}/../../../Path_Planning/output/elements/20250927"
 SAVE_DIR = f"{DIR}/outputs/{os.path.splitext(os.path.basename(__file__))[0]}"
 os.makedirs(SAVE_DIR, exist_ok=True)
 #
@@ -37,11 +37,11 @@ elements
 """
 
 def calcurate_goal():
-    goal_path = glob.glob(f"{DIR}/raw_datas/tmp/coordinates_of_port/*port*.csv")
+    goal_path = glob.glob(f"{DIR}/../../raw_datas/tmp/coordinates_of_port/*port*.csv")
     for path in goal_path:
         raw_df =pd.read_csv(
             path,
-            encoding="shif-jis"
+            encoding="shift-jis"
         )
         #
 
@@ -87,5 +87,5 @@ def make_glaph():
 
 if __name__ == "__main__":
     calcurate_goal()
-    #make_glaph()
+    make_glaph()
     print("\n Done \n")

@@ -1,6 +1,8 @@
 #outputs
-/outputs/dim_vec_2_n_code_25
-!/outputs/.gitkeep
+/program/LDA/outputs/*
+!/outputs/LDa/outputs/.gitkeep
+
+/program/sandbox/outputs/*
 
 #program
 /program/LDA/src/*.so

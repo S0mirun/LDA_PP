@@ -2,7 +2,6 @@ import glob
 import os
 import re
 
-import coord_conv
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 import numpy as np
@@ -19,8 +18,8 @@ dirname =os.path.splitext(os.path.basename(__file__))[0]
 SAVE_DIR = f"{DIR}/outputs/{dirname}"
 os.makedirs(SAVE_DIR, exist_ok=True)
 #
-top_path = f"{DIR}/raw_datas/tmp/csv/yokkaichi_port2.csv"
-coast_path = f"{DIR}/raw_datas/海岸線データ/四日市港 海岸線データ(国土地理院地図から抽出).csv"
+top_path = f"{DIR}/../../raw_datas/tmp/csv/yokkaichi_port2.csv"
+coast_path = f"{DIR}/../../raw_datas/海岸線データ/四日市港 海岸線データ(国土地理院地図から抽出).csv"
 #
 def prepare(top_path, coast_path):
     raw_top_df = pd.read_csv(
@@ -255,7 +254,7 @@ def MAKE_YOKKAICHI_SUM(top_df, coast_df,
                 dpi=400, bbox_inches="tight", pad_inches=0.05)
     print("\nfigure saved   : YOKKAICHI_SUM\n")
 
-    for i_path, path in enumerate(glob.glob(f"{DIR}/raw_datas/tmp/_Yokkaichi_port*/*.csv")):
+    for i_path, path in enumerate(glob.glob(f"{DIR}/../../raw_datas/tmp/_Yokkaichi_port*/*.csv")):
         raw_df = pd.read_csv(path, usecols=[2, 3], encoding='shift-jis')
         raw_df.iloc[:,0] = raw_df.iloc[:,0].map(convert_coordinate)
         raw_df.iloc[:,1] = raw_df.iloc[:,1].map(convert_coordinate)
@@ -286,6 +285,6 @@ def MAKE_YOKKAICHI_SUM(top_df, coast_df,
 if __name__ == "__main__":
     top_df, coast_df = prepare(top_path, coast_path)
     print("\nprepare finished\n")
-    #MAKE_YOKKAICHI(top_df)
-    #MAKE_YOKKAICHI_BAY(coast_df)
+    MAKE_YOKKAICHI(top_df)
+    MAKE_YOKKAICHI_BAY(coast_df)
     MAKE_YOKKAICHI_SUM(top_df, coast_df)
