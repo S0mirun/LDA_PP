@@ -10,7 +10,6 @@
 import numpy as np
 import pandas as pd
 import glob
-from datetime import datetime
 import os
 
 from subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
