@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 DIR = os.path.dirname(__file__)
-TS_DIR = f"{DIR}/raw_datas/tmp/*"
+TS_DIR = f"{DIR}/../../raw_datas/tmp/*"
 SAVE_DIR = f"{DIR}/outputs/{os.path.splitext(os.path.basename(__file__))[0]}/"
 os.makedirs(SAVE_DIR, exist_ok=True)
 #

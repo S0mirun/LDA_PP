@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 
 DIR = os.path.dirname(__file__)
-TS_DIR = f"{DIR}/../**/raw_data/888-送付データ/2-3_一次解析/"
+TS_DIR = f"{DIR}/../../**/raw_data/888-送付データ/2-3_一次解析/"
 TS_DIR_PATH = f"{TS_DIR}/1_2023_0216_PCC_着/1-運動/"
 SAVE_DIR = f"{DIR}/outputs/{os.path.splitext(os.path.basename(__file__))[0]}"
 os.makedirs(SAVE_DIR, exist_ok=True)
