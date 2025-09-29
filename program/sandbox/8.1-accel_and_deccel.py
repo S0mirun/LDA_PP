@@ -5,7 +5,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.collections import LineCollection
-import coord_conv
 
 
 DIR = os.path.dirname(__file__)
