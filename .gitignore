@@ -1,6 +1,8 @@
 #outputs
 /program/LDA/outputs/*
-!/outputs/LDa/outputs/.gitkeep
+!/outputs/LDA/outputs/.gitkeep
+
+/program/path_planning/outputs/*
 
 /program/sandbox/outputs/*
 
