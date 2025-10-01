@@ -15,13 +15,13 @@ import sys
 import os
 import glob
 
-from Input import CONVERT_LATLONG_FROM_DM_TO_D, GET_MIDSHIP_LATLONG
-from subroutine import overall, sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay #if __name__ == '__main__':直後で対象の港を選択する箇所がある
-from subroutine import ship_status, convert_to_xy, load_target_ship_shape_parameter, sigmoid, ship_shape_fix
-from graph import ShipDomain_Wang, ShipDomain_proposal, ShipDomain_shape
+from utils.PP.Input import CONVERT_LATLONG_FROM_DM_TO_D, GET_MIDSHIP_LATLONG
+from utils.PP.subroutine import overall, sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay #if __name__ == '__main__':直後で対象の港を選択する箇所がある
+from utils.PP.subroutine import ship_status, convert_to_xy, load_target_ship_shape_parameter, sigmoid, ship_shape_fix
+from utils.PP.graph import ShipDomain_Wang, ShipDomain_proposal, ShipDomain_shape
 
 #Matplotlibのグラフ作成におけるスタイル設定を行っています。具体的には、mpl_configという辞書に各種設定を定義し、plt.rcParams.update(mpl_config)でその設定をMatplotlibに適用しています。
-from subroutine import mpl_config
+from utils.PP.subroutine import mpl_config
 plt.rcParams.update(mpl_config)
 
 ### Program to plot the simulated traj., real traj., and generated check points in one figure

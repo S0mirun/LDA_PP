@@ -1,4 +1,5 @@
 #outputs
+/outputs/*
 /program/LDA/outputs/*
 !/outputs/LDA/outputs/.gitkeep
 
