@@ -9,7 +9,7 @@ from matplotlib.collections import LineCollection
 
 DIR = os.path.dirname(__file__)
 CSV_DIR = f"{DIR}/../../../Path_Planning/output/elements/20250927"
-SAVE_DIR = f"{DIR}/outputs/{os.path.splitext(os.path.basename(__file__))[0]}"
+SAVE_DIR = f"{DIR}/../../outputs/{os.path.splitext(os.path.basename(__file__))[0]}"
 os.makedirs(SAVE_DIR, exist_ok=True)
 #
 paths = glob.glob(f"{CSV_DIR}/*/*")
@@ -42,11 +42,6 @@ def calcurate_goal():
             path,
             encoding="shift-jis"
         )
-        #
-
-
-
-
 
 def make_glaph():
     for num, path in enumerate(paths):
@@ -71,7 +66,11 @@ def make_glaph():
             lc = LineCollection(segments, colors=colors)
             plt.gca().add_collection(lc)
         
-        ax.set_title(str(target_port))
+        ax.set_title({str(target_port)})
+        # ax.set_title(f"""
+        #              {str(target_port)}
+        #              \ncsv:{os.path.splitext(os.path.basename(path))[0]}
+        #              """)
         ax.set_xlabel("time (s)")
         ax.set_ylabel("u (m/s)")
         ax.set_ylim(0, 6)

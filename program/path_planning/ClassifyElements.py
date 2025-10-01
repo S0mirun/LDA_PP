@@ -12,15 +12,15 @@ import pandas as pd
 import glob
 import os
 
-from subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
-from MultiPlot import RealTraj
+from utils.PP.subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
+from utils.PP.MultiPlot import RealTraj
 
 
 
 DIR = os.path.dirname(__file__)
 TMP_DIR = f"{DIR}/../../raw_datas/tmp"
 dirname =os.path.splitext(os.path.basename(__file__))[0]
-SAVE_DIR = f"{DIR}/outputs/{dirname}"
+SAVE_DIR = f"{DIR}/../../outputs/{dirname}"
 os.makedirs(SAVE_DIR, exist_ok=True)
 #
 #elements_list 0:停止、1:保針、2:横移動、3:斜航、4:その場回頭、5:変針(旋回)

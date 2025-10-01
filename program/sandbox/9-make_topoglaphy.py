@@ -8,14 +8,14 @@ import numpy as np
 import pandas as pd
 import unicodedata
 
-from utils.ship_geometry import *
-from utils.visualization import *
-from utils.kml import kml_based_txt_to_csv
+from utils.LDA.ship_geometry import *
+from utils.LDA.visualization import *
+from utils.LDA.kml import kml_based_txt_to_csv
 
 
 DIR = os.path.dirname(__file__)
 dirname =os.path.splitext(os.path.basename(__file__))[0]
-SAVE_DIR = f"{DIR}/outputs/{dirname}"
+SAVE_DIR = f"{DIR}/../../outputs/{dirname}"
 os.makedirs(SAVE_DIR, exist_ok=True)
 #
 top_path = f"{DIR}/../../raw_datas/tmp/csv/yokkaichi_port2.csv"
