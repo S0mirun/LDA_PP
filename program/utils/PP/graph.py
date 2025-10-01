@@ -7,12 +7,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-program_folder = os.path.dirname(os.path.abspath(__file__))
-pyshipsim_path = os.path.join(f"{program_folder}/../../path_planning", "py-ship-simulator-main/py-ship-simulator-main")
-sys.path.append(pyshipsim_path)
+from utils.PP.subroutine import  mpl_config
 
-import pyshipsim
-from subroutine import  mpl_config
+PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
+PYSIM_DIR = os.path.join(PROGRAM_DIR, "py-ship-simulator-main/py-ship-simulator-main")
+if PYSIM_DIR not in sys.path:
+    sys.path.append(PYSIM_DIR)
+import pyshipsim 
 plt.rcParams.update(mpl_config)
 
 # 楕円の近似多角形を何度刻みで得るか決める角度リスト
