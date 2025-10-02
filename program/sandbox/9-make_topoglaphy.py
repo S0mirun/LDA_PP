@@ -240,18 +240,25 @@ def MAKE_YOKKAICHI_SUM(top_df, coast_df,
 
     set_rcParams()
     fig, ax = plt.subplots(figsize=(10, 8))
-    ax.set_xlim(-6000, 2500)
+    ax.set_xlim(-4500, 1500)
     y_min = float(min(coords_coast[:,1].min(), coords_port[:,1].min()))
     y_max = float(max(coords_coast[:,1].max(), coords_port[:,1].max()))
-    ax.set_ylim(y_min, y_max)
+    ax.set_ylim(y_min, -3000)
     ax.set_aspect('equal')
-    ax.set_xticks([]); ax.set_yticks([])
+    #ax.set_xticks([]); ax.set_yticks([])
+    x_ticks = np.arange(ax.get_xlim()[0], ax.get_xlim()[1]+1000, 1000)
+    y_ticks = np.arange(ax.get_ylim()[0], ax.get_ylim()[1]+1000, 1000)
+    ax.set_xticks(x_ticks)
+    ax.set_yticks(y_ticks)
+    ax.set_xticklabels([])
+    ax.set_yticklabels([])
+    ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
 
     ax.add_patch(poly_coast)
     ax.add_patch(poly_port)
 
-    plt.savefig(os.path.join(SAVE_DIR, "YOKKAICHI_SUM.png"),
-                dpi=400, bbox_inches="tight", pad_inches=0.05)
+    # plt.savefig(os.path.join(SAVE_DIR, "YOKKAICHI_SUM.png"),
+    #             dpi=400, bbox_inches="tight", pad_inches=0.05)
     print("\nfigure saved   : YOKKAICHI_SUM\n")
 
     for i_path, path in enumerate(glob.glob(f"{DIR}/../../raw_datas/tmp/_Yokkaichi_port*/*.csv")):
@@ -276,7 +283,7 @@ def MAKE_YOKKAICHI_SUM(top_df, coast_df,
         ax.plot(x[m], y[m], c=Colors.black, linewidth=0.5, alpha=0.9,
                 label="Path" if i_path == 0 else None, zorder=3)
 
-    plt.savefig(os.path.join(SAVE_DIR, "YOKKAICHI_PATH_1A2B.png"),
+    plt.savefig(os.path.join(SAVE_DIR, "YOKKAICHI_PATH_1A2B_ZOOM.png"),
                 dpi=400, bbox_inches="tight", pad_inches=0.05)
     print("\nfigure saved   : YOKKAICHI_PATH\n")
 
@@ -285,6 +292,6 @@ def MAKE_YOKKAICHI_SUM(top_df, coast_df,
 if __name__ == "__main__":
     top_df, coast_df = prepare(top_path, coast_path)
     print("\nprepare finished\n")
-    MAKE_YOKKAICHI(top_df)
-    MAKE_YOKKAICHI_BAY(coast_df)
+    #MAKE_YOKKAICHI(top_df)
+    #MAKE_YOKKAICHI_BAY(coast_df)
     MAKE_YOKKAICHI_SUM(top_df, coast_df)
