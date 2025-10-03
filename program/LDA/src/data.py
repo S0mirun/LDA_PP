@@ -10,74 +10,78 @@ import unicodedata
 
 from utils.LDA.ship_geometry import *
 from utils.LDA.time_series_figure  \
-    import TimeSeries, make_traj_fig, make_ts_fig, make_traj_and_velo_fig
+    import TimeSeries, make_traj_fig, make_ts_fig, make_traj_and_velo_fig, make_traj_and_topo_fig
 from utils.LDA.visualization import *
-from utils.LDA.kml import kml_based_txt_to_csv
 
 
 DIR = os.path.dirname(__file__)
-RAW_TS_DIR = f"{DIR}/../../tmp/"
+dirname =os.path.splitext(os.path.basename(__file__))[0]
+SAVE_DIR = f"{DIR}/../../../outputs/{dirname}"
+os.makedirs(SAVE_DIR, exist_ok=True)
+#
+MOTION_DIR = f"{DIR}/../../../raw_datas/tmp"
 TS_HEADER = [
     "date (JST)", "time (JST)", "latitude [deg]",
     "longitude [deg]", "GPS deg [deg]", "gyro deg [deg]",
     "GPS speed [knot]", "log speed [knot]", "wind dir [deg]", "wind sped [knot]"
 ]
 #
-BLANK_IDS = [15, 16,]
 n_cols = 2
 
 
 def preprocess():
+    paths = glob.glob(f"{MOTION_DIR}/_Yokkaichi_port*/*.csv")
+    print(len(paths))
     #
-    for dir in glob.glob(f"{RAW_TS_DIR}/*[A-C]"):
+    for path in paths:
+        csv_path = path
+        name= os.path.splitext(os.path.basename(csv_path))[0]
+        raw_df = pd.read_csv(
+            csv_path,
+            skiprows=[0,1],
+            encoding='shift-jis'
+        )
         #
-        for path in glob.glob(f"{dir}/*"):
-            csv_path = path
-            ts_id = os.path.basename(csv_path)
-            name= os.path.splitext(ts_id)[0]
-            date, num, port, port_num, rest = name.split("_", 4)
-            ts_id_str = f"{port}_{port_num}_{date}_{num}_{rest}.csv"
-            raw_df = pd.read_csv(
-                csv_path,
-                skiprows=[0,1],
-                encoding='shift-jis'
-            )
-            #
-            raw_df.columns = TS_HEADER
-            raw_df["latitude [deg]"] = raw_df["latitude [deg]"].map(convert_coordinate)
-            raw_df["longitude [deg]"] = raw_df["longitude [deg]"].map(convert_coordinate)
-            #
-            # basename = os.path.basename(dir)
-            # save_dir = os.path.join(f"{DIR}/../../outputs", basename)
-            # os.makedirs(save_dir, exist_ok=True)
-            # raw_df.to_csv(os.path.join(save_dir, os.path.basename(csv_path)))
-            #print(raw_df.dtypes)
+        raw_df.columns = TS_HEADER
+        raw_df["latitude [deg]"] = raw_df["latitude [deg]"].map(convert_coordinate)
+        raw_df["longitude [deg]"] = raw_df["longitude [deg]"].map(convert_coordinate)
+        #
+        # basename = os.path.basename(dir)
+        # save_dir = os.path.join(f"{DIR}/../../outputs", basename)
+        # os.makedirs(save_dir, exist_ok=True)
+        # raw_df.to_csv(os.path.join(save_dir, os.path.basename(csv_path)))
+        #print(raw_df.dtypes)
 
-            df = prepare_df(raw_df)
-            log_dir = f"{DIR}/ts_data/original/"
-            os.makedirs(f"{log_dir}csv/", exist_ok=True)
-            df.to_csv(os.path.join(f"{log_dir}/csv/", f"{ts_id_str}"))
-            #
-            ts = TimeSeries(
-                df=df,
-                label=ts_id_str, L=100, B=16,
-                color=Colors.black, line_style=(0, (1, 0)),
-                dt=1.0,
-            )
-            make_traj_fig(
-                ts_list=[ts],
-                ship_plot_step_period=100, alpha_ship_shape=0.5,
-                fig_size=(5, 5), legend_flag=True,
-            )
-            save_fig(f"{log_dir}/fig/traj/", f"{ts_id_str}_traj",)
-            make_ts_fig(ts_list=[ts], fig_size=(10, 5,))
-            save_fig(f"{log_dir}/fig/state/", f"{ts_id_str}_state",)
-            make_traj_and_velo_fig(
-                ts_list=[ts],
-                ship_plot_step_period=100, alpha_ship_shape=0.5,
-                fig_size=(14, 7)
-            )
-            save_fig(f"{log_dir}/fig/traj_and_velo/", f"{ts_id_str}_traj_and_velo",)
+        df = prepare_df(raw_df)
+        os.makedirs(f"{SAVE_DIR}/csv/", exist_ok=True)
+        df.to_csv(os.path.join(f"{SAVE_DIR}/csv/", f"{name}.csv"))
+        #
+        ts = TimeSeries(
+            df=df,
+            label=None, L=100, B=16,
+            color=Colors.black, line_style=(0, (1, 0)),
+            dt=1.0,
+        )
+        make_traj_fig(
+            ts_list=[ts],
+            ship_plot_step_period=1, alpha_ship_shape=0.5,
+            fig_size=(5, 5), legend_flag=False,
+        )
+        save_fig(f"{SAVE_DIR}/fig/traj/", f"{name}_traj")
+        # make_ts_fig(ts_list=[ts], fig_size=(10, 5,))
+        # save_fig(f"{SAVE_DIR}/fig/state/", f"{name}_state",)
+        # make_traj_and_velo_fig(
+        #     ts_list=[ts],
+        #     ship_plot_step_period=1, alpha_ship_shape=0.5,
+        #     fig_size=(14, 7)
+        # )
+        save_fig(f"{SAVE_DIR}/fig/traj_and_velo/", f"{name}_traj_and_velo")
+        make_traj_and_topo_fig(
+            ts_list=[ts],
+            ship_plot_step_period=1, alpha_ship_shape=0.5,
+            fig_size=(14, 7)
+        )
+        save_fig(f"{SAVE_DIR}/fig/traj_and_topo/", f"{name}_traj_and_topo")
 
 def convert_coordinate(value):
     if value is None or value == '':

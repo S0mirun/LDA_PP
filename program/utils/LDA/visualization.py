@@ -83,8 +83,8 @@ class Colors:
 
 def save_fig(dir, name):
     os.makedirs(f"{dir}png", exist_ok = True)
-    plt.savefig(f"{dir}{name}.pdf", dpi = 100)
-    plt.savefig(f"{dir}png/{name}.png", dpi = 100)
+    plt.savefig(f"{dir}{name}.pdf", dpi=400, bbox_inches="tight", pad_inches=0.05)
+    plt.savefig(f"{dir}png/{name}.png", dpi=400, bbox_inches="tight", pad_inches=0.05)
     print(f'\nFigure saved: \"{name}\"\n')
     plt.close()
 
