@@ -1,89 +1,139 @@
 import glob
 import os
 import re
+import unicodedata
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 import numpy as np
 import pandas as pd
-import unicodedata
 
 from utils.LDA.ship_geometry import *
 from utils.LDA.visualization import *
 
-
 DIR = os.path.dirname(__file__)
-dirname =os.path.splitext(os.path.basename(__file__))[0]
+dirname = os.path.splitext(os.path.basename(__file__))[0]
 SAVE_DIR = f"{DIR}/../../outputs/{dirname}"
 os.makedirs(SAVE_DIR, exist_ok=True)
-#
+
+top_path = f"{DIR}/../../raw_datas/tmp/csv/yokkaichi_port2.csv"
 coast_path = f"{DIR}/../../raw_datas/海岸線データ/四日市港 海岸線データ(国土地理院地図から抽出).csv"
-AIS_path = f"{DIR}/../../raw_datas/tmp/_Yokkaichi_port*/*.csv"
-#
-def preprocess(csv_path):
-    raw_coast_df = pd.read_csv(
-        csv_path,
-        encoding='shift-jis'
-    )
-    #
-    coast_df = pd.DataFrame(columns=['latitude', 'longitude'])
-    coast_df['latitude'] = raw_coast_df.iloc[:,0]
-    coast_df['longitude'] =raw_coast_df.iloc[:,1]
-    return coast_df
-    
-def MAKE_YOKKAICHI_BAY(df):
-    #
-    LAT_ORIGIN = 35.00627778
-    LON_ORIGIN = 136.6740283
-    ANGLE_FROM_NORTH = 0.0
-    #
-    df_tpgrph = df
-    p_x_arrtpgrph = np.empty(len(df_tpgrph))
-    p_y_arrtpgrph = np.empty(len(df_tpgrph))
-    for i in range(len(df_tpgrph)):
-        #
-        p_y_temp, p_x_temp = convert_to_xy(
-            df_tpgrph.iloc[i, df_tpgrph.columns.get_loc("latitude")],
-            df_tpgrph.iloc[i, df_tpgrph.columns.get_loc("longitude")],
-            LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH
-        )
-        p_x_arrtpgrph[i] = p_x_temp
-        p_y_arrtpgrph[i] = p_y_temp
-    #
-    set_rcParams()
-    fig = plt.figure(figsize=(10,8))
-    ax = fig.add_subplot(1, 1, 1)
-    # ax setting
-    ax.set_xlim(-6000, 2500)
-    ax.set_ylim(p_y_arrtpgrph.min(), p_y_arrtpgrph.max())
-    ax.set_aspect('equal')
-    ax.set_xticks([])
+
+LAT_ORIGIN = 35.00627778
+LON_ORIGIN = 136.6740283
+ANGLE_FROM_NORTH = 0.0
+
+def prepare(top_path, coast_path):
+    raw_top_df = pd.read_csv(top_path, usecols=[0, 1], encoding="shift-jis")
+    top_df = pd.DataFrame({"latitude": raw_top_df.iloc[:, 1], "longitude": raw_top_df.iloc[:, 0]})
+    raw_coast_df = pd.read_csv(coast_path, encoding="shift-jis")
+    coast_df = pd.DataFrame({"latitude": raw_coast_df.iloc[:, 0], "longitude": raw_coast_df.iloc[:, 1]})
+    return top_df, coast_df
+
+def convert_coordinate(value):
+    if value is None or value == "":
+        return float("nan")
+    s = unicodedata.normalize("NFKC", str(value)).strip()
+    s = s.replace("’", "'").replace("′", "'").replace("”", '"').replace("″", '"')
+    m = re.match(r'^([+-]?\d+(?:\.\d+)?)(?:[°\s]*?(\d+(?:\.\d+)?))?(?:[\'\s]*?(\d+(?:\.\d+)?)(?:"|″)?)?\s*([NnSsEeWw])?$', s)
+    if not m:
+        nums = re.findall(r"\d+(?:\.\d+)?", s)
+        if not nums:
+            return float("nan")
+        deg = float(nums[0])
+        if len(nums) >= 2:
+            deg += float(nums[1]) / 60.0
+        if len(nums) >= 3:
+            deg += float(nums[2]) / 3600.0
+        return deg
+    deg = float(m.group(1))
+    mi = float(m.group(2)) if m.group(2) else 0.0
+    se = float(m.group(3)) if m.group(3) else 0.0
+    hem = (m.group(4) or "").upper()
+    val = deg + mi / 60.0 + se / 3600.0
+    if hem in ("S", "W"):
+        val = -abs(val)
+    elif hem in ("N", "E"):
+        val = abs(val)
+    return val
+
+def df_to_xy(df):
+    lat_idx = df.columns.get_loc("latitude")
+    lon_idx = df.columns.get_loc("longitude")
+    px = np.empty(len(df), dtype=np.float64)
+    py = np.empty(len(df), dtype=np.float64)
+    for i in range(len(df)):
+        y_m, x_m = convert_to_xy(float(df.iat[i, lat_idx]), float(df.iat[i, lon_idx]), LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH)
+        px[i] = x_m
+        py[i] = y_m
+    return np.column_stack([px, py]).astype(float)
+
+def maybe_add_extra(coords, use_flag=True, x_const=-6000.0):
+    if not use_flag:
+        return coords
+    y_min = float(coords[:, 1].min())
+    y_max = float(coords[:, 1].max())
+    extra = np.array([[x_const, y_min], [x_const, y_max], [float(coords[0, 0]), float(coords[0, 1])]], dtype=float)
+    return np.vstack([coords, extra])
+
+def draw_base_map(ax, top_df, coast_df, apply_port_extra=False, apply_coast_extra=True, x_const=-6000.0):
+    coords_coast = df_to_xy(coast_df)
+    coords_port = df_to_xy(top_df)
+    coords_coast = maybe_add_extra(coords_coast, apply_coast_extra, x_const)
+    coords_port = maybe_add_extra(coords_port, apply_port_extra, x_const)
+    if not np.allclose(coords_coast[0], coords_coast[-1]):
+        coords_coast = np.vstack([coords_coast, coords_coast[0]])
+    if not np.allclose(coords_port[0], coords_port[-1]):
+        coords_port = np.vstack([coords_port, coords_port[0]])
+    poly_coast = Polygon(coords_coast, closed=True, facecolor=Colors.black, edgecolor="none", alpha=0.5, linewidth=0, zorder=1)
+    poly_port = Polygon(coords_port, closed=True, facecolor=Colors.red, edgecolor="none", alpha=1.0, linewidth=0, zorder=2)
+    ax.add_patch(poly_coast)
+    ax.add_patch(poly_port)
+    ax.set_xlim(-4500, 1500)
+    y_min = float(min(coords_coast[:, 1].min(), coords_port[:, 1].min()))
+    ax.set_ylim(y_min, -3000)
+    ax.set_aspect("equal")
+    x_ticks = np.arange(ax.get_xlim()[0], ax.get_xlim()[1] + 1000, 1000)
+    y_ticks = np.arange(ax.get_ylim()[0], ax.get_ylim()[1] + 1000, 1000)
+    ax.set_xticks(x_ticks)
+    ax.set_yticks(y_ticks)
     ax.set_xticklabels([])
-    ax.set_yticks([])
     ax.set_yticklabels([])
-    # plot topography
-    coords = np.column_stack([p_x_arrtpgrph, p_y_arrtpgrph]).astype(float)
-    extra_pts = np.array([[-6000, float(p_y_arrtpgrph.min())],
-                         [-6000, float(p_y_arrtpgrph.max())],
-                         [float(coords[0,0]), float(coords[0,1])]  
-                         ])
-    coords = np.vstack([coords, extra_pts])
-    ax.add_patch(
-        Polygon(
-            coords,
-            closed=True,
-            facecolor=Colors.black,
-            linewidth=0,
-            alpha=0.5
-        )
-    )
-    #fig.tight_layout()
-    #
-    plt.savefig(os.path.join(SAVE_DIR, "YOKKAICHI_BAY.png"),
-                dpi=400, bbox_inches="tight", pad_inches=0.05)
-    print("\nfigure saved   : YOKKAICHI BAY\n")
+    ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
+
+def plot_one_route_and_save(ax, csv_path, out_dir, linewidth=0.5):
+    raw_df = pd.read_csv(csv_path, usecols=[2, 3], encoding="shift-jis")
+    raw_df.iloc[:, 0] = raw_df.iloc[:, 0].map(convert_coordinate)
+    raw_df.iloc[:, 1] = raw_df.iloc[:, 1].map(convert_coordinate)
+    df = pd.DataFrame({"latitude": raw_df.iloc[:, 0], "longitude": raw_df.iloc[:, 1]})
+    lat = df["latitude"].to_numpy(dtype=np.float64, copy=False)
+    lon = df["longitude"].to_numpy(dtype=np.float64, copy=False)
+    x = np.empty_like(lat, dtype=np.float64)
+    y = np.empty_like(lat, dtype=np.float64)
+    for i in range(lat.size):
+        y[i], x[i] = convert_to_xy(float(lat[i]), float(lon[i]), LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH)
+    m = np.isfinite(x) & np.isfinite(y)
+    if m.sum() < 2:
+        return None
+    ax.plot(x[m], y[m], c=Colors.black, linewidth=linewidth, alpha=0.9, zorder=3)
+    folder = os.path.basename(os.path.dirname(csv_path))
+    name = os.path.splitext(os.path.basename(csv_path))[0]
+    out_name = f"route__{folder}__{name}.png"
+    out_path = os.path.join(out_dir, out_name)
+    plt.savefig(out_path, dpi=400, bbox_inches="tight", pad_inches=0.05)
+    return out_path
+
+def main():
+    top_df, coast_df = prepare(top_path, coast_path)
+    set_rcParams()
+    paths = sorted(glob.glob(f"{DIR}/../../raw_datas/tmp/_Yokkaichi_port*/*.csv"))
+    for csv_path in paths:
+        fig, ax = plt.subplots(figsize=(10, 8))
+        draw_base_map(ax, top_df, coast_df, apply_port_extra=False, apply_coast_extra=True, x_const=-6000.0)
+        out_path = plot_one_route_and_save(ax, csv_path, SAVE_DIR, linewidth=0.5)
+        plt.close(fig)
+        if out_path:
+            print(f"saved: {out_path}")
 
 if __name__ == "__main__":
-    coast_df = preprocess(coast_path)
-    print("\nprepare finished\n")
-    MAKE_YOKKAICHI_BAY(coast_df)
+    main()
