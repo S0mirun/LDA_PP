@@ -9,16 +9,25 @@ import numpy as np
 import pandas as pd
 
 from utils.LDA.ship_geometry import *
+from utils.LDA.time_series_figure import TimeSeries,plot_traj
 from utils.LDA.visualization import *
+
+
 
 DIR = os.path.dirname(__file__)
 dirname = os.path.splitext(os.path.basename(__file__))[0]
 SAVE_DIR = f"{DIR}/../../outputs/{dirname}"
 os.makedirs(SAVE_DIR, exist_ok=True)
-
+#
 top_path = f"{DIR}/../../raw_datas/tmp/csv/yokkaichi_port2.csv"
 coast_path = f"{DIR}/../../raw_datas/海岸線データ/四日市港 海岸線データ(国土地理院地図から抽出).csv"
-
+#
+TOP_HEADER = [
+    "date (JST)", "time (JST)", "latitude [deg]",
+    "longitude [deg]", "GPS deg [deg]", "gyro deg [deg]",
+    "GPS speed [knot]", "log speed [knot]", "wind dir [deg]", "wind sped [knot]"
+]
+#
 LAT_ORIGIN = 35.00627778
 LON_ORIGIN = 136.6740283
 ANGLE_FROM_NORTH = 0.0
@@ -100,6 +109,11 @@ def maybe_add_extra(coords, use_flag=True, x_const=-6000.0):
     
     return np.vstack([coords, extra])
 
+def JST_str_to_float(str):
+    l = str.split(":")
+    t = float(l[0]) * 3600.0 + float(l[1]) * 60.0 + float(l[2])
+    return t
+
 def draw_base_map(ax, top_df, coast_df, apply_port_extra=False, apply_coast_extra=True, x_const=-6000.0):
     coords_coast = df_to_xy(coast_df)
     coords_port = df_to_xy(top_df)
@@ -130,31 +144,66 @@ def draw_base_map(ax, top_df, coast_df, apply_port_extra=False, apply_coast_extr
     ax.set_yticklabels([])
     ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
 
-def plot_one_route_and_save(ax, csv_path, out_dir, linewidth=0.5):
+def plot_one_route_and_save(ax, csv_path, linewidth=0.5):
     raw_df = pd.read_csv(
         csv_path,
-        usecols=[2, 3],
         encoding="shift-jis"
     )
-    raw_df.iloc[:, 0] = raw_df.iloc[:, 0].map(convert_coordinate)
-    raw_df.iloc[:, 1] = raw_df.iloc[:, 1].map(convert_coordinate)
-    df = pd.DataFrame({"latitude": raw_df.iloc[:, 0], "longitude": raw_df.iloc[:, 1]})
-    lat = df["latitude"].to_numpy(dtype=np.float64, copy=False)
-    lon = df["longitude"].to_numpy(dtype=np.float64, copy=False)
-    x = np.empty_like(lat, dtype=np.float64)
-    y = np.empty_like(lat, dtype=np.float64)
-    for i in range(lat.size):
-        y[i], x[i] = convert_to_xy(float(lat[i]), float(lon[i]), LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH)
-    m = np.isfinite(x) & np.isfinite(y)
-    if m.sum() < 2:
-        return None
-    ax.plot(x[m], y[m], c=Colors.black, linewidth=linewidth, alpha=0.9, zorder=3)
+    raw_df.columns = TOP_HEADER
+    df = raw_df.copy()
+    #
+    df["latitude [deg]"] = raw_df["latitude [deg]"].map(convert_coordinate)
+    df["longitude [deg]"] = raw_df["longitude [deg]"].map(convert_coordinate)
+    #
+    time_arr = np.empty(len(df))
+    p_x_arr = np.empty(len(df))
+    p_y_arr = np.empty(len(df))
+    #
+    time_origin = JST_str_to_float(df.iloc[0, df.columns.get_loc("time (JST)")])
+    lat_origin = df.iloc[-1, df.columns.get_loc("latitude [deg]")]
+    lon_origin = df.iloc[-1, df.columns.get_loc("longitude [deg]")]
+    angle_from_north = 0.0
+    for i in range(len(df)):
+        #
+        time_arr[i] = JST_str_to_float(df.iloc[i, df.columns.get_loc("time (JST)")]) - time_origin
+        #
+        p_x_temp, p_y_temp = convert_to_xy(
+            df.iloc[i, df.columns.get_loc("latitude [deg]")],
+            df.iloc[i, df.columns.get_loc("longitude [deg]")],
+            lat_origin, lon_origin, angle_from_north
+        )
+        p_x_arr[i] = p_x_temp
+        p_y_arr[i] = p_y_temp
+    #
+    df["t [s]"] = time_arr
+    df["p_x [m]"] = p_x_arr
+    df["p_y [m]"] = p_y_arr
+    df["GPS deg [rad]"] = np.deg2rad(df["GPS deg [deg]"].values)
+    #save
     folder = os.path.basename(os.path.dirname(csv_path))
     name = os.path.splitext(os.path.basename(csv_path))[0]
-    out_name = f"{folder}__{name}.png"
-    out_path = os.path.join(out_dir, out_name)
-    plt.savefig(out_path, dpi=400, bbox_inches="tight", pad_inches=0.05)
-    return out_path
+    os.makedirs(f"{SAVE_DIR}/csv", exist_ok=True)
+    df.to_csv(os.path.join(f"{SAVE_DIR}/csv", f"{folder}__{name}.csv"))
+    # root
+    ax.plot(df["p_x [m]"], df["p_y [m]"], c=Colors.black,
+            linewidth=linewidth, alpha=0.9, zorder=3)
+    # ship 
+    ts = TimeSeries(
+            df=df,
+            label=None, L=100, B=16,
+            color=Colors.black, line_style=(0, (1, 0)),
+            dt=1.0,
+        )
+    ts_list=[ts]
+    for ts in ts_list:
+        plot_traj(
+            ax, ts, "p_x [m]", "p_y [m]", "GPS deg [rad]",
+            1, 0.5, ts.L, ts.B
+        )
+    #save
+    os.makedirs(f"{SAVE_DIR}/fig", exist_ok=True)
+    plt.savefig(os.path.join(f"{SAVE_DIR}/fig", f"{folder}__{name}.png"),
+                dpi=400, bbox_inches="tight", pad_inches=0.05)
 
 def main():
     top_df, coast_df = prepare(top_path, coast_path)
@@ -163,10 +212,9 @@ def main():
     for csv_path in paths:
         fig, ax = plt.subplots(figsize=(10, 8))
         draw_base_map(ax, top_df, coast_df, apply_port_extra=False, apply_coast_extra=True, x_const=-6000.0)
-        out_path = plot_one_route_and_save(ax, csv_path, SAVE_DIR, linewidth=0.5)
+        plot_one_route_and_save(ax, csv_path, linewidth=0.5)
         plt.close(fig)
-        if out_path:
-            print(f"\nsaved     :{os.path.splitext(os.path.basename(out_path))[0]}\n")
+        print(f"\nsaved:    {os.path.splitext(os.path.basename(csv_path))[0]}\n")
 
 if __name__ == "__main__":
     main()

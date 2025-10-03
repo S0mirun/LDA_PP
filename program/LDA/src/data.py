@@ -10,7 +10,7 @@ import unicodedata
 
 from utils.LDA.ship_geometry import *
 from utils.LDA.time_series_figure  \
-    import TimeSeries, make_traj_fig, make_ts_fig, make_traj_and_velo_fig, make_traj_and_topo_fig
+    import TimeSeries, make_traj_fig, make_ts_fig, make_traj_and_velo_fig
 from utils.LDA.visualization import *
 
 
@@ -76,12 +76,6 @@ def preprocess():
         #     fig_size=(14, 7)
         # )
         save_fig(f"{SAVE_DIR}/fig/traj_and_velo/", f"{name}_traj_and_velo")
-        make_traj_and_topo_fig(
-            ts_list=[ts],
-            ship_plot_step_period=1, alpha_ship_shape=0.5,
-            fig_size=(14, 7)
-        )
-        save_fig(f"{SAVE_DIR}/fig/traj_and_topo/", f"{name}_traj_and_topo")
 
 def convert_coordinate(value):
     if value is None or value == '':
