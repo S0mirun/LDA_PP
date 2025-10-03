@@ -38,13 +38,13 @@ def prepare(top_path, coast_path):
         usecols=[0, 1],
         encoding="shift-jis"
     )
-    top_df = pd.DataFrame({"latitude": raw_top_df.iloc[:, 1], "longitude": raw_top_df.iloc[:, 0]})
+    top_df = pd.DataFrame({"latitude [deg]": raw_top_df.iloc[:, 1], "longitude [deg]": raw_top_df.iloc[:, 0]})
     #
     raw_coast_df = pd.read_csv(
         coast_path,
         encoding="shift-jis"
     )
-    coast_df = pd.DataFrame({"latitude": raw_coast_df.iloc[:, 0], "longitude": raw_coast_df.iloc[:, 1]})
+    coast_df = pd.DataFrame({"latitude [deg]": raw_coast_df.iloc[:, 0], "longitude [deg]": raw_coast_df.iloc[:, 1]})
 
     return top_df, coast_df
 
@@ -77,8 +77,8 @@ def convert_coordinate(value):
     return val
 
 def df_to_xy(df):
-    lat_idx = df.columns.get_loc("latitude")
-    lon_idx = df.columns.get_loc("longitude")
+    lat_idx = df.columns.get_loc("latitude [deg]")
+    lon_idx = df.columns.get_loc("longitude [deg]")
     #
     px = np.empty(len(df), dtype=np.float64)
     py = np.empty(len(df), dtype=np.float64)
@@ -132,9 +132,9 @@ def draw_base_map(ax, top_df, coast_df, apply_port_extra=False, apply_coast_extr
     #
     ax.add_patch(poly_coast)
     ax.add_patch(poly_port)
-    ax.set_xlim(-4500, 1500)
+    ax.set_xlim(-3500, 500)
     y_min = float(min(coords_coast[:, 1].min(), coords_port[:, 1].min()))
-    ax.set_ylim(y_min, -3000)
+    ax.set_ylim(y_min + 1000, -4000)
     ax.set_aspect("equal")
     x_ticks = np.arange(ax.get_xlim()[0], ax.get_xlim()[1] + 1000, 1000)
     y_ticks = np.arange(ax.get_ylim()[0], ax.get_ylim()[1] + 1000, 1000)
@@ -156,28 +156,17 @@ def plot_one_route_and_save(ax, csv_path, linewidth=0.5):
     df["longitude [deg]"] = raw_df["longitude [deg]"].map(convert_coordinate)
     #
     time_arr = np.empty(len(df))
-    p_x_arr = np.empty(len(df))
-    p_y_arr = np.empty(len(df))
     #
     time_origin = JST_str_to_float(df.iloc[0, df.columns.get_loc("time (JST)")])
-    lat_origin = df.iloc[-1, df.columns.get_loc("latitude [deg]")]
-    lon_origin = df.iloc[-1, df.columns.get_loc("longitude [deg]")]
-    angle_from_north = 0.0
     for i in range(len(df)):
         #
         time_arr[i] = JST_str_to_float(df.iloc[i, df.columns.get_loc("time (JST)")]) - time_origin
         #
-        p_x_temp, p_y_temp = convert_to_xy(
-            df.iloc[i, df.columns.get_loc("latitude [deg]")],
-            df.iloc[i, df.columns.get_loc("longitude [deg]")],
-            lat_origin, lon_origin, angle_from_north
-        )
-        p_x_arr[i] = p_x_temp
-        p_y_arr[i] = p_y_temp
+    conv_df = df_to_xy(df)
     #
     df["t [s]"] = time_arr
-    df["p_x [m]"] = p_x_arr
-    df["p_y [m]"] = p_y_arr
+    df["p_x [m]"] = conv_df[:, 0]
+    df["p_y [m]"] = conv_df[:, 1]
     df["GPS deg [rad]"] = np.deg2rad(df["GPS deg [deg]"].values)
     #save
     folder = os.path.basename(os.path.dirname(csv_path))
@@ -188,17 +177,27 @@ def plot_one_route_and_save(ax, csv_path, linewidth=0.5):
     ax.plot(df["p_x [m]"], df["p_y [m]"], c=Colors.black,
             linewidth=linewidth, alpha=0.9, zorder=3)
     # ship 
-    ts = TimeSeries(
-            df=df,
-            label=None, L=100, B=16,
-            color=Colors.black, line_style=(0, (1, 0)),
-            dt=1.0,
+    for j in range(len(df)):
+        p = df.iloc[
+            j,
+            [
+                df.columns.get_loc("p_x [m]"),
+                df.columns.get_loc("p_y [m]"),
+                df.columns.get_loc("GPS deg [rad]")
+            ]
+        ]
+        ax.add_patch(
+            plt.Polygon(
+                ship_shape_poly(p, 100, 16, scale=1.0,),
+                fill=True, alpha=0.5,
+                color=Colors.red, linewidth=0.3, zorder=4
+            )
         )
-    ts_list=[ts]
-    for ts in ts_list:
-        plot_traj(
-            ax, ts, "p_x [m]", "p_y [m]", "GPS deg [rad]",
-            1, 0.5, ts.L, ts.B
+        ax.add_patch(
+            plt.Polygon(
+                ship_shape_poly(p, 100, 16, scale=1.0,),
+                fill=False, color=Colors.red, linewidth=0.3, zorder=4
+            )
         )
     #save
     os.makedirs(f"{SAVE_DIR}/fig", exist_ok=True)
