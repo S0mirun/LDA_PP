@@ -24,15 +24,22 @@ LON_ORIGIN = 136.6740283
 ANGLE_FROM_NORTH = 0.0
 
 def prepare(top_path, coast_path):
-    raw_top_df = pd.read_csv(top_path, usecols=[0, 1], encoding="shift-jis")
+    raw_top_df = pd.read_csv(
+        top_path,
+        usecols=[0, 1],
+        encoding="shift-jis"
+    )
     top_df = pd.DataFrame({"latitude": raw_top_df.iloc[:, 1], "longitude": raw_top_df.iloc[:, 0]})
-    raw_coast_df = pd.read_csv(coast_path, encoding="shift-jis")
+    #
+    raw_coast_df = pd.read_csv(
+        coast_path,
+        encoding="shift-jis"
+    )
     coast_df = pd.DataFrame({"latitude": raw_coast_df.iloc[:, 0], "longitude": raw_coast_df.iloc[:, 1]})
+
     return top_df, coast_df
 
 def convert_coordinate(value):
-    if value is None or value == "":
-        return float("nan")
     s = unicodedata.normalize("NFKC", str(value)).strip()
     s = s.replace("’", "'").replace("′", "'").replace("”", '"').replace("″", '"')
     m = re.match(r'^([+-]?\d+(?:\.\d+)?)(?:[°\s]*?(\d+(?:\.\d+)?))?(?:[\'\s]*?(\d+(?:\.\d+)?)(?:"|″)?)?\s*([NnSsEeWw])?$', s)
@@ -46,34 +53,51 @@ def convert_coordinate(value):
         if len(nums) >= 3:
             deg += float(nums[2]) / 3600.0
         return deg
+    #
     deg = float(m.group(1))
     mi = float(m.group(2)) if m.group(2) else 0.0
     se = float(m.group(3)) if m.group(3) else 0.0
     hem = (m.group(4) or "").upper()
     val = deg + mi / 60.0 + se / 3600.0
+    #
     if hem in ("S", "W"):
         val = -abs(val)
     elif hem in ("N", "E"):
         val = abs(val)
+
     return val
 
 def df_to_xy(df):
     lat_idx = df.columns.get_loc("latitude")
     lon_idx = df.columns.get_loc("longitude")
+    #
     px = np.empty(len(df), dtype=np.float64)
     py = np.empty(len(df), dtype=np.float64)
+    #
     for i in range(len(df)):
-        y_m, x_m = convert_to_xy(float(df.iat[i, lat_idx]), float(df.iat[i, lon_idx]), LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH)
+        y_m, x_m = convert_to_xy(
+            float(df.iat[i, lat_idx]), float(df.iat[i, lon_idx]),
+            LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH
+        )
         px[i] = x_m
         py[i] = y_m
+    
     return np.column_stack([px, py]).astype(float)
 
 def maybe_add_extra(coords, use_flag=True, x_const=-6000.0):
     if not use_flag:
         return coords
+    #
     y_min = float(coords[:, 1].min())
     y_max = float(coords[:, 1].max())
-    extra = np.array([[x_const, y_min], [x_const, y_max], [float(coords[0, 0]), float(coords[0, 1])]], dtype=float)
+    extra = np.array(
+        [
+            [x_const, y_min], [x_const, y_max],
+            [float(coords[0, 0]), float(coords[0, 1])]
+        ]
+        ,dtype=float
+    )
+    
     return np.vstack([coords, extra])
 
 def draw_base_map(ax, top_df, coast_df, apply_port_extra=False, apply_coast_extra=True, x_const=-6000.0):
@@ -81,12 +105,17 @@ def draw_base_map(ax, top_df, coast_df, apply_port_extra=False, apply_coast_extr
     coords_port = df_to_xy(top_df)
     coords_coast = maybe_add_extra(coords_coast, apply_coast_extra, x_const)
     coords_port = maybe_add_extra(coords_port, apply_port_extra, x_const)
+    #
     if not np.allclose(coords_coast[0], coords_coast[-1]):
         coords_coast = np.vstack([coords_coast, coords_coast[0]])
     if not np.allclose(coords_port[0], coords_port[-1]):
         coords_port = np.vstack([coords_port, coords_port[0]])
-    poly_coast = Polygon(coords_coast, closed=True, facecolor=Colors.black, edgecolor="none", alpha=0.5, linewidth=0, zorder=1)
-    poly_port = Polygon(coords_port, closed=True, facecolor=Colors.red, edgecolor="none", alpha=1.0, linewidth=0, zorder=2)
+    #
+    poly_coast = Polygon(coords_coast, closed=True, facecolor=Colors.black,
+                         edgecolor="none", alpha=0.5, linewidth=0, zorder=1)
+    poly_port = Polygon(coords_port, closed=True, facecolor=Colors.red,
+                        edgecolor="none", alpha=1.0, linewidth=0, zorder=2)
+    #
     ax.add_patch(poly_coast)
     ax.add_patch(poly_port)
     ax.set_xlim(-4500, 1500)
@@ -102,7 +131,11 @@ def draw_base_map(ax, top_df, coast_df, apply_port_extra=False, apply_coast_extr
     ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
 
 def plot_one_route_and_save(ax, csv_path, out_dir, linewidth=0.5):
-    raw_df = pd.read_csv(csv_path, usecols=[2, 3], encoding="shift-jis")
+    raw_df = pd.read_csv(
+        csv_path,
+        usecols=[2, 3],
+        encoding="shift-jis"
+    )
     raw_df.iloc[:, 0] = raw_df.iloc[:, 0].map(convert_coordinate)
     raw_df.iloc[:, 1] = raw_df.iloc[:, 1].map(convert_coordinate)
     df = pd.DataFrame({"latitude": raw_df.iloc[:, 0], "longitude": raw_df.iloc[:, 1]})
@@ -118,7 +151,7 @@ def plot_one_route_and_save(ax, csv_path, out_dir, linewidth=0.5):
     ax.plot(x[m], y[m], c=Colors.black, linewidth=linewidth, alpha=0.9, zorder=3)
     folder = os.path.basename(os.path.dirname(csv_path))
     name = os.path.splitext(os.path.basename(csv_path))[0]
-    out_name = f"route__{folder}__{name}.png"
+    out_name = f"{folder}__{name}.png"
     out_path = os.path.join(out_dir, out_name)
     plt.savefig(out_path, dpi=400, bbox_inches="tight", pad_inches=0.05)
     return out_path
@@ -133,7 +166,7 @@ def main():
         out_path = plot_one_route_and_save(ax, csv_path, SAVE_DIR, linewidth=0.5)
         plt.close(fig)
         if out_path:
-            print(f"saved: {out_path}")
+            print(f"\nsaved     :{os.path.splitext(os.path.basename(out_path))[0]}\n")
 
 if __name__ == "__main__":
     main()
