@@ -60,7 +60,7 @@ def ship_shape_poly(pose, L=3.0, B=0.48925, scale=1, Lrate = 0.6, z_axis_upward=
     x, y, p = pose
     xc  = x if z_axis_upward else y
     yc  = y if z_axis_upward else x
-    psi = p if z_axis_upward else np.pi*0.5 - p
+    psi = np.pi*0.5 - p
     # calc shape
     coo1 = np.array([xc + scale * L/2.0 * np.cos(psi), yc + scale * L/2.0 * np.sin(psi)])
     coo2 = np.array([xc + scale * (L/2.0 * Lrate * np.cos(psi) - B/2.0 * np.sin(psi)), yc + scale * (L/2.0 * Lrate * np.sin(psi) + B/2.0 * np.cos(psi))])
