@@ -132,9 +132,9 @@ def draw_base_map(ax, top_df, coast_df, apply_port_extra=False, apply_coast_extr
     #
     ax.add_patch(poly_coast)
     ax.add_patch(poly_port)
-    ax.set_xlim(-3500, 500)
+    ax.set_xlim(-4500, 1500)
     y_min = float(min(coords_coast[:, 1].min(), coords_port[:, 1].min()))
-    ax.set_ylim(y_min + 1000, -4000)
+    ax.set_ylim(y_min, -3000)
     ax.set_aspect("equal")
     x_ticks = np.arange(ax.get_xlim()[0], ax.get_xlim()[1] + 1000, 1000)
     y_ticks = np.arange(ax.get_ylim()[0], ax.get_ylim()[1] + 1000, 1000)
@@ -156,26 +156,25 @@ def plot_one_route_and_save(ax, csv_path, linewidth=0.5):
     df["longitude [deg]"] = raw_df["longitude [deg]"].map(convert_coordinate)
     #
     time_arr = np.empty(len(df))
-    #
     time_origin = JST_str_to_float(df.iloc[0, df.columns.get_loc("time (JST)")])
     for i in range(len(df)):
         #
         time_arr[i] = JST_str_to_float(df.iloc[i, df.columns.get_loc("time (JST)")]) - time_origin
-        #
+    #
     conv_df = df_to_xy(df)
     #
     df["t [s]"] = time_arr
     df["p_x [m]"] = conv_df[:, 0]
     df["p_y [m]"] = conv_df[:, 1]
-    df["GPS deg [rad]"] = np.deg2rad(df["GPS deg [deg]"].values)
+    df["gyro deg [rad]"] = np.deg2rad(df["gyro deg [deg]"].values)
     #save
     folder = os.path.basename(os.path.dirname(csv_path))
     name = os.path.splitext(os.path.basename(csv_path))[0]
     os.makedirs(f"{SAVE_DIR}/csv", exist_ok=True)
     df.to_csv(os.path.join(f"{SAVE_DIR}/csv", f"{folder}__{name}.csv"))
     # root
-    ax.plot(df["p_x [m]"], df["p_y [m]"], c=Colors.black,
-            linewidth=linewidth, alpha=0.9, zorder=3)
+    # ax.plot(df["p_x [m]"], df["p_y [m]"], c=Colors.black,
+    #         linewidth=linewidth, alpha=0.9, zorder=3)
     # ship 
     for j in range(len(df)):
         p = df.iloc[
@@ -183,19 +182,19 @@ def plot_one_route_and_save(ax, csv_path, linewidth=0.5):
             [
                 df.columns.get_loc("p_x [m]"),
                 df.columns.get_loc("p_y [m]"),
-                df.columns.get_loc("GPS deg [rad]")
+                df.columns.get_loc("gyro deg [rad]")
             ]
-        ]
+        ].to_numpy(dtype=float)
         ax.add_patch(
             plt.Polygon(
-                ship_shape_poly(p, 100, 16, scale=1.0,),
+                ship_shape_poly(p, 100, 16, scale=1.0, z_axis_upward=True),
                 fill=True, alpha=0.5,
                 color=Colors.red, linewidth=0.3, zorder=4
             )
         )
         ax.add_patch(
             plt.Polygon(
-                ship_shape_poly(p, 100, 16, scale=1.0,),
+                ship_shape_poly(p, 100, 16, scale=1.0, z_axis_upward=True),
                 fill=False, color=Colors.red, linewidth=0.3, zorder=4
             )
         )
