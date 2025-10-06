@@ -18,6 +18,8 @@ num(TS_INFO_DIR)
 TS_INFO_TABLE_PATH = f"{TS_INFO_DIR}/1_2023_0216_PCC_着/1-運動/"
 num(TS_INFO_TABLE_PATH)
 
+
+#aaaaaaaa
 print(glob.glob('./../*.py'))
 
 
