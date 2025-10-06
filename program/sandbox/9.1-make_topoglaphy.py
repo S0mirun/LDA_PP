@@ -5,6 +5,7 @@ import unicodedata
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
 import numpy as np
 import pandas as pd
 
@@ -144,7 +145,7 @@ def draw_base_map(ax, top_df, coast_df, apply_port_extra=False, apply_coast_extr
     ax.set_yticklabels([])
     ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
 
-def plot_one_route_and_save(ax, csv_path, linewidth=0.5):
+def plot_one_route_and_save(ax, csv_path, top_df, coast_df, linewidth=0.5):
     raw_df = pd.read_csv(
         csv_path,
         encoding="shift-jis"
@@ -173,9 +174,31 @@ def plot_one_route_and_save(ax, csv_path, linewidth=0.5):
     os.makedirs(f"{SAVE_DIR}/csv", exist_ok=True)
     df.to_csv(os.path.join(f"{SAVE_DIR}/csv", f"{folder}__{name}.csv"))
     # root
-    # ax.plot(df["p_x [m]"], df["p_y [m]"], c=Colors.black,
-    #         linewidth=linewidth, alpha=0.9, zorder=3)
+    ax.plot(df["p_x [m]"], df["p_y [m]"], c=Colors.black,
+            linewidth=linewidth, alpha=0.5, zorder=3)
     # ship 
+    ax = plot_ship(ax, df)
+
+    #zoom
+    axins = inset_axes(ax, width="35%", height="35%", loc="upper right", borderpad=0.6)
+    axins.set_aspect("equal")
+    draw_base_map(axins, top_df, coast_df,
+                  apply_port_extra=False, apply_coast_extra=True, x_const=-6000.0)
+    axins.plot(df["p_x [m]"], df["p_y [m]"], c=Colors.black, lw=1.0, zorder=3)
+    if folder == "_Yokkaichi_port1A":
+        axins.set_xlim(-2500, -1500)
+        axins.set_ylim(-4500, -3500)
+    else:
+        axins.set_xlim(-3500, -2500)
+        axins.set_ylim(-7500, -6500)      
+    axins = plot_ship(axins, df)
+    mark_inset(ax, axins, loc1=2, loc2=4, fc="none", ec="0.3", lw=0.8)
+    #save
+    os.makedirs(f"{SAVE_DIR}/fig", exist_ok=True)
+    plt.savefig(os.path.join(f"{SAVE_DIR}/fig", f"{folder}__{name}.png"),
+                dpi=400, bbox_inches="tight", pad_inches=0.05)
+
+def plot_ship(ax,df):
     for j in range(len(df)):
         p = df.iloc[
             j,
@@ -198,10 +221,7 @@ def plot_one_route_and_save(ax, csv_path, linewidth=0.5):
                 fill=False, color=Colors.red, linewidth=0.3, zorder=4
             )
         )
-    #save
-    os.makedirs(f"{SAVE_DIR}/fig", exist_ok=True)
-    plt.savefig(os.path.join(f"{SAVE_DIR}/fig", f"{folder}__{name}.png"),
-                dpi=400, bbox_inches="tight", pad_inches=0.05)
+    return ax
 
 def main():
     top_df, coast_df = prepare(top_path, coast_path)
@@ -209,8 +229,9 @@ def main():
     paths = sorted(glob.glob(f"{DIR}/../../raw_datas/tmp/_Yokkaichi_port*/*.csv"))
     for csv_path in paths:
         fig, ax = plt.subplots(figsize=(10, 8))
-        draw_base_map(ax, top_df, coast_df, apply_port_extra=False, apply_coast_extra=True, x_const=-6000.0)
-        plot_one_route_and_save(ax, csv_path, linewidth=0.5)
+        draw_base_map(ax, top_df, coast_df,
+                      apply_port_extra=False, apply_coast_extra=True, x_const=-6000.0)
+        plot_one_route_and_save(ax, csv_path, top_df, coast_df, linewidth=0.5)
         plt.close(fig)
         print(f"\nsaved:    {os.path.splitext(os.path.basename(csv_path))[0]}\n")
 
