@@ -235,8 +235,8 @@ class PathPlanning():
         sample_map.origin_xy = sample_map.FindNodeOfThePoint(origin_pt)
 
         self.origin_pt = origin_pt
-        self.origin_ver_idx = np.where(sample_map.ver_range == sample_map.origin_xy[0])[0]
-        self.origin_hor_idx = np.where(sample_map.hor_range == sample_map.origin_xy[1])[0]
+        self.origin_ver_idx = np.where(sample_map.ver_range == sample_map.origin_xy[0, 0])
+        self.origin_hor_idx = np.where(sample_map.hor_range == sample_map.origin_xy[0, 1])
 
         # end
         straight_dist = self.ps.L * self.steady_course_coeff if self.ps.enable_pre_berthing_straight_segment else 0.0
@@ -245,8 +245,8 @@ class PathPlanning():
         sample_map.last_xy = sample_map.FindNodeOfThePoint(last_pt)
 
         self.last_pt = last_pt
-        self.last_ver_idx = np.where(sample_map.ver_range == sample_map.last_xy[0])[0]
-        self.last_hor_idx = np.where(sample_map.hor_range == sample_map.last_xy[1])[0]
+        self.last_ver_idx = np.where(sample_map.ver_range == sample_map.last_xy[0, 0])
+        self.last_hor_idx = np.where(sample_map.hor_range == sample_map.last_xy[0, 1])
 
         print(f"### SET UP COMPLETE ###\n")
 
@@ -289,7 +289,8 @@ class PathPlanning():
                 self.last_pt,
                 self.port
             )
-            print(initial_point_list)
+            for i, (x, y) in enumerate(initial_point_list, 1):
+                print(f"  P{i:02d}: ({x:.1f}, {y:.1f})")
             # save
             if self.ps.save_init_path:
                 sample_map.path_xy = np.empty((0, 2))
@@ -312,6 +313,10 @@ class PathPlanning():
                     SD_sw=self.ps.show_SD_on_init_path,
                     initial_point_list=initial_point_list,
                 )
+        else:
+            for i, (x, y) in enumerate(self.initial_points, 1):
+                print(f"  P{i:02d}: ({x:.1f}, {y:.1f})")
+
 
     def PP(self):
         pass
