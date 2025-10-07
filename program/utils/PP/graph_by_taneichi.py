@@ -54,7 +54,7 @@ class Map():
         Map.AddObstacleNode(target_map, obstacles, 'berth')
         return target_map
     
-    def ShowMap_for_astar(self, filename = None, SD = None, SD_sw = 0, initial_point_list = None):
+    def ShowMap_for_astar(self, filename = None, SD = None, SD_sw = True, initial_point_list = None):
 
         # set glaph
         x_range = self.hor_range[-1] - self.hor_range[0]
@@ -109,7 +109,7 @@ class Map():
             ax.plot(all_points[:, 0], all_points[:, 1], lw=1.0, color='r', ls='-')
 
         # show ship domain
-        if 'psi' in dir(self) and not SD == None and SD_sw == 0:
+        if 'psi' in dir(self) and not SD == None and SD_sw == True:
             for j in range(len(self.path_xy)):
                 # SDを表示する間隔
                 if j % 30 == 0:

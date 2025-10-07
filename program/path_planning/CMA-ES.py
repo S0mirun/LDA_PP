@@ -11,8 +11,7 @@ from enum import StrEnum
 import os
 import sys
 import time
-from dataclasses import dataclass
-from typing import List, Tuple, Dict, Any
+from typing import Iterable, Tuple
 
 import numpy as np
 import pandas as pd
@@ -86,12 +85,59 @@ def sigmoid(x, a, b, c):
 def round_by_pitch(value, pitch):
     return int(np.round(value / pitch) * pitch)
 
+def undo_conversion(reference_hor_index, reference_ver_index, end_hor_coord, end_ver_coord, indices, grid_pitch):
+    idx = np.asarray(indices, dtype=float)
+    ref_idx = np.array([reference_hor_index, reference_ver_index], dtype=float)
+    ref_xy = np.array([end_hor_coord, end_ver_coord], dtype=float)
+    return ref_xy - (ref_idx - idx) * grid_pitch
+
+
+def calculate_turning_points(initial_coords, sample_map, last_pt, port):
+    turning_points = []
+    current_index = 0
+    while current_index < len(initial_coords) - 1:
+        current_point = initial_coords[current_index]
+        d = np.hypot(current_point[0] - sample_map.end_xy[0, 0], current_point[1] - sample_map.end_xy[0, 1])
+        current_speed = sample_map.b_ave * d ** sample_map.a_ave + sample_map.b_SD * d ** sample_map.a_SD
+        if current_speed > 9.5:
+            current_speed = 9.5
+        minute_distance = current_speed * 1852 / 60
+        sum_of_distance = 0.0
+        broke = False
+        for i in range(current_index, len(initial_coords) - 1):
+            seg = np.hypot(initial_coords[i + 1][0] - initial_coords[i][0], initial_coords[i + 1][1] - initial_coords[i][1])
+            sum_of_distance += seg
+            if sum_of_distance >= minute_distance:
+                distance_to_last = np.hypot(initial_coords[i + 1][0] - last_pt[0], initial_coords[i + 1][1] - last_pt[1])
+                bt = port["berth_type"]
+                if bt == 1:
+                    if distance_to_last < 80:
+                        broke = True
+                        break
+                    turning_points.append(initial_coords[i + 1])
+                    current_index = i + 1
+                    break
+                elif bt == 2:
+                    if distance_to_last < 120:
+                        broke = True
+                        break
+                    turning_points.append(initial_coords[i + 1])
+                    current_index = i + 1
+                    break
+        else:
+            break
+        if broke:
+            break
+    return turning_points
+
+
 class PathPlanning():
     def __init__(self, ps):
         self.ps = ps
 
     def main(self):
         self.setup()
+        self.gen_init_path()
         self.PP()
 
     def setup(self):
@@ -110,14 +156,17 @@ class PathPlanning():
         world_polys.append(df_world[['x [m]', 'y [m]']].to_numpy())
         enclosing = pyshipsim.EnclosingPointCollisionChecker()
         enclosing.reset(world_polys)
+        self.enclosing = enclosing
         print(f"Successfully imported data from csv\n")
         #
         SD = ShipDomain_proposal()
         SD.initial_setting(f"{DIR}/../../outputs/303/mirror5/fitting_parameter.csv", sigmoid)
+        self.SD = SD
         print(f"Generating map from data\n")
         #
         time_start_map_generation = time.time()
         sample_map = utils.PP.graph_by_taneichi.Map.GenerateMapFromCSV(target_csv, self.ps.gridpitch_for_Astar)
+        #
         time_end_map_generation = time.time()
         map_generation_caltime = time_end_map_generation - time_start_map_generation
         print(f"Map generation is complete.\nCalculation time : {map_generation_caltime}\n")
@@ -164,10 +213,10 @@ class PathPlanning():
         sample_map.ver_range = np.arange(ver_min_round, ver_max_round+sample_map.grid_pitch/10, sample_map.grid_pitch)
         sample_map.hor_range = np.arange(hor_min_round, hor_max_round+sample_map.grid_pitch/10, sample_map.grid_pitch)
         #
-        start_ver_idx = np.where(sample_map.ver_range == sample_map.start_xy[0, 0])
-        start_hor_idx = np.where(sample_map.hor_range == sample_map.start_xy[0, 1])
-        end_ver_idx   = np.where(sample_map.ver_range == sample_map.end_xy[0, 0])
-        end_hor_idx   = np.where(sample_map.hor_range == sample_map.end_xy[0, 1])
+        self.start_ver_idx = np.where(sample_map.ver_range == sample_map.start_xy[0, 0])
+        self.start_hor_idx = np.where(sample_map.hor_range == sample_map.start_xy[0, 1])
+        self.end_ver_idx   = np.where(sample_map.ver_range == sample_map.end_xy[0, 0])
+        self.end_hor_idx   = np.where(sample_map.hor_range == sample_map.end_xy[0, 1])
         #
         sx, sy = sample_map.start_xy[0, 0], sample_map.start_xy[0, 1]
         ex, ey = sample_map.end_xy[0, 0],   sample_map.end_xy[0, 1]
@@ -185,6 +234,7 @@ class PathPlanning():
         origin_pt = sample_map.start_xy[0] + origin_navigation_distance * u_start
         sample_map.origin_xy = sample_map.FindNodeOfThePoint(origin_pt)
 
+        self.origin_pt = origin_pt
         self.origin_ver_idx = np.where(sample_map.ver_range == sample_map.origin_xy[0])[0]
         self.origin_hor_idx = np.where(sample_map.hor_range == sample_map.origin_xy[1])[0]
 
@@ -194,11 +244,74 @@ class PathPlanning():
         last_pt = sample_map.end_xy[0] - straight_dist * u_end
         sample_map.last_xy = sample_map.FindNodeOfThePoint(last_pt)
 
+        self.last_pt = last_pt
         self.last_ver_idx = np.where(sample_map.ver_range == sample_map.last_xy[0])[0]
         self.last_hor_idx = np.where(sample_map.hor_range == sample_map.last_xy[1])[0]
 
+        print(f"### SET UP COMPLETE ###\n")
 
+    def gen_init_path(self):
+        if self.ps.init_path_algo == 'astar':
+            print(f'Initial Path generation starts')
+            time_start_astar = time.time()
+            sample_map = self.sample_map
+            #
+            utils.PP.graph_by_taneichi.Map.SetMaze(sample_map)
+            weight = sample_map.grid_pitch * self.weight_of_SD
+            sample_map.path_node, sample_map.psi, astar_iteration = utils.PP.Astar_for_CMAES.astar(
+                sample_map, 
+                (self.origin_hor_idx[0][0], self.origin_ver_idx[0][0]),
+                (self.last_hor_idx[0][0], self.last_ver_idx[0][0]),
+                psi_start = self.psi_start,
+                psi_end = self.psi_end,
+                SD = self.SD,
+                weight = weight,
+                enclosing_checker = self.enclosing
+            )
+            #
+            time_end_astar = time.time()
+            astar_caltime = time_end_astar - time_start_astar
+            print(f'Astar algorithm took {astar_caltime}[s]\n')
 
+            original_initial_coord = undo_conversion(
+                self.end_hor_idx[0][0],
+                self.end_ver_idx[0][0],
+                sample_map.end_xy[0, 1],
+                sample_map.end_xy[0, 0],
+                sample_map.path_node,
+                self.ps.gridpitch,
+            )
+            original_initial_coord = original_initial_coord[:, ::-1]
+
+            initial_point_list = calculate_turning_points(
+                original_initial_coord,
+                sample_map,
+                self.last_pt,
+                self.port
+            )
+            print(initial_point_list)
+            # save
+            if self.ps.save_init_path:
+                sample_map.path_xy = np.empty((0, 2))
+                for i in range(len(sample_map.path_node)):
+                    sample_map.path_xy = np.append(
+                        sample_map.path_xy,
+                        np.array(
+                            [
+                                [
+                                    sample_map.ver_range[sample_map.path_node[i][1]],
+                                    sample_map.hor_range[sample_map.path_node[i][0]],
+                                ]
+                            ]
+                        ),
+                        axis=0,
+                    )
+                sample_map.ShowMap_for_astar(
+                    filename=self.filename_astar,
+                    SD=self.SD,
+                    SD_sw=self.ps.show_SD_on_init_path,
+                    initial_point_list=initial_point_list,
+                )
 
     def PP(self):
         pass
@@ -248,11 +361,11 @@ class PathPlanning():
             )
             if self.ps.save_init_path:
                 if self.ps.show_SD_on_init_path:
-                    filename_astar = f"{SAVE_DIR}/Initial_Path_by_Astar_with_SD.png"
-                    print(f"初期経路の図は Ship Domain の表示'有り'で {filename_astar} に保存されます\n")
+                    self.filename_astar = f"{SAVE_DIR}/Initial_Path_by_Astar_with_SD.png"
+                    print(f"初期経路の図は Ship Domain の表示'有り'で {self.filename_astar} に保存されます\n")
                 else:
-                    filename_astar = f"{SAVE_DIR}/Initial_Path_by_Astar_without_SD.png"
-                    print(f"初期経路の図は Ship Domain の表示'無し'で {filename_astar} に保存されます\n")
+                    self.filename_astar = f"{SAVE_DIR}/Initial_Path_by_Astar_without_SD.png"
+                    print(f"初期経路の図は Ship Domain の表示'無し'で {self.filename_astar} に保存されます\n")
             else:
                 print("初期経路は図に保存されません\n")
         else: # Manual
