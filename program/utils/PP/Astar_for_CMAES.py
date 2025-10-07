@@ -55,7 +55,6 @@ def astar(map, start, end, psi_start, psi_end, SD, weight, enclosing_checker):
     itr = 0
     with tqdm(total=len(open_list) + len(closed_list), desc="A*", unit="node") as pbar:
         while open_list:
-            pbar = tqdm(total=len(open_list) + len(closed_list))
             current_node = open_list[0]
             current_index = 0
             for index, item in enumerate(open_list):
