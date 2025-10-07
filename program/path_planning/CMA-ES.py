@@ -19,10 +19,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 import utils.PP.Astar_for_CMAES
-import utils.PP.graph
+import utils.PP.graph_by_taneichi
 from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.MakeDictionary_and_StackedBarGraph import new_filtered_dict
-from utils.PP.graph import ShipDomain_proposal
+from utils.PP.graph_by_taneichi import ShipDomain_proposal
 from utils.PP.subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
 
 PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -59,12 +59,15 @@ class Settings:
         self.psi_mode: ParamMode = ParamMode.AUTO
         self.steady_course_coeff_mode: ParamMode = ParamMode.AUTO
         self.init_path_algo: InitPathAlgo = InitPathAlgo.ASTAR
+        self.MAX_SPEED_KTS = 9.5 # [knots]
         self.length_ratio: float = 0.1
         self.SD_ratio: float = 0.5
         self.element_ratio: float = 1.0
         self.distance_ratio: float = 0.2
         self.restarts: int = 3
-        self.increase_popsize_on_restart: bool = False  # True: restarts use increased population size (IPOP); False: keep same size
+        self.increase_popsize_on_restart: bool = False
+        self.enable_pre_berthing_straight_segment: bool = True
+
         # figure
         self.save_init_path: bool = True
         self.show_SD_on_init_path: bool = True
@@ -72,6 +75,7 @@ class Settings:
         self.enable_multiplot: bool = True
         self.gridpitch: float = 5.0 #[m]
         self.gridpitch_for_Astar: float = 5.0 #[m]
+        self.range_type = 1
         # csv
         self.save_opt_path: bool = True
 
@@ -97,7 +101,7 @@ class PathPlanning():
 
     def shipdomain(self):
         port = self.port
-        TARGET_DIR = "../../outputs/port"
+        TARGET_DIR = f"{DIR}/../../outputs/port"
         target_csv = f"{TARGET_DIR}/detail_port_csv_{port['name']}.csv"
         target_csv_for_pyship = f"{TARGET_DIR}/detail_port_csv_{port['name']}_for_pyship.csv"
         #
@@ -109,16 +113,16 @@ class PathPlanning():
         print(f"Successfully imported data from csv\n")
         #
         SD = ShipDomain_proposal()
-        SD.initial_setting('../../output/303/mirror5/fitting_parameter.csv', sigmoid)
+        SD.initial_setting(f"{DIR}/../../outputs/303/mirror5/fitting_parameter.csv", sigmoid)
         print(f"Generating map from data\n")
         #
         time_start_map_generation = time.time()
-        sample_map = utils.PP.graph.Map.GenerateMapFromCSV(target_csv, self.gridpitch_for_astar)
+        sample_map = utils.PP.graph_by_taneichi.Map.GenerateMapFromCSV(target_csv, self.ps.gridpitch_for_Astar)
         time_end_map_generation = time.time()
         map_generation_caltime = time_end_map_generation - time_start_map_generation
         print(f"Map generation is complete.\nCalculation time : {map_generation_caltime}\n")
         # Coefficients for the speed-decay approximation (orange guideline curve)
-        df = pd.read_csv('../../raw_datas/tmp/GuidelineFit_debug.csv')
+        df = pd.read_csv(f"{DIR}/../../raw_datas/tmp/GuidelineFit_debug.csv")
         sample_map.a_ave = df['a_ave'].values[0]
         sample_map.b_ave = df['b_ave'].values[0]
         sample_map.a_SD = df['a_SD'].values[0]
@@ -131,19 +135,77 @@ class PathPlanning():
         port = self.port
         sample_map = self.sample_map
         #
-
-        if set_start_end_sw == 0: # defalt
+        if self.ps.start_end_mode == 'auto':
             sample_map.start_raw = np.array([port["start"]])
             sample_map.end_raw   = np.array([port["end"]])
         else: # manual
-            sample_map.start_raw = np.array([manual_start_coord])
-            sample_map.end_raw   = np.array([manual_end_coord])
+            sample_map.start_raw = np.array([self.start_coord])
+            sample_map.end_raw   = np.array([self.end_coord])
+        sample_map.start_xy = sample_map.FindNodeOfThePoint(sample_map.start_raw[0,:])
+        sample_map.end_xy   = sample_map.FindNodeOfThePoint(sample_map.end_raw[0,:])
+        #
+        if self.ps.range_type == 1:
+            ver_margin = 200 # [m]
+            hor_margin = 200 # [m]
+
+            ver_min = min((np.amin(sample_map.ver_range),sample_map.start_raw[0,0], sample_map.end_raw[0,0])) - ver_margin
+            ver_max = max((np.amax(sample_map.ver_range),sample_map.start_raw[0,0], sample_map.end_raw[0,0])) + ver_margin
+            hor_min = min((np.amin(sample_map.hor_range),sample_map.start_raw[0,1], sample_map.end_raw[0,1])) - hor_margin
+            hor_max = max((np.amax(sample_map.hor_range),sample_map.start_raw[0,1], sample_map.end_raw[0,1])) + hor_margin
+        else:
+            ver_min = -15
+            ver_max = +10
+            hor_min = -20
+            hor_max = +20
+        ver_min_round = utils.PP.graph_by_taneichi.Map.RoundRange(None, ver_min, sample_map.grid_pitch, 'min')
+        ver_max_round = utils.PP.graph_by_taneichi.Map.RoundRange(None, ver_max, sample_map.grid_pitch, 'max')
+        hor_min_round = utils.PP.graph_by_taneichi.Map.RoundRange(None, hor_min, sample_map.grid_pitch, 'min')
+        hor_max_round = utils.PP.graph_by_taneichi.Map.RoundRange(None, hor_max, sample_map.grid_pitch, 'max')
+        sample_map.ver_range = np.arange(ver_min_round, ver_max_round+sample_map.grid_pitch/10, sample_map.grid_pitch)
+        sample_map.hor_range = np.arange(hor_min_round, hor_max_round+sample_map.grid_pitch/10, sample_map.grid_pitch)
+        #
+        start_ver_idx = np.where(sample_map.ver_range == sample_map.start_xy[0, 0])
+        start_hor_idx = np.where(sample_map.hor_range == sample_map.start_xy[0, 1])
+        end_ver_idx   = np.where(sample_map.ver_range == sample_map.end_xy[0, 0])
+        end_hor_idx   = np.where(sample_map.hor_range == sample_map.end_xy[0, 1])
+        #
+        sx, sy = sample_map.start_xy[0, 0], sample_map.start_xy[0, 1]
+        ex, ey = sample_map.end_xy[0, 0],   sample_map.end_xy[0, 1]
+        distance_between_start_and_end = ((sx - ex) ** 2 + (sy - ey) ** 2) ** 0.5
+
+        start_speed = min(
+            sample_map.b_ave * distance_between_start_and_end ** sample_map.a_ave
+            + sample_map.b_SD  * distance_between_start_and_end ** sample_map.a_SD,
+            self.ps.MAX_SPEED_KTS,
+        )
+        print(f"start speed is {start_speed} knots.\n")
+        # start
+        origin_navigation_distance = start_speed * 1852 / 60
+        u_start = np.array([np.cos(self.psi_start), np.sin(self.psi_start)])
+        origin_pt = sample_map.start_xy[0] + origin_navigation_distance * u_start
+        sample_map.origin_xy = sample_map.FindNodeOfThePoint(origin_pt)
+
+        self.origin_ver_idx = np.where(sample_map.ver_range == sample_map.origin_xy[0])[0]
+        self.origin_hor_idx = np.where(sample_map.hor_range == sample_map.origin_xy[1])[0]
+
+        # end
+        straight_dist = self.ps.L * self.steady_course_coeff if self.ps.enable_pre_berthing_straight_segment else 0.0
+        u_end = np.array([np.cos(self.psi_end), np.sin(self.psi_end)])
+        last_pt = sample_map.end_xy[0] - straight_dist * u_end
+        sample_map.last_xy = sample_map.FindNodeOfThePoint(last_pt)
+
+        self.last_ver_idx = np.where(sample_map.ver_range == sample_map.last_xy[0])[0]
+        self.last_hor_idx = np.where(sample_map.hor_range == sample_map.last_xy[1])[0]
+
+
+
 
     def PP(self):
         pass
 
     def update_planning_settings(self):
-        self.port = self.dict_of_port(self.ps.port_number)
+        port = self.dict_of_port(self.ps.port_number)
+        self.port = port
         #
         if self.ps.start_end_mode == 'auto':
             self.weight_of_SD = 20
@@ -159,10 +221,12 @@ class PathPlanning():
             )
         #
         if self.ps.psi_mode == 'auto':
+            self.psi_start = np.deg2rad(port["psi_start"])
+            self.psi_end = np.deg2rad(port["psi_end"])
             print("\npsi_startとpsi_endの値はデフォルト値です\n")
         else: # manual
-            self.psi_start = -20
-            self.psi_end = 10
+            self.psi_start = np.deg2rad(-20)
+            self.psi_end = np.deg2rad(10)
             print(
                 f"psi_startの値は{self.psi_start}です",
                 f"psi_endの値は{self.psi_end}です",
@@ -170,8 +234,9 @@ class PathPlanning():
             )
         #
         if self.ps.steady_course_coeff_mode == 'auto':
+            self.steady_course_coeff = 1.2
             print(f"保針区間の長さを決める係数はデフォルト値です\n")
-        else:
+        else: # Manual
             self.steady_course_coeff = 0
             print(f"保針区間の長さを決める係数は{self.steady_course_coeff}です\n")
         #
@@ -190,7 +255,7 @@ class PathPlanning():
                     print(f"初期経路の図は Ship Domain の表示'無し'で {filename_astar} に保存されます\n")
             else:
                 print("初期経路は図に保存されません\n")
-        else:
+        else: # Manual
             init_check_points = [
                 (1990.0, -300.0),
                 (1750.0, -400.0),
