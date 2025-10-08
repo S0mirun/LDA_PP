@@ -11,7 +11,8 @@ from enum import StrEnum
 import os
 import sys
 import time
-from typing import Iterable, Tuple
+from dataclasses import dataclass
+from typing import Iterable, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -52,30 +53,45 @@ class Settings:
         # ship
         self.L = 100
 
-        # CMA-ES / parameter modes
-        self.seed: float = 42
+        # setup  /  initial path
         self.start_end_mode: ParamMode = ParamMode.AUTO
         self.psi_mode: ParamMode = ParamMode.AUTO
         self.steady_course_coeff_mode: ParamMode = ParamMode.AUTO
         self.init_path_algo: InitPathAlgo = InitPathAlgo.ASTAR
-        self.MAX_SPEED_KTS = 9.5 # [knots]
+        self.enable_pre_berthing_straight_segment: bool = True
+        
+        self.save_init_path: bool = True
+        self.show_SD_on_init_path: bool = True
+        self.enable_multiplot: bool = True
+        self.gridpitch: float = 5.0 #[m]
+        self.gridpitch_for_Astar: float = 5.0 #[m]
+        self.range_type:float = 1
+        # CMA-ES
+        self.seed: float = 42
+        self.MAX_SPEED_KTS:float = 9.5 # [knots]
+        self.MIN_SPEED_KTS:float = 1.5 # [knots]
+        self.speed_interval:float = 1.0
+        self.MAX_ANGLE_DEG:float = 60 # [deg]
+        self.MIN_ANGLE_DEG:float = 0 # [deg]
+        self.angle_interval:float = 5
         self.length_ratio: float = 0.1
         self.SD_ratio: float = 0.5
         self.element_ratio: float = 1.0
         self.distance_ratio: float = 0.2
+        # restart
         self.restarts: int = 3
         self.increase_popsize_on_restart: bool = False
-        self.enable_pre_berthing_straight_segment: bool = True
 
-        # figure
-        self.save_init_path: bool = True
-        self.show_SD_on_init_path: bool = True
+        self.is_satisfied: bool = False
+        self.best_cost: float = float("inf")
+        self.best_mean: Optional[np.ndarray] = None
+        self.checkpoints: list[tuple[float, float]] = []
+        self.midpoints: list[tuple[float, float]] = []
+        self.psi_at_cp: list[float] = []
+        self.psi_at_mp: list[float] = []
+
+        
         self.show_SD_on_optimized_path: bool = True
-        self.enable_multiplot: bool = True
-        self.gridpitch: float = 5.0 #[m]
-        self.gridpitch_for_Astar: float = 5.0 #[m]
-        self.range_type = 1
-        # csv
         self.save_opt_path: bool = True
 
 def sigmoid(x, a, b, c):
@@ -137,13 +153,78 @@ class PathPlanning():
 
     def main(self):
         self.setup()
-        self.gen_init_path()
+        self.init_path()
         self.PP()
 
     def setup(self):
         self.update_planning_settings()
         self.shipdomain()
         self.prepare_plots_and_variables()
+        print(f"### SET UP COMPLETE ###\n")
+
+    def init_path(self):
+        self.gen_init_path()
+        self.initial_D = self.cal_sigma_for_ddCMA(self.initial_points, self.last_pt)
+        self.N = len(self.initial_points.flatten())
+        print(
+            f"この最適化問題の次元Nは {self.N} です\n"
+            "### INITIAL CHECKPOINTS AND sigma0 SETUP COMPLETED ###\n"
+            "### MOVED TO THE OPTIMIZATION PROCESS ###\n"
+        )
+
+    def PP(self):
+        w_len, w_SD, w_elem, w_dist = self.compute_cost_weights(self.initial_points)
+        best_dict = {}
+        #
+        for restart in range(self.ps.restarts):
+            best_dict[restart] = {
+                    "fbestsofar": self.ps.fbestsofar,
+                    "best_mean_sofar": self.ps.best_mean_sofar,
+                    "calculation_time": None,  # 後で更新
+                    "cp_list": self.ps.cp_list,
+                    "mp_list": self.ps.mp_list,
+                    "psi_list_at_cp": self.ps.psi_list_at_cp,
+                    "psi_list_at_mp": self.ps.psi_list_at_mp
+                }
+            each_cal_start_time = time.time()
+            while not self.ps.is_satisfied:
+
+
+    def compute_cost_weights(self, initial_pt):
+        origin_pt = self.origin_pt
+        last_pt = self.last_pt
+        points = np.vstack([origin_pt, initial_pt, last_pt])
+        #
+        total_dist = 0.0                    # total_distance
+        SD_cost = 0.0                  # total_contact_cost
+        elem_ratio = 0.0                    # proportion_of_elements
+        p2p_dist_ratio = 0.0                # proportion_of_distance_between_point_and_point
+        #
+        # length coefficient
+        straight_dist = ((origin_pt[0] - last_pt[0]) ** 2 + (origin_pt[1] - last_pt[1]) ** 2) ** 0.5
+        seg  = np.diff(points, axis=0)
+        total_dist = np.sum(np.hypot(seg[:, 0], seg[:, 1]))
+        # nomalize
+        w_len = total_dist / straight_dist * 100 - 100
+        if w_len < 0:
+            print(f"total_distance is negative value!")
+            sys.exit()
+        
+        # Ship Domin coefficient
+        w_SD_midpoint = self.calculate_SD_cost_midpoint()
+        w_SD_ccheckpoint = self.calculate_SD_cost_checkpoint()
+        w_SD = w_SD_midpoint + w_SD_ccheckpoint
+
+        # element coefficient
+        # distance coefficient
+        return w_len, w_SD, w_elem, w_dist
+    
+    def calculate_SD_cost_midpoint(self):
+        pass
+
+    def calculate_SD_cost_checkpoint(self):
+        pass
+
 
     def shipdomain(self):
         port = self.port
@@ -248,7 +329,6 @@ class PathPlanning():
         self.last_ver_idx = np.where(sample_map.ver_range == sample_map.last_xy[0, 0])
         self.last_hor_idx = np.where(sample_map.hor_range == sample_map.last_xy[0, 1])
 
-        print(f"### SET UP COMPLETE ###\n")
 
     def gen_init_path(self):
         if self.ps.init_path_algo == 'astar':
@@ -283,44 +363,62 @@ class PathPlanning():
             )
             original_initial_coord = original_initial_coord[:, ::-1]
 
-            initial_point_list = calculate_turning_points(
+            initial_points = calculate_turning_points(
                 original_initial_coord,
                 sample_map,
                 self.last_pt,
                 self.port
             )
-            for i, (x, y) in enumerate(initial_point_list, 1):
+            for i, (x, y) in enumerate(initial_points, 1):
                 print(f"  P{i:02d}: ({x:.1f}, {y:.1f})")
             # save
             if self.ps.save_init_path:
-                sample_map.path_xy = np.empty((0, 2))
-                for i in range(len(sample_map.path_node)):
-                    sample_map.path_xy = np.append(
-                        sample_map.path_xy,
-                        np.array(
-                            [
-                                [
-                                    sample_map.ver_range[sample_map.path_node[i][1]],
-                                    sample_map.hor_range[sample_map.path_node[i][0]],
-                                ]
-                            ]
-                        ),
-                        axis=0,
-                    )
-                sample_map.ShowMap_for_astar(
-                    filename=self.filename_astar,
-                    SD=self.SD,
-                    SD_sw=self.ps.show_SD_on_init_path,
-                    initial_point_list=initial_point_list,
-                )
-        else:
+                self.save_init_path(sample_map, initial_points)
+            #
+            initial_points = np.array(initial_points)
+            self.initial_points = initial_points
+        else: # manual
             for i, (x, y) in enumerate(self.initial_points, 1):
                 print(f"  P{i:02d}: ({x:.1f}, {y:.1f})")
-                
+    
+    def save_init_path(self, sample_map, initial_points):
+        sample_map.path_xy = np.empty((0, 2))
+        for i in range(len(sample_map.path_node)):
+            sample_map.path_xy = np.append(
+                sample_map.path_xy,
+                np.array(
+                    [
+                        [
+                            sample_map.ver_range[sample_map.path_node[i][1]],
+                            sample_map.hor_range[sample_map.path_node[i][0]],
+                        ]
+                    ]
+                ),
+                axis=0,
+            )
+        sample_map.ShowMap_for_astar(
+            filename=self.filename_astar,
+            SD=self.SD,
+            SD_sw=self.ps.show_SD_on_init_path,
+            initial_point_list=initial_points,
+        )
 
+    def cal_sigma_for_ddCMA(
+            self,
+            points: np.ndarray,
+            last_point: Tuple[float, float], 
+            *, min_sigma: float = 5.0, scale: float = 0.5
+    ) -> np.ndarray:
+        ver = points[:, 0]
+        hor = points[:, 1]
+        # 最終点は last_point との距離で補う（np.diff の append を利用）
+        ver_diffs = np.abs(np.diff(ver, append=last_point[0])) * scale
+        hor_diffs = np.abs(np.diff(hor, append=last_point[1])) * scale
+        # 直線経路で 0 が出ないように下限を設ける
+        ver_diffs = np.maximum(ver_diffs, min_sigma)
+        hor_diffs = np.maximum(hor_diffs, min_sigma)
 
-    def PP(self):
-        pass
+        return np.column_stack((ver_diffs, hor_diffs)).ravel()
 
     def update_planning_settings(self):
         port = self.dict_of_port(self.ps.port_number)
@@ -408,8 +506,6 @@ class PathPlanning():
             print("最適化の詳細なデータはcsvファイルに保存されます\n")
         else:
             print("最適化の詳細なデータはcsvファイルに保存されません\n")
-
-
 
     def dict_of_port(self, num):
         dictionary_of_port = {
