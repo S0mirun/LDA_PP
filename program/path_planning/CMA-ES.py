@@ -316,6 +316,7 @@ class PathPlanning():
         else:
             for i, (x, y) in enumerate(self.initial_points, 1):
                 print(f"  P{i:02d}: ({x:.1f}, {y:.1f})")
+                
 
 
     def PP(self):
