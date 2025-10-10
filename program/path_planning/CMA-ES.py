@@ -7,6 +7,7 @@ CMA-ES path optimization (A* init → element-based turning points → CMA-ES)
 """
 
 from __future__ import annotations
+import copy
 from enum import StrEnum
 import os
 import sys
@@ -81,15 +82,6 @@ class Settings:
         # restart
         self.restarts: int = 3
         self.increase_popsize_on_restart: bool = False
-
-        self.is_satisfied: bool = False
-        self.best_cost: float = float("inf")
-        self.best_mean: Optional[np.ndarray] = None
-        self.checkpoints: list[tuple[float, float]] = []
-        self.midpoints: list[tuple[float, float]] = []
-        self.psi_at_cp: list[float] = []
-        self.psi_at_mp: list[float] = []
-
         
         self.show_SD_on_optimized_path: bool = True
         self.save_opt_path: bool = True
@@ -154,10 +146,11 @@ class PathPlanning():
     def main(self):
         self.setup()
         self.init_path()
-        self.PP()
+        self.CMAES()
 
     def setup(self):
         self.update_planning_settings()
+        os.makedirs(f"{SAVE_DIR}/{self.port}", exist_ok=True)
         self.shipdomain()
         self.prepare_plots_and_variables()
         print(f"### SET UP COMPLETE ###\n")
@@ -172,22 +165,110 @@ class PathPlanning():
             "### MOVED TO THE OPTIMIZATION PROCESS ###\n"
         )
 
-    def PP(self):
+    def CMAES(self):
         w_len, w_SD, w_elem, w_dist = self.compute_cost_weights(self.initial_points)
-        best_dict = {}
+        # cmaをインスタンス化
+        ddcma = DdCma(xmean0=self.initial_points, sigma0=self.initial_D, seed=self.ps.seed)
+        checker = Checker(ddcma)
+        logger = Logger(ddcma)
+        
+        # 評価関数の呼び出し回数に関する初期設定
+        NEVAL_STANDARD = ddcma.lam * 5000
+
+        print("Start with first population size: " + str(ddcma.lam))
+        print("Dimension: " + str(ddcma.N))
+        print(f"NEVAL_STANDARD: {NEVAL_STANDARD}")
+        print('Path optimization start\n')
         #
+        total_neval = 0 # total number of f-calls(number of evaluation)
+        best_dict = {}
+        time_start = time.time()
+        # per-restart loop
         for restart in range(self.ps.restarts):
+            # init per-restart state
+            is_satisfied = False
             best_dict[restart] = {
-                    "fbestsofar": self.ps.fbestsofar,
-                    "best_mean_sofar": self.ps.best_mean_sofar,
-                    "calculation_time": None,  # 後で更新
-                    "cp_list": self.ps.cp_list,
-                    "mp_list": self.ps.mp_list,
-                    "psi_list_at_cp": self.ps.psi_list_at_cp,
-                    "psi_list_at_mp": self.ps.psi_list_at_mp
-                }
-            each_cal_start_time = time.time()
-            while not self.ps.is_satisfied:
+                "best_cost_so_far": float("inf"),
+                "best_mean_sofar": None,
+                "calculation_time": None,
+                "cp_list": None,
+                "mp_list": None,
+                "psi_list_at_cp": None,
+                "psi_list_at_mp": None,
+            }
+
+            t0 = time.time()
+
+            # CMA-ES main loop
+            while not is_satisfied:
+                ddcma.onestep(func=self.path_evaluate)
+
+                # best of this iteration (onestep sorts; idx[0] is best)
+                best_cost = float(np.min(ddcma.arf))
+                best_mean = ddcma.arx[int(ddcma.idx[0])].copy()
+
+                # update global best in this restart
+                if best_cost < best_dict[restart]["best_cost_so_far"]:
+                    best_dict[restart]["best_cost_so_far"] = best_cost
+                    best_dict[restart]["best_mean_sofar"] = best_mean
+                    best_dict[restart]["cp_list"] = cp_list
+                    best_dict[restart]["mp_list"] = mp_list
+                    best_dict[restart]["psi_list_at_cp"] = psi_list_at_cp
+                    best_dict[restart]["psi_list_at_mp"] = psi_list_at_mp
+
+                # check stopping criteria
+                is_satisfied, condition = checker()
+
+                # periodic logging
+                if ddcma.t % 10 == 0:
+                    print(ddcma.t, ddcma.neval, best_cost, best_dict[restart]["best_cost_so_far"])
+                    logger()
+
+            # result
+            logger(condition)
+            elapsed = time.time() - t0
+            best_dict[restart]["calculation_time"] = elapsed
+            print(f"Terminated with condition: {condition}")
+            print(f"Restart {restart} time: {elapsed:.2f} s")
+
+            # save
+            cp_list, mp_list, psi_list_at_cp, psi_list_at_mp = self.figure_output(
+                best_dict[restart]["best_mean_sofar"],
+                restart,
+                initial_point_list=self.initial_points,
+            )
+            best_dict[restart]["cp_list"] = cp_list
+            best_dict[restart]["mp_list"] = mp_list
+            best_dict[restart]["psi_list_at_cp"] = psi_list_at_cp
+            best_dict[restart]["psi_list_at_mp"] = psi_list_at_mp
+
+            # prepare next restart
+            total_neval += ddcma.neval
+            print(f"total number of evaluate function calls: {total_neval}\n")
+
+            # restart if below the evaluation budget
+            if total_neval < NEVAL_STANDARD:
+                if not self.ps.increase_popsize_on_restart:
+                    popsize = ddcma.lam
+                else:
+                    popsize = ddcma.lam * 2
+                seed *= 2  # change seed to avoid converging to the same solution
+                ddcma = DdCma(xmean0=self.initial_points, sigma0=self.initial_D, lam=popsize, seed=self.seed)
+                checker = Checker(ddcma)
+                logger.setcma(ddcma)
+                print(f"Restart with popsize: {ddcma.lam}")
+            else:
+                print("Path optimization completed")
+                break
+    
+        time_end = time.time()
+        cma_caltime = time_end - time_start
+        print(f"""Path optimization completed in {cma_caltime:.2f} s.
+
+        best_cost_so_far の値とその値を記録した平均の遷移:
+        {'='*50}
+        """)
+        self.print_result(best_dict)
 
 
     def compute_cost_weights(self, initial_pt):
@@ -225,6 +306,70 @@ class PathPlanning():
     def calculate_SD_cost_checkpoint(self):
         pass
 
+    def path_evaluate(self):
+        
+        pass
+
+    def figure_output(self, best_mean, restart, initial_points):
+        path_xy = best_mean
+        sample_map = self.sample_map
+        #
+        path_coord = path_xy.reshape(-1, 2)
+        path_coord = [
+            (round_by_pitch(ver, self.ps.gridpitch), round_by_pitch(hor, self.ps.gridpitch))
+            for ver, hor in path_coord
+        ]
+        path_coord = [tuple(coord) for coord in path_coord]
+        path_coord_idx = [
+            (int(np.argmin(np.abs(sample_map.ver_range - ver))),
+            int(np.argmin(np.abs(sample_map.hor_range - hor))))
+            for ver, hor in path_coord
+        ]
+        sample_map.path_node = path_coord_idx
+        #
+        sample_map.path_xy = np.empty((0,2))
+        path_coord_fig = copy.deepcopy(path_coord)
+
+        for i in range(len(sample_map.path_node)):
+            sample_map.path_xy = np.append(sample_map.path_xy,
+                    np.array([[sample_map.ver_range[sample_map.path_node[i][0]],
+                                sample_map.hor_range[sample_map.path_node[i][1]]]]),
+                    axis = 0)
+        print(f"\nsample_map.path_xy:     {sample_map.path_xy}")
+        # save the map
+        cp_list, mp_list, psi_at_cp, psi_at_mp = sample_map.ShowMap(
+            filename=f"{SAVE_DIR}/{self.port}/Path_by_CMA_{self.port['name']}_{restart}.png",
+            SD=self.SD,
+            initial_point_list=initial_points,
+            optimized_point_list=path_coord_fig,
+            SD_sw=self.ps.show_SD_on_optimized_path,
+        )
+
+        return cp_list, mp_list, psi_at_cp, psi_at_mp
+
+    def print_result(self, best_dict):
+        for restart, values in best_dict.items():
+            best_cost_so_far = values["best_cost_so_far"]
+            best_mean_sofar = values["best_mean_sofar"]
+            calculation_time = values["calculation_time"]
+            pairs = "\n".join(
+                f"  ({best_mean_sofar[i]:.6f}, {best_mean_sofar[i+1]:.6f})"
+                for i in range(0, len(best_mean_sofar), 2)
+            )
+            print(
+                f"\n[Restart {restart}]\n"
+                f"  best_cost_so_far: {best_cost_so_far:.6f}\n"
+                f"  計算時間: {calculation_time:.2f} s\n"
+                f"  best_mean_sofar:\n{pairs}"
+            )
+        print("\n"+"=" * 50+"\n")
+        smallest_evaluation_key = min(best_dict, key=lambda k: best_dict[k]["best_cost_so_far"])
+        print(f"最も評価値が小さかった試行は {smallest_evaluation_key} 番目\n")
+        print(f"最小評価値: {best_dict[smallest_evaluation_key]['best_cost_so_far']}\n")
+        print(f"  対応する最適解 (ver, hor):")
+        best_solution = best_dict[smallest_evaluation_key]['best_mean_sofar']
+        for i in range(0, len(best_solution), 2):
+            print(f"({best_solution[i]:.6f}, {best_solution[i+1]:.6f})")
 
     def shipdomain(self):
         port = self.port
@@ -258,7 +403,6 @@ class PathPlanning():
         sample_map.a_SD = df['a_SD'].values[0]
         sample_map.b_SD = df['b_SD'].values[0]
         #
-        self.port = port
         self.sample_map = sample_map
 
     def prepare_plots_and_variables(self):
@@ -423,6 +567,7 @@ class PathPlanning():
     def update_planning_settings(self):
         port = self.dict_of_port(self.ps.port_number)
         self.port = port
+
         #
         if self.ps.start_end_mode == 'auto':
             self.weight_of_SD = 20
