@@ -178,7 +178,6 @@ def plot_one_route_and_save(ax, csv_path, top_df, coast_df, linewidth=0.5):
             linewidth=linewidth, alpha=0.5, zorder=3)
     # ship 
     ax = plot_ship(ax, df)
-
     #zoom
     axins = inset_axes(ax, width="35%", height="35%", loc="upper right", borderpad=0.6)
     axins.set_aspect("equal")
