@@ -9,6 +9,7 @@ CMA-ES path optimization (A* init → element-based turning points → CMA-ES)
 from __future__ import annotations
 import copy
 from enum import StrEnum
+import glob
 import os
 import sys
 import time
@@ -18,6 +19,7 @@ from typing import Iterable, Tuple, Optional
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib import gridspec
 
 import utils.PP.Astar_for_CMAES
 import utils.PP.graph_by_taneichi
@@ -25,6 +27,7 @@ from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.MakeDictionary_and_StackedBarGraph import new_filtered_dict
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
 from utils.PP.subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
+from utils.PP.MultiPlot import RealTraj
 
 PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
 PYSIM_DIR = os.path.join(PROGRAM_DIR, "py-ship-simulator-main/py-ship-simulator-main")
@@ -36,6 +39,7 @@ DIR = os.path.dirname(__file__)
 dirname = os.path.splitext(os.path.basename(__file__))[0]
 SAVE_DIR = f"{DIR}/../../outputs/{dirname}"
 os.makedirs(SAVE_DIR, exist_ok=True)
+TMP_DIR = f"{DIR}/../../raw_datas/tmp"
 
 
 class ParamMode(StrEnum):
@@ -63,7 +67,6 @@ class Settings:
         
         self.save_init_path: bool = True
         self.show_SD_on_init_path: bool = True
-        self.enable_multiplot: bool = True
         self.gridpitch: float = 5.0 #[m]
         self.gridpitch_for_Astar: float = 5.0 #[m]
         self.range_type:float = 1
@@ -85,6 +88,7 @@ class Settings:
         
         self.show_SD_on_optimized_path: bool = True
         self.save_opt_path: bool = True
+        self.enable_multiplot: bool = True
 
 def sigmoid(x, a, b, c):
     return a/(b + np.exp(c*x))
@@ -147,6 +151,9 @@ class PathPlanning():
         self.setup()
         self.init_path()
         self.CMAES()
+        # result
+        self.print_result(self.best_dict)
+        self.show_result_fig(self.best_dict)
 
     def setup(self):
         self.update_planning_settings()
@@ -268,7 +275,9 @@ class PathPlanning():
         best_cost_so_far の値とその値を記録した平均の遷移:
         {'='*50}
         """)
-        self.print_result(best_dict)
+
+        self.logger = logger
+        self.best_dict = best_dict
 
 
     def compute_cost_weights(self, initial_pt):
@@ -346,30 +355,6 @@ class PathPlanning():
         )
 
         return cp_list, mp_list, psi_at_cp, psi_at_mp
-
-    def print_result(self, best_dict):
-        for restart, values in best_dict.items():
-            best_cost_so_far = values["best_cost_so_far"]
-            best_mean_sofar = values["best_mean_sofar"]
-            calculation_time = values["calculation_time"]
-            pairs = "\n".join(
-                f"  ({best_mean_sofar[i]:.6f}, {best_mean_sofar[i+1]:.6f})"
-                for i in range(0, len(best_mean_sofar), 2)
-            )
-            print(
-                f"\n[Restart {restart}]\n"
-                f"  best_cost_so_far: {best_cost_so_far:.6f}\n"
-                f"  計算時間: {calculation_time:.2f} s\n"
-                f"  best_mean_sofar:\n{pairs}"
-            )
-        print("\n"+"=" * 50+"\n")
-        smallest_evaluation_key = min(best_dict, key=lambda k: best_dict[k]["best_cost_so_far"])
-        print(f"最も評価値が小さかった試行は {smallest_evaluation_key} 番目\n")
-        print(f"最小評価値: {best_dict[smallest_evaluation_key]['best_cost_so_far']}\n")
-        print(f"  対応する最適解 (ver, hor):")
-        best_solution = best_dict[smallest_evaluation_key]['best_mean_sofar']
-        for i in range(0, len(best_solution), 2):
-            print(f"({best_solution[i]:.6f}, {best_solution[i+1]:.6f})")
 
     def shipdomain(self):
         port = self.port
@@ -656,6 +641,7 @@ class PathPlanning():
         dictionary_of_port = {
             0: {
                 "name": "Osaka_port1A",
+                "bay": sakai_bay.port1A,
                 "start": [-1400.0, -800.0], # [-1400.0, -700.0]
                 "end": [0.0, -10.0],
                 "psi_start": 40,  # psi of start（degree）
@@ -666,6 +652,7 @@ class PathPlanning():
             },
             1: {
                 "name": "Tokyo_port2C",
+                "bay": Tokyo_bay.port2C,
                 "start": [-1400.0, -1100.0],
                 "end": [0.0, 0.0],
                 "psi_start": 45,
@@ -676,6 +663,7 @@ class PathPlanning():
             },
             2: {
                 "name": "Yokkaichi_port2B",
+                "bay": yokkaichi_bay.port2B,
                 "start": [2050.0, 2000.0], # [2200.0, 2000.0]
                 "end": [200.0, 100.0],
                 "psi_start": -125, # -140
@@ -686,6 +674,7 @@ class PathPlanning():
             },
             3: {
                 "name": "Else_port1",
+                "bay": else_bay.port1,
                 "start": [2500.0, 0.0],
                 "end": [350.0, 20.0],
                 "psi_start": -145,
@@ -696,6 +685,7 @@ class PathPlanning():
             },
             4: {
                 "name": "Osaka_port1B",
+                "bay": sakai_bay.port1B,
                 "start": [-1400.0, -800.0], # [-1400.0, -700.0]
                 "end": [0.0, 15.0],
                 "psi_start": 40,  # psi of start（degree）
@@ -706,6 +696,187 @@ class PathPlanning():
             }
         }
         return dictionary_of_port[num]
+    
+    def print_result(self, best_dict):
+        for restart, values in best_dict.items():
+            best_cost_so_far = values["best_cost_so_far"]
+            best_mean_sofar = values["best_mean_sofar"]
+            calculation_time = values["calculation_time"]
+            pairs = "\n".join(
+                f"  ({best_mean_sofar[i]:.6f}, {best_mean_sofar[i+1]:.6f})"
+                for i in range(0, len(best_mean_sofar), 2)
+            )
+            print(
+                f"\n[Restart {restart}]\n"
+                f"  best_cost_so_far: {best_cost_so_far:.6f}\n"
+                f"  計算時間: {calculation_time:.2f} s\n"
+                f"  best_mean_sofar:\n{pairs}"
+            )
+        print("\n"+"=" * 50+"\n")
+        smallest_evaluation_key = min(best_dict, key=lambda k: best_dict[k]["best_cost_so_far"])
+        print(f"最も評価値が小さかった試行は {smallest_evaluation_key} 番目\n")
+        print(f"最小評価値: {best_dict[smallest_evaluation_key]['best_cost_so_far']}\n")
+        print(f"  対応する最適解 (ver, hor):")
+        best_solution = best_dict[smallest_evaluation_key]['best_mean_sofar']
+        for i in range(0, len(best_solution), 2):
+            print(f"({best_solution[i]:.6f}, {best_solution[i+1]:.6f})")
+        
+        self.smallest_evaluation_key = smallest_evaluation_key
+    
+    def show_result_fig(self, best_dict):
+        """
+        Contents of Figure
+        ------------------
+        fmin  xmean  D
+        S     sigma  beta
+        ------------------
+        fmin : Minimum evaluation value
+        xmean : Mean of x (x is an array containing veriables)
+        D : Deviation
+        S : Standat deviation
+        sigma : Parameters for the scale of the search range of the optimization
+        beta : Parameters that control the frequency and intensity of matrix updates
+        """
+        #
+        port        = self.port
+        points      = self.initial_points
+        SD          = self.SD
+        sample_map  = self.sample_map
+        logger      = self.logger
+        best_key    = self.smallest_evaluation_key
+        folder_path = f"{SAVE_DIR}/{port['name']}"
+
+        # logger plot
+        fig, axdict = logger.plot()
+        for ax_name, ax in axdict.items():
+            if ax_name != "xmean":
+                ax.set_yscale("log")
+        plt.tight_layout()
+        plt.savefig(f"{folder_path}/Result_of_CMA_{port['name']}.png")
+
+        # multiplot
+        if self.ps.enable_multiplot:
+            pointsize = 2
+            fig = plt.figure(figsize=(12, 8), dpi=150, constrained_layout=True)
+            gs = gridspec.GridSpec(4, 3, figure=fig)
+            ax1 = fig.add_subplot(gs[:, 0:2])
+
+            # map
+            df_map = pd.read_csv(f"output/real_port_csv/for_thesis_{port['name']}.csv")
+            map_X, map_Y = df_map["x [m]"].values, df_map["y [m]"].values
+            ax1.fill_betweenx(map_X, map_Y, facecolor="gray", alpha=0.3)
+            ax1.plot(map_Y, map_X, color="k", linestyle="--", lw=0.5, alpha=0.8)
+
+            # captain's routes
+            for f in glob.glob(f'tmp/_{port["name"]}/*.csv'):
+                rt = RealTraj()
+                rt.input_csv(f, f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
+                ax1.plot(rt.Y, rt.X, color="gray", ls="-", marker="D", markersize=2, alpha=0.8, lw=1.0, zorder=1)
+            legend_captain = plt.Line2D([0], [0], linestyle="-", marker="D", markersize=2, color="gray", alpha=0.8, lw=1.0, label="Captain's Route")
+
+            # key points
+            start_point  = (sample_map.start_xy[0, 0],  sample_map.start_xy[0, 1])
+            end_point    = (sample_map.end_xy[0, 0],    sample_map.end_xy[0, 1])
+            origin_point = (sample_map.origin_xy[0, 0], sample_map.origin_xy[0, 1])
+            last_point   = (sample_map.last_xy[0, 0],   sample_map.last_xy[0, 1])
+
+            # initial points
+            pts = np.asarray(points, dtype=float)
+            ax1.scatter(pts[:, 1], pts[:, 0], color="#03AF7A", s=20, zorder=4)
+            legend_initial = plt.Line2D([0], [0], marker="o", color="w",
+                                        markerfacecolor="#03AF7A", markersize=pointsize,
+                                        label="Initial Point")
+
+            full_initial_path = np.vstack([
+                np.asarray(start_point,  float),
+                np.asarray(origin_point, float),
+                pts,
+                np.asarray(last_point,   float),
+                np.asarray(end_point,    float),
+            ])
+            ax1.plot(full_initial_path[:, 1], full_initial_path[:, 0],
+                    color="#03AF7A", linestyle="-", linewidth=1.5, alpha=0.8, zorder=2)
+
+            # optimized path + SD
+            cp_list       = best_dict[best_key]["cp_list"]
+            mp_list       = best_dict[best_key]["mp_list"]
+            psi_at_cp     = best_dict[best_key]["psi_list_at_cp"]
+            psi_at_mp     = best_dict[best_key]["psi_list_at_mp"]
+
+            cp_hor = [h for v, h in cp_list]
+            cp_ver = [v for v, h in cp_list]
+            ax1.scatter(cp_hor, cp_ver, color="#005AFF", marker="o", s=25, zorder=4)
+            legend_way = plt.Line2D([0], [0], marker="o", color="w",
+                                    markerfacecolor="#005AFF", markersize=pointsize,
+                                    label="Optimized Point")
+
+            theta = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(10))
+            theta_closed = np.append(theta, theta[0])
+
+            # SD at CP
+            for (v, h), psi in zip(cp_list, psi_at_cp):
+                dist  = np.hypot(h - sample_map.end_xy[0, 1], v - sample_map.end_xy[0, 0])
+                speed = sample_map.b_ave * dist**sample_map.a_ave + sample_map.b_SD * dist**sample_map.a_SD
+                r     = np.array([SD.distance(speed, t) for t in theta] + [SD.distance(speed, theta[0])])
+                ax1.plot(h + r * np.sin(theta_closed + psi),
+                        v + r * np.cos(theta_closed + psi),
+                        lw=0.6, color="#005AFF", ls="--", zorder=3)
+            legend_SD = plt.Line2D([0], [0], linestyle="--", color="#005AFF", lw=1.0, label="Ship Domain")
+
+            # SD at MP
+            for (v, h), psi in zip(mp_list, psi_at_mp):
+                dist  = np.hypot(h - sample_map.end_xy[0, 1], v - sample_map.end_xy[0, 0])
+                speed = sample_map.b_ave * dist**sample_map.a_ave + sample_map.b_SD * dist**sample_map.a_SD
+                r     = np.array([SD.distance(speed, t) for t in theta] + [SD.distance(speed, theta[0])])
+                ax1.plot(h + r * np.sin(theta_closed + psi),
+                        v + r * np.cos(theta_closed + psi),
+                        lw=0.8, color="#005AFF", ls="--")
+
+            # optimized path polyline
+            path_points = [start_point, origin_point] + [(v, h) for v, h in cp_list] + [last_point, end_point]
+            path_points = np.asarray(path_points, float)
+            ax1.plot(path_points[:, 1], path_points[:, 0],
+                    color="#005AFF", linestyle="-", linewidth=2.5, alpha=0.8, zorder=3)
+
+            # start/end/origin/last
+            ax1.scatter(sample_map.start_xy[0, 1], sample_map.start_xy[0, 0], color="k", s=20, zorder=4)
+            ax1.text(sample_map.start_xy[0, 1], sample_map.start_xy[0, 0] + (60 * start_positive_minus),
+                    "start", va="center", ha="right", fontsize=20)
+            ax1.scatter(sample_map.end_xy[0, 1], sample_map.end_xy[0, 0], color="k", s=20, zorder=4)
+            ax1.text(sample_map.end_xy[0, 1], sample_map.end_xy[0, 0] + (60 * end_positive_minus),
+                    "end", va="center", ha="left", fontsize=20)
+            ax1.scatter(sample_map.origin_xy[0, 1], sample_map.origin_xy[0, 0], color="#FF4B00", s=20, zorder=4)
+            ax1.scatter(sample_map.last_xy[0, 1],   sample_map.last_xy[0, 0],   color="#FF4B00", s=20, zorder=4)
+            legend_fixed = plt.Line2D([0], [0], marker="o", color="w",
+                                    markerfacecolor="#FF4B00", markersize=pointsize,
+                                    label="Fixed Point")
+
+            # axes/ticks
+            hor_lim = [port["hor_range"][0], port["hor_range"][1]]
+            ver_lim = [port["ver_range"][0], port["ver_range"][1]]
+            ax1.set_xlim(*hor_lim)
+            ax1.set_ylim(*ver_lim)
+
+            tick_int = 500
+            x_start = int(np.floor(hor_lim[0] / tick_int) * tick_int)
+            x_end   = int(np.ceil(hor_lim[1] / tick_int) * tick_int)
+            y_start = int(np.floor(ver_lim[0] / tick_int) * tick_int)
+            y_end   = int(np.ceil(ver_lim[1] / tick_int) * tick_int)
+            ax1.set_xticks(np.arange(x_start, x_end + tick_int, tick_int))
+            ax1.set_yticks(np.arange(y_start, y_end + tick_int, tick_int))
+            ax1.set_xticklabels(np.arange(x_start, x_end + tick_int, tick_int).astype(int), rotation=90)
+            ax1.set_yticklabels(np.arange(y_start, y_end + tick_int, tick_int).astype(int))
+
+            ax1.set_aspect("equal")
+            ax1.grid()
+            ax1.set_xlabel(r"$Y\,\rm{[m]}$")
+            ax1.set_ylabel(r"$X\,\rm{[m]}$")
+            ax1.legend(handles=[legend_initial, legend_way, legend_fixed, legend_captain, legend_SD])
+
+            plt.tight_layout()
+            fig.savefig(f"{folder_path}/Multiplot_{port['name']}.png", bbox_inches="tight", pad_inches=0.05)
+            plt.close()
+
 
 if __name__ == "__main__":
     ps = Settings()
