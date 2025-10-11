@@ -470,15 +470,25 @@ class PathPlanning:
 
             t0 = time.time()
 
-            # ---- Progress bar for this restart (minimal right-side info) ----
+            # --- Progress bar: show only Restart, %, eval/s, 試行数/Max, best_sofar ---
             pbar = tqdm(
                 total=NEVAL_STANDARD,
                 desc=f"Restart {restart}",
                 dynamic_ncols=True,
-                bar_format="{l_bar}{bar} | {postfix}",  # 右側は postfix のみ
+                bar_format="{desc}: {percentage:.0f}%|{bar}| {postfix}",
                 mininterval=0.2,
+                smoothing=0.1,
             )
             last_neval = ddcma.neval
+
+            def _refresh_postfix():
+                rate = pbar.format_dict.get("rate")
+                eval_per_s = f"{rate:.1f}" if rate is not None else "–"
+                trials_str = f"{ddcma.neval}/{NEVAL_STANDARD}"
+                best_sofar = best_dict[restart]["best_cost_so_far"]
+                pbar.set_postfix_str(
+                    f"eval/s={eval_per_s}  trials={trials_str}  best={best_sofar:.6g}"
+                )
 
             while not is_satisfied:
                 ddcma.onestep(func=self.path_evaluate)
@@ -492,29 +502,22 @@ class PathPlanning:
 
                 is_satisfied, condition = checker()
 
-                # ---- update progress by how many new evaluations happened ----
+                # Update progress by increase in evaluation count
                 if ddcma.neval > last_neval:
                     pbar.update(ddcma.neval - last_neval)
                     last_neval = ddcma.neval
+                    _refresh_postfix()
 
-                # ---- tagged, compact status every 10 iterations ----
                 if ddcma.t % 10 == 0:
-                    pbar.set_postfix(
-                        t=ddcma.t,
-                        eval=ddcma.neval,
-                        best=f"{best_cost:.6g}",
-                        best_sofar=f"{best_dict[restart]['best_cost_so_far']:.6g}",
-                    )
-                    print(
-                        f"t={ddcma.t}  "
-                        f"neval={ddcma.neval}  "
-                        f"cost={best_cost:.9g}  "
-                        f"best={best_dict[restart]['best_cost_so_far']:.9g}"
+                    pbar.write(
+                        f"neval:{ddcma.neval}  "
+                        f"cost:{best_cost:.9g}  "
+                        f"best:{best_dict[restart]['best_cost_so_far']:.9g}"
                     )
                     logger()
 
-            # 終了時の最終ステータスを一度だけ表示
-            pbar.set_postfix(stop=condition, best_sofar=f"{best_dict[restart]['best_cost_so_far']:.6g}")
+            # final bar state
+            _refresh_postfix()
             pbar.close()
 
             logger(condition)
@@ -747,7 +750,7 @@ class PathPlanning:
                 np.array([[sm.ver_range[sm.path_node[i][0]], sm.hor_range[sm.path_node[i][1]]]]),
                 axis=0,
             )
-        print(f"\nsample_map.path_xy:     {sm.path_xy}")
+        print(f"\n{sm.path_xy}")
 
         cp_list, mp_list, psi_at_cp, psi_at_mp = sm.ShowMap(
             filename=f"{SAVE_DIR}/{self.port['name']}/Path_by_CMA_{self.port['name']}_{restart}.png",
@@ -982,44 +985,44 @@ class PathPlanning:
         port = self.dict_of_port(self.ps.port_number)
         self.port = port
 
+        # --- start & end ---
         if self.ps.start_end_mode == ParamMode.AUTO:
             self.weight_of_SD = 20
-            print("\nstartとendの座標はデフォルト値です")
+            print("start_end : default")
         else:
             self.weight_of_SD = 20
             self.start_coord = [-600.0, -400.0]
             self.end_coord = [0.0, 0.0]
-            print(f"startの座標は{self.start_coord}です\nendの座標は{self.end_coord}です")
+            print("start_end : manual")
 
+        # --- psi (heading) ---
         if self.ps.psi_mode == ParamMode.AUTO:
-            print("\npsi_startとpsi_endの値はデフォルト値です\n")
+            print("psi : default")
         else:
             self.manual_psi_start = -20
             self.manual_psi_end = 10
-            print(f"psi_startの値は{self.manual_psi_start}\npsi_endの値は{self.manual_psi_end}")
+            print("psi : manual")
 
+        # --- steady course coefficient ---
         if self.ps.steady_course_coeff_mode == ParamMode.AUTO:
-            print("保針区間の長さを決める係数はデフォルト値です\n")
+            print("steady_course_coeff : default")
         else:
-            print(f"保針区間の長さを決める係数は0です\n")
+            print("steady_course_coeff : 0")
 
+        # --- init path algorithm & related flags ---
         if self.ps.init_path_algo == InitPathAlgo.ASTAR:
-            print(
-                "Astarアルゴリズムによって初期経路が探索され、その後、初期チェックポイントが与えられます\n"
-                f"探索におけるShip Domainの重み係数は sample_map.grid_pitch * {self.weight_of_SD} です"
-            )
+            print("init_path_algo : Astar")
+            print(f"weight_SD : grid_pitch*{self.weight_of_SD}")
             if self.ps.save_init_path:
-                if self.ps.show_SD_on_init_path:
-                    print("初期経路の図は Ship Domain の表示'有り'で保存されます\n")
-                else:
-                    print("初期経路の図は Ship Domain の表示'無し'で保存されます\n")
+                print("save_init_path : on")
+                print(f"init_SD : {'on' if self.ps.show_SD_on_init_path else 'off'}")
             else:
-                print("初期経路は図に保存されません\n")
+                print("save_init_path : off")
         else:
-            print("初期チェックポイントは手動設定です")
+            print("init_path_algo : Manual")
 
+        # --- ratios for cost weights (concise one-liner) ---
         print(
-            "最適化における各コストの重み係数は、初期のコスト比が以下になるように調整されます\n"
             f"{'項目':<12}{'比率'}\n"
             f"{'-'*25}\n"
             f"{'Length':<12}{self.ps.length_ratio}\n"
@@ -1028,8 +1031,10 @@ class PathPlanning:
             f"{'Distance':<12}{self.ps.distance_ratio}\n"
         )
 
-        if self.ps.save_opt_path:
-            print("最適化の詳細なデータはcsvファイルに保存されます\n" if self.ps.save_csv else "最適化の詳細なデータはcsvに保存されません\n")
+        # --- save options ---
+        print(f"save_opt_path : {'on' if self.ps.save_opt_path else 'off'}\n"
+              f"csv : {'on' if self.ps.save_csv else 'off'}"
+            )
 
     def dict_of_port(self, num):
         dictionary_of_port = {

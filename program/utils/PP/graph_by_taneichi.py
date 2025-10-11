@@ -209,7 +209,7 @@ class Map():
         plt.close()
         """
 
-    def ShowMap(self, filename=None, SD=None, initial_point_list=None, optimized_point_list=None, SD_sw=1):
+    def ShowMap(self, filename=None, SD=None, initial_point_list=None, optimized_point_list=None, SD_sw=True):
         # set glaph
         x_range = self.hor_range[-1] - self.hor_range[0]
         y_range = self.ver_range[-1] - self.ver_range[0]
@@ -279,7 +279,7 @@ class Map():
             ax.plot(all_points[:, 0], all_points[:, 1], lw=1.0, color='r', ls='-')
 
         # Show the SD
-        if SD_sw == 0:
+        if SD_sw:
             # check pointでのSDの描画
             # CPでのSDの方向を与える関数
             def cal_psi_at_checkpoint(ver_parent, hor_parent, ver_current, hor_current, ver_child, hor_child):
