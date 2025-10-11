@@ -4,8 +4,6 @@ CMA-ES path optimization (A* init → element-based turning points → CMA-ES)
 - Ship Domain at segment midpoint + checkpoint
 - Angle convention: vertical (X) = 0 deg, clockwise positive
 - Coordinate note: (ver, hor) = (X, Y)
-
-This file reproduces the legacy behavior (captain routes removed).
 """
 
 from __future__ import annotations
@@ -13,13 +11,13 @@ from enum import StrEnum
 import os
 import sys
 import time
-from typing import Tuple, List
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 # --- external project modules ---
 import utils.PP.Astar_for_CMAES as Astar
@@ -33,7 +31,7 @@ PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
 PYSIM_DIR = os.path.join(PROGRAM_DIR, "py-ship-simulator-main/py-ship-simulator-main")
 if PYSIM_DIR not in sys.path:
     sys.path.append(PYSIM_DIR)
-import pyshipsim  # noqa: E402
+import pyshipsim
 
 DIR = os.path.dirname(__file__)
 dirname = os.path.splitext(os.path.basename(__file__))[0]
@@ -96,7 +94,7 @@ class Settings:
         self.enable_multiplot: bool = True
         self.save_csv: bool = True
 
-        # label offsets
+        # label offsets (same as legacy behavior)
         self.start_label_offset_sign: int = +1
         self.end_label_offset_sign: int = -1
 
@@ -337,7 +335,7 @@ def undo_conversion(reference_hor_index, reference_ver_index, end_hor_coord, end
     return original[:, ::-1]  # (ver, hor)
 
 
-def calculate_turning_points(initial_coords: np.ndarray, sample_map, last_pt: np.ndarray, port: dict) -> List[tuple]:
+def calculate_turning_points(initial_coords: np.ndarray, sample_map, last_pt: np.ndarray, port: dict) -> list[tuple[float, float]]:
     """
     Parameters
     ----------
@@ -348,7 +346,7 @@ def calculate_turning_points(initial_coords: np.ndarray, sample_map, last_pt: np
     last_pt : array-like
         Last point (ver, hor) before berthing straight segment.
     port : dict
-        Port info including 'berth_type' (1: outbound, 2: inbound).
+        Port info including 'berth_type' (1: 出船, 2: 入船).
 
     Returns
     -------
@@ -357,7 +355,7 @@ def calculate_turning_points(initial_coords: np.ndarray, sample_map, last_pt: np
         The search stops once a point is closer than the berth-dependent threshold
         to `last_pt` (80 m for type=1, 120 m for type=2).
     """
-    turning_points: List[tuple] = []
+    turning_points = []
     current_index = 0
     bt = port["berth_type"]
     stop_thresh = 80.0 if bt == 1 else 120.0
@@ -424,16 +422,16 @@ class PathPlanning:
         os.makedirs(f"{SAVE_DIR}/{self.port['name']}", exist_ok=True)
         self.shipdomain()
         self.prepare_plots_and_variables()
-        print("### SET UP COMPLETE ###\n")
+        print(f"### SET UP COMPLETE ###\n")
 
     def init_path(self):
         self.gen_init_path()
         # sigma vector matches flattened xmean vector length
         self.initial_D = self.cal_sigma_for_ddCMA(self.initial_points, self.last_pt)
-        self.initial_vec = self.initial_points.ravel()  # flatten for CMA-ES
+        self.initial_vec = self.initial_points.ravel()  # <<< important: flatten for CMA-ES
         self.N = len(self.initial_vec)
         print(
-            f"Dimension N = {self.N}\n"
+            f"この最適化問題の次元Nは {self.N} です\n"
             "### INITIAL CHECKPOINTS AND sigma0 SETUP COMPLETED ###\n"
             "### MOVED TO THE OPTIMIZATION PROCESS ###\n"
         )
@@ -442,6 +440,7 @@ class PathPlanning:
         # compute auto scaling coefficients from initial solution
         self.compute_cost_weights(self.initial_points)
 
+        # --- CMA-ES expects 1D mean (N,) and sigma0 of same length ---
         ddcma = DdCma(xmean0=self.initial_vec, sigma0=self.initial_D, seed=self.ps.seed)
         checker = Checker(ddcma)
         logger = Logger(ddcma)
@@ -449,7 +448,7 @@ class PathPlanning:
         NEVAL_STANDARD = ddcma.lam * 5000
         print("Start with first population size:", ddcma.lam)
         print("Dimension:", ddcma.N)
-        print(f"NEVAL_STANDARD (eval budget): {NEVAL_STANDARD}")
+        print(f"NEVAL_STANDARD: {NEVAL_STANDARD}")
         print("Path optimization start\n")
 
         total_neval = 0
@@ -470,14 +469,16 @@ class PathPlanning:
             }
 
             t0 = time.time()
-            last_eval = 0
-            bar = tqdm(
+
+            # ---- Progress bar for this restart (minimal right-side info) ----
+            pbar = tqdm(
                 total=NEVAL_STANDARD,
-                desc=f"CMA-ES restart {restart+1}/{self.ps.restarts}",
-                unit="eval",
-                ncols=100,
-                leave=True,
+                desc=f"Restart {restart}",
+                dynamic_ncols=True,
+                bar_format="{l_bar}{bar} | {postfix}",  # 右側は postfix のみ
+                mininterval=0.2,
             )
+            last_neval = ddcma.neval
 
             while not is_satisfied:
                 ddcma.onestep(func=self.path_evaluate)
@@ -489,36 +490,39 @@ class PathPlanning:
                     best_dict[restart]["best_cost_so_far"] = best_cost
                     best_dict[restart]["best_mean_sofar"] = best_mean
 
-                # update tqdm by incremental evals
-                delta = int(ddcma.neval - last_eval)
-                if delta > 0:
-                    bar.update(delta)
-                    bar.set_postfix(
-                        gen=ddcma.t,
-                        evals=ddcma.neval,
-                        best=f"{best_cost:.6f}",
-                        best_so_far=f"{best_dict[restart]['best_cost_so_far']:.6f}",
-                    )
-                    last_eval = ddcma.neval
+                is_satisfied, condition = checker()
 
-                # labeled progress log every 10 generations
+                # ---- update progress by how many new evaluations happened ----
+                if ddcma.neval > last_neval:
+                    pbar.update(ddcma.neval - last_neval)
+                    last_neval = ddcma.neval
+
+                # ---- tagged, compact status every 10 iterations ----
                 if ddcma.t % 10 == 0:
-                    tqdm.write(
-                        f"[CMA-ES] gen={ddcma.t}  evals={ddcma.neval}  "
-                        f"best={best_cost:.6f}  best_so_far={best_dict[restart]['best_cost_so_far']:.6f}"
+                    pbar.set_postfix(
+                        t=ddcma.t,
+                        eval=ddcma.neval,
+                        best=f"{best_cost:.6g}",
+                        best_sofar=f"{best_dict[restart]['best_cost_so_far']:.6g}",
+                    )
+                    print(
+                        f"t={ddcma.t}  "
+                        f"neval={ddcma.neval}  "
+                        f"cost={best_cost:.9g}  "
+                        f"best={best_dict[restart]['best_cost_so_far']:.9g}"
                     )
                     logger()
 
-                is_satisfied, condition = checker()
+            # 終了時の最終ステータスを一度だけ表示
+            pbar.set_postfix(stop=condition, best_sofar=f"{best_dict[restart]['best_cost_so_far']:.6g}")
+            pbar.close()
 
-            bar.close()
             logger(condition)
             elapsed = time.time() - t0
             best_dict[restart]["calculation_time"] = elapsed
             print(f"Terminated with condition: {condition}")
             print(f"Restart {restart} time: {elapsed:.2f} s")
 
-            # save figure and compute cp/mp/psi lists (no ShowMap call)
             cp_list, mp_list, psi_list_at_cp, psi_list_at_mp = self.figure_output(
                 best_dict[restart]["best_mean_sofar"], restart, initial_points=self.initial_points
             )
@@ -533,6 +537,7 @@ class PathPlanning:
             if total_neval < NEVAL_STANDARD:
                 popsize = ddcma.lam if not self.ps.increase_popsize_on_restart else ddcma.lam * 2
                 cur_seed *= 2
+                # restart from the SAME initial mean as legacy code
                 ddcma = DdCma(xmean0=self.initial_vec, sigma0=self.initial_D, lam=popsize, seed=cur_seed)
                 checker = Checker(ddcma)
                 logger.setcma(ddcma)
@@ -544,7 +549,7 @@ class PathPlanning:
         self.cma_caltime = time.time() - time_start
         print(
             f"Path optimization completed in {self.cma_caltime:.2f} s.\n\n"
-            f"best_cost_so_far history:\n{'='*50}\n"
+            f"best_cost_so_far の値とその値を記録した平均の遷移:\n{'='*50}\n"
         )
 
         self.logger = logger
@@ -713,153 +718,46 @@ class PathPlanning:
 
         return float(costs[0]) if not batched else costs
 
-    # ----- helpers for psi lists used in figure_output -----
-
-    @staticmethod
-    def _psi_for_segment(p1: np.ndarray, p2: np.ndarray) -> float:
-        """Heading psi for segment p1->p2 using vertical=0°, clockwise positive (radians)."""
-        ver1, hor1 = p1
-        ver2, hor2 = p2
-        psi = np.deg2rad(90.0) - np.arctan2(ver2 - ver1, hor2 - hor1)
-        if psi > np.deg2rad(180.0):
-            psi = (np.deg2rad(360.0) - psi) * (-1.0)
-        return float(((psi + np.pi) % (2.0 * np.pi)) - np.pi)
-
-    @staticmethod
-    def _psi_for_checkpoint(parent: np.ndarray, current: np.ndarray, child: np.ndarray) -> float:
-        """Psi at checkpoint with half turning-angle adjustment and direction sign (radians)."""
-        v1 = np.array([current[1] - parent[1], current[0] - parent[0]], dtype=float)
-        v2 = np.array([child[1] - current[1], child[0] - current[0]], dtype=float)
-        m1 = np.linalg.norm(v1)
-        m2 = np.linalg.norm(v2)
-        if m1 == 0.0 or m2 == 0.0:
-            angle_rad = 0.0
-            direction = 0
-        else:
-            cos_theta = np.clip(np.dot(v1, v2) / (m1 * m2), -1.0, 1.0)
-            angle_rad = float(np.arccos(cos_theta))
-            cross = np.cross(v1, v2)
-            direction = -1 if cross > 0 else (1 if cross < 0 else 0)
-        base = PathPlanning._psi_for_segment(parent, current)
-        psi = base + 0.5 * angle_rad * direction
-        return float(((psi + np.pi) % (2.0 * np.pi)) - np.pi)
-
     def figure_output(self, best_mean, restart, initial_points):
         """
-        Draw optimized path figure (without using ShowMap) and return cp/mp lists with psi.
+        Save optimized path figure via sample_map.ShowMap, and return cp/mp lists with psi.
         """
         path_xy = np.asarray(best_mean, float)
         sm = self.sample_map
-        SD = self.SD
 
-        # checkpoints (CP): optimized points rounded to grid pitch
-        cp = path_xy.reshape(-1, 2)
-        cp = [(round_by_pitch(ver, self.ps.gridpitch), round_by_pitch(hor, self.ps.gridpitch)) for ver, hor in cp]
-        cp = [tuple(coord) for coord in cp]
-        cp_arr = np.asarray(cp, float)
+        path_coord = path_xy.reshape(-1, 2)
+        path_coord = [
+            (round_by_pitch(ver, self.ps.gridpitch), round_by_pitch(hor, self.ps.gridpitch))
+            for ver, hor in path_coord
+        ]
+        path_coord = [tuple(coord) for coord in path_coord]
+        path_coord_idx = [
+            (
+                int(np.argmin(np.abs(sm.ver_range - ver))),
+                int(np.argmin(np.abs(sm.hor_range - hor))),
+            )
+            for ver, hor in path_coord
+        ]
+        sm.path_node = path_coord_idx
 
-        # midpoints (MP): for segments [origin] + CP + [last]
-        origin = sm.origin_xy[0].astype(float)
-        last = sm.last_xy[0].astype(float)
-        full_poly = np.vstack([origin, cp_arr, last])
-        mp = [tuple(((full_poly[i] + full_poly[i + 1]) / 2.0)) for i in range(len(full_poly) - 1)]
+        sm.path_xy = np.empty((0, 2))
+        for i in range(len(sm.path_node)):
+            sm.path_xy = np.append(
+                sm.path_xy,
+                np.array([[sm.ver_range[sm.path_node[i][0]], sm.hor_range[sm.path_node[i][1]]]]),
+                axis=0,
+            )
+        print(f"\nsample_map.path_xy:     {sm.path_xy}")
 
-        # psi lists
-        psi_cp = []
-        for i in range(len(cp_arr)):
-            parent = origin if i == 0 else cp_arr[i - 1]
-            current = cp_arr[i]
-            child = cp_arr[i + 1] if i < len(cp_arr) - 1 else last
-            psi_cp.append(self._psi_for_checkpoint(parent, current, child))
-        psi_mp = [self._psi_for_segment(full_poly[i], full_poly[i + 1]) for i in range(len(full_poly) - 1)]
+        cp_list, mp_list, psi_at_cp, psi_at_mp = sm.ShowMap(
+            filename=f"{SAVE_DIR}/{self.port['name']}/Path_by_CMA_{self.port['name']}_{restart}.png",
+            SD=self.SD,
+            initial_point_list=initial_points,
+            optimized_point_list=path_coord,
+            SD_sw=self.ps.show_SD_on_optimized_path,
+        )
 
-        # draw figure similar to multiplot
-        folder_path = f"{SAVE_DIR}/{self.port['name']}"
-        fig = plt.figure(figsize=(12, 8), dpi=150, constrained_layout=True)
-        gs = gridspec.GridSpec(4, 3, figure=fig)
-        ax1 = fig.add_subplot(gs[:, 0:2])
-
-        # map
-        map_csv = f"{DIR}/../../outputs/real_port_csv/for_thesis_{self.port['name']}.csv"
-        if os.path.exists(map_csv):
-            df_map = pd.read_csv(map_csv)
-            map_X, map_Y = df_map["x [m]"].values, df_map["y [m]"].values
-            ax1.fill_betweenx(map_X, map_Y, facecolor="gray", alpha=0.3)
-            ax1.plot(map_Y, map_X, color="k", linestyle="--", lw=0.5, alpha=0.8)
-
-        # initial points
-        pts = np.asarray(initial_points, dtype=float)
-        ax1.scatter(pts[:, 1], pts[:, 0], color="#03AF7A", s=20, zorder=4)
-
-        # initial polyline
-        start_point = sm.start_xy[0].astype(float)
-        end_point = sm.end_xy[0].astype(float)
-        full_initial_path = np.vstack([start_point, origin, pts, last, end_point])
-        ax1.plot(full_initial_path[:, 1], full_initial_path[:, 0], color="#03AF7A", linestyle="-", linewidth=1.5, alpha=0.8, zorder=2)
-
-        # optimized CPs
-        cp_hor = [h for v, h in cp]
-        cp_ver = [v for v, h in cp]
-        ax1.scatter(cp_hor, cp_ver, color="#005AFF", marker="o", s=25, zorder=4)
-
-        # draw SD (CP + MP) if enabled
-        if self.ps.show_SD_on_optimized_path:
-            theta = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(10))
-            theta_closed = np.append(theta, theta[0])
-
-            # SD at CP
-            for (v, h), psi in zip(cp, psi_cp):
-                dist = np.hypot(h - sm.end_xy[0, 1], v - sm.end_xy[0, 0])
-                speed = sm.b_ave * dist ** sm.a_ave + sm.b_SD * dist ** sm.a_SD
-                r = np.array([SD.distance(speed, t) for t in theta] + [SD.distance(speed, theta[0])])
-                ax1.plot(h + r * np.sin(theta_closed + psi), v + r * np.cos(theta_closed + psi), lw=0.6, color="#005AFF", ls="--", zorder=3)
-
-            # SD at MP
-            for (v, h), psi in zip(mp, psi_mp):
-                dist = np.hypot(h - sm.end_xy[0, 1], v - sm.end_xy[0, 0])
-                speed = sm.b_ave * dist ** sm.a_ave + sm.b_SD * dist ** sm.a_SD
-                r = np.array([SD.distance(speed, t) for t in theta] + [SD.distance(speed, theta[0])])
-                ax1.plot(h + r * np.sin(theta_closed + psi), v + r * np.cos(theta_closed + psi), lw=0.8, color="#005AFF", ls="--")
-
-        # optimized polyline
-        path_points = [tuple(start_point), tuple(origin)] + [(v, h) for v, h in cp] + [tuple(last), tuple(end_point)]
-        path_points = np.asarray(path_points, float)
-        ax1.plot(path_points[:, 1], path_points[:, 0], color="#005AFF", linestyle="-", linewidth=2.5, alpha=0.8, zorder=3)
-
-        # start/end/origin/last markers
-        ax1.scatter(sm.start_xy[0, 1], sm.start_xy[0, 0], color="k", s=20, zorder=4)
-        ax1.text(sm.start_xy[0, 1], sm.start_xy[0, 0] + (60 * self.ps.start_label_offset_sign), "start", va="center", ha="right", fontsize=20)
-        ax1.scatter(sm.end_xy[0, 1], sm.end_xy[0, 0], color="k", s=20, zorder=4)
-        ax1.text(sm.end_xy[0, 1], sm.end_xy[0, 0] + (60 * self.ps.end_label_offset_sign), "end", va="center", ha="left", fontsize=20)
-        ax1.scatter(sm.origin_xy[0, 1], sm.origin_xy[0, 0], color="#FF4B00", s=20, zorder=4)
-        ax1.scatter(sm.last_xy[0, 1], sm.last_xy[0, 0], color="#FF4B00", s=20, zorder=4)
-
-        # axes/ticks
-        hor_lim = [self.port["hor_range"][0], self.port["hor_range"][1]]
-        ver_lim = [self.port["ver_range"][0], self.port["ver_range"][1]]
-        ax1.set_xlim(*hor_lim)
-        ax1.set_ylim(*ver_lim)
-
-        tick_int = 500
-        x_start = int(np.floor(hor_lim[0] / tick_int) * tick_int)
-        x_end = int(np.ceil(hor_lim[1] / tick_int) * tick_int)
-        y_start = int(np.floor(ver_lim[0] / tick_int) * tick_int)
-        y_end = int(np.ceil(ver_lim[1] / tick_int) * tick_int)
-        ax1.set_xticks(np.arange(x_start, x_end + tick_int, tick_int))
-        ax1.set_yticks(np.arange(y_start, y_end + tick_int, tick_int))
-        ax1.set_xticklabels(np.arange(x_start, x_end + tick_int, tick_int).astype(int), rotation=90)
-        ax1.set_yticklabels(np.arange(y_start, y_end + tick_int, tick_int).astype(int))
-
-        ax1.set_aspect("equal")
-        ax1.grid()
-        ax1.set_xlabel(r"$Y\,\rm{[m]}$")
-        ax1.set_ylabel(r"$X\,\rm{[m]}$")
-
-        plt.tight_layout()
-        fig.savefig(f"{folder_path}/Path_by_CMA_{self.port['name']}_{restart}.png", bbox_inches="tight", pad_inches=0.05)
-        plt.close()
-
-        return cp, mp, psi_cp, psi_mp
+        return cp_list, mp_list, psi_at_cp, psi_at_mp
 
     def shipdomain(self):
         port = self.port
@@ -872,19 +770,17 @@ class PathPlanning:
         enclosing = pyshipsim.EnclosingPointCollisionChecker()
         enclosing.reset(world_polys)
         self.enclosing = enclosing
-        print("Successfully imported data from csv")
+        print(f"Successfully imported data from csv\n")
 
         SD = ShipDomain_proposal()
         SD.initial_setting(f"{DIR}/../../outputs/303/mirror5/fitting_parameter.csv", sigmoid)
         self.SD = SD
+        print(f"Generating map from data\n")
 
-        print("Generating map from data")
-        t0 = time.time()
-        with tqdm(total=1, desc="Map generation", unit="task", ncols=100) as pbar:
-            sample_map = Glaph.Map.GenerateMapFromCSV(target_csv, self.ps.gridpitch_for_Astar)
-            pbar.update(1)
-        elapsed = time.time() - t0
-        print(f"Map generation is complete. Calculation time: {elapsed:.3f} s\n")
+        time_start_map_generation = time.time()
+        sample_map = Glaph.Map.GenerateMapFromCSV(target_csv, self.ps.gridpitch_for_Astar)
+        time_end_map_generation = time.time()
+        print(f"Map generation is complete.\nCalculation time : {time_end_map_generation - time_start_map_generation}\n")
 
         df = pd.read_csv(f"{DIR}/../../raw_datas/tmp/GuidelineFit_debug.csv")
         sample_map.a_ave = df["a_ave"].values[0]
@@ -955,13 +851,13 @@ class PathPlanning:
         if self.ps.psi_mode == ParamMode.AUTO:
             self.psi_start = np.deg2rad(self.port["psi_start"])
             self.psi_end = np.deg2rad(self.port["psi_end"])
-            print("psi_start and psi_end are default.\n")
+            print("\npsi_startとpsi_endの値はデフォルト値です\n")
         else:
             self.psi_start = np.deg2rad(self.manual_psi_start)
             self.psi_end = np.deg2rad(self.manual_psi_end)
 
         start_speed = min(sm.b_ave * d_se ** sm.a_ave + sm.b_SD * d_se ** sm.a_SD, self.ps.MAX_SPEED_KTS)
-        print(f"start speed is {start_speed:.3f} knots.\n")
+        print(f"start speed is {start_speed} knots.\n")
 
         origin_navigation_distance = start_speed * 1852.0 / 60.0
         u_start = np.array([np.cos(self.psi_start), np.sin(self.psi_start)])
@@ -974,10 +870,10 @@ class PathPlanning:
 
         if self.ps.steady_course_coeff_mode == ParamMode.AUTO:
             self.steady_course_coeff = 1.2
-            print("steady-course length coefficient is default.\n")
+            print(f"保針区間の長さを決める係数はデフォルト値です\n")
         else:
             self.steady_course_coeff = 0.0
-            print(f"steady-course length coefficient = {self.steady_course_coeff}\n")
+            print(f"保針区間の長さを決める係数は{self.steady_course_coeff}です\n")
 
         straight_dist = self.ps.L * self.steady_course_coeff if self.ps.enable_pre_berthing_straight_segment else 0.0
         u_end = np.array([np.cos(self.psi_end), np.sin(self.psi_end)])
@@ -1007,7 +903,7 @@ class PathPlanning:
                 enclosing_checker=self.enclosing,
             )
             astar_caltime = time.time() - time_start_astar
-            print(f"Astar algorithm took {astar_caltime:.3f} s\n")
+            print(f"Astar algorithm took {astar_caltime:.3f} [s]\n")
 
             original_initial_coord = undo_conversion(
                 self.end_hor_idx[0][0],
@@ -1042,41 +938,12 @@ class PathPlanning:
             if self.ps.show_SD_on_init_path
             else f"{SAVE_DIR}/{self.port['name']}/Initial_Path_by_Astar_without_SD.png"
         )
-
-        # draw a simple initial path figure (no ShowMap call)
-        fig = plt.figure(figsize=(12, 8), dpi=150, constrained_layout=True)
-        gs = gridspec.GridSpec(4, 3, figure=fig)
-        ax1 = fig.add_subplot(gs[:, 0:2])
-
-        map_csv = f"{DIR}/../../outputs/real_port_csv/for_thesis_{self.port['name']}.csv"
-        if os.path.exists(map_csv):
-            df_map = pd.read_csv(map_csv)
-            map_X, map_Y = df_map["x [m]"].values, df_map["y [m]"].values
-            ax1.fill_betweenx(map_X, map_Y, facecolor="gray", alpha=0.3)
-            ax1.plot(map_Y, map_X, color="k", linestyle="--", lw=0.5, alpha=0.8)
-
-        ip = np.asarray(initial_points, float)
-        start_point = sm.start_xy[0].astype(float)
-        end_point = sm.end_xy[0].astype(float)
-        origin = sm.origin_xy[0].astype(float)
-        last = sm.last_xy[0].astype(float)
-
-        ax1.scatter(ip[:, 1], ip[:, 0], color="#03AF7A", s=20)
-        full_initial_path = np.vstack([start_point, origin, ip, last, end_point])
-        ax1.plot(full_initial_path[:, 1], full_initial_path[:, 0], color="#03AF7A", linestyle="-", linewidth=1.5, alpha=0.8)
-
-        hor_lim = [self.port["hor_range"][0], self.port["hor_range"][1]]
-        ver_lim = [self.port["ver_range"][0], self.port["ver_range"][1]]
-        ax1.set_xlim(*hor_lim)
-        ax1.set_ylim(*ver_lim)
-        ax1.set_aspect("equal")
-        ax1.grid()
-        ax1.set_xlabel(r"$Y\,\rm{[m]}$")
-        ax1.set_ylabel(r"$X\,\rm{[m]}$")
-
-        plt.tight_layout()
-        fig.savefig(filename_astar, bbox_inches="tight", pad_inches=0.05)
-        plt.close()
+        sm.ShowMap_for_astar(
+            filename=filename_astar,
+            SD=self.SD,
+            SD_sw=self.ps.show_SD_on_init_path,
+            initial_point_list=initial_points,
+        )
 
     def cal_sigma_for_ddCMA(
         self,
@@ -1117,43 +984,43 @@ class PathPlanning:
 
         if self.ps.start_end_mode == ParamMode.AUTO:
             self.weight_of_SD = 20
-            print("start and end coordinates are default.")
+            print("\nstartとendの座標はデフォルト値です")
         else:
             self.weight_of_SD = 20
             self.start_coord = [-600.0, -400.0]
             self.end_coord = [0.0, 0.0]
-            print(f"start: {self.start_coord}\nend: {self.end_coord}")
+            print(f"startの座標は{self.start_coord}です\nendの座標は{self.end_coord}です")
 
         if self.ps.psi_mode == ParamMode.AUTO:
-            print("psi_start and psi_end are default.\n")
+            print("\npsi_startとpsi_endの値はデフォルト値です\n")
         else:
             self.manual_psi_start = -20
             self.manual_psi_end = 10
-            print(f"psi_start: {self.manual_psi_start}\npsi_end: {self.manual_psi_end}")
+            print(f"psi_startの値は{self.manual_psi_start}\npsi_endの値は{self.manual_psi_end}")
 
         if self.ps.steady_course_coeff_mode == ParamMode.AUTO:
-            print("steady-course length coefficient is default.\n")
+            print("保針区間の長さを決める係数はデフォルト値です\n")
         else:
-            print("steady-course length coefficient = 0\n")
+            print(f"保針区間の長さを決める係数は0です\n")
 
         if self.ps.init_path_algo == InitPathAlgo.ASTAR:
             print(
-                "Initial path is explored by A* and then initial checkpoints are provided.\n"
-                f"Ship Domain weight in search: sample_map.grid_pitch * {self.weight_of_SD}"
+                "Astarアルゴリズムによって初期経路が探索され、その後、初期チェックポイントが与えられます\n"
+                f"探索におけるShip Domainの重み係数は sample_map.grid_pitch * {self.weight_of_SD} です"
             )
             if self.ps.save_init_path:
                 if self.ps.show_SD_on_init_path:
-                    print("Initial path figure will be saved WITH Ship Domain.\n")
+                    print("初期経路の図は Ship Domain の表示'有り'で保存されます\n")
                 else:
-                    print("Initial path figure will be saved WITHOUT Ship Domain.\n")
+                    print("初期経路の図は Ship Domain の表示'無し'で保存されます\n")
             else:
-                print("Initial path figure will NOT be saved.\n")
+                print("初期経路は図に保存されません\n")
         else:
-            print("Initial checkpoints are set manually.")
+            print("初期チェックポイントは手動設定です")
 
         print(
-            "Cost weight ratios (auto-scaled from initial costs):\n"
-            f"{'Item':<12}{'Ratio'}\n"
+            "最適化における各コストの重み係数は、初期のコスト比が以下になるように調整されます\n"
+            f"{'項目':<12}{'比率'}\n"
             f"{'-'*25}\n"
             f"{'Length':<12}{self.ps.length_ratio}\n"
             f"{'SD':<12}{self.ps.SD_ratio}\n"
@@ -1162,9 +1029,7 @@ class PathPlanning:
         )
 
         if self.ps.save_opt_path:
-            print("Detailed optimization data will be saved to CSV.\n")
-        else:
-            print("Detailed optimization data will NOT be saved to CSV.\n")
+            print("最適化の詳細なデータはcsvファイルに保存されます\n" if self.ps.save_csv else "最適化の詳細なデータはcsvに保存されません\n")
 
     def dict_of_port(self, num):
         dictionary_of_port = {
@@ -1238,14 +1103,14 @@ class PathPlanning:
             print(
                 f"\n[Restart {restart}]\n"
                 f"  best_cost_so_far: {best_cost_so_far:.6f}\n"
-                f"  time: {calculation_time:.2f} s\n"
+                f"  計算時間: {calculation_time:.2f} s\n"
                 f"  best_mean_sofar:\n{pairs}"
             )
         print("\n" + "=" * 50 + "\n")
         smallest_evaluation_key = min(best_dict, key=lambda k: best_dict[k]["best_cost_so_far"])
-        print(f"Best trial index: {smallest_evaluation_key}\n")
-        print(f"Minimum cost: {best_dict[smallest_evaluation_key]['best_cost_so_far']}\n")
-        print("  Corresponding solution (ver, hor):")
+        print(f"最も評価値が小さかった試行は {smallest_evaluation_key} 番目\n")
+        print(f"最小評価値: {best_dict[smallest_evaluation_key]['best_cost_so_far']}\n")
+        print(f"  対応する最適解 (ver, hor):")
         best_solution = best_dict[smallest_evaluation_key]["best_mean_sofar"]
         for i in range(0, len(best_solution), 2):
             print(f"({best_solution[i]:.6f}, {best_solution[i+1]:.6f})")
@@ -1254,7 +1119,7 @@ class PathPlanning:
 
     def show_result_fig(self, best_dict):
         """
-        Plot CMA-ES logger results and a multi-plot map (no captain routes).
+        Plot CMA-ES logger results and a multi-plot map (without captain routes).
         """
         port = self.port
         points = self.initial_points
@@ -1275,7 +1140,7 @@ class PathPlanning:
         if not self.ps.enable_multiplot:
             return
 
-        # multiplot (same as previous but without captain's routes)
+        # ---- multiplot (no captain routes) ----
         pointsize = 2
         fig = plt.figure(figsize=(12, 8), dpi=150, constrained_layout=True)
         gs = gridspec.GridSpec(4, 3, figure=fig)
@@ -1293,7 +1158,7 @@ class PathPlanning:
         origin_point = (sm.origin_xy[0, 0], sm.origin_xy[0, 1])
         last_point = (sm.last_xy[0, 0], sm.last_xy[0, 1])
 
-        # initial points
+        # initial points and path
         pts = np.asarray(points, dtype=float)
         ax1.scatter(pts[:, 1], pts[:, 0], color="#03AF7A", s=20, zorder=4)
         legend_initial = plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="#03AF7A", markersize=pointsize, label="Initial Point")
@@ -1333,7 +1198,7 @@ class PathPlanning:
         path_points = np.asarray(path_points, float)
         ax1.plot(path_points[:, 1], path_points[:, 0], color="#005AFF", linestyle="-", linewidth=2.5, alpha=0.8, zorder=3)
 
-        # start/end/origin/last
+        # start/end/origin/last markers
         ax1.scatter(sm.start_xy[0, 1], sm.start_xy[0, 0], color="k", s=20, zorder=4)
         ax1.text(sm.start_xy[0, 1], sm.start_xy[0, 0] + (60 * self.ps.start_label_offset_sign), "start", va="center", ha="right", fontsize=20)
         ax1.scatter(sm.end_xy[0, 1], sm.end_xy[0, 0], color="k", s=20, zorder=4)
@@ -1404,7 +1269,7 @@ class PathPlanning:
         df = pd.concat([df, df_opt], axis=1)
 
         df.to_csv(csv_file_path, index=False)
-        print(f"Saved CSV: {csv_file_path}\n")
+        print(f"最適化の詳細情報を {csv_file_path} に保存しました。\n")
 
 
 if __name__ == "__main__":
