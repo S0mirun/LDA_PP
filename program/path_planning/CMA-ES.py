@@ -21,8 +21,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
 
-import utils.PP.Astar_for_CMAES
-import utils.PP.graph_by_taneichi
+import utils.PP.Astar_for_CMAES as Astar
+import utils.PP.graph_by_taneichi as Glaph
 from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.MakeDictionary_and_StackedBarGraph import new_filtered_dict
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
@@ -89,6 +89,124 @@ class Settings:
         self.show_SD_on_optimized_path: bool = True
         self.save_opt_path: bool = True
         self.enable_multiplot: bool = True
+
+class CostCalculator:
+    def __init__(self):
+        pass
+
+    def SD_midpoint(self, parent_pt, child_pt):
+        """
+        parent_pt, child_pt: (ver, hor)
+        戻り値: 正規化Ship Domainコスト（%）
+        """
+        ver_p, hor_p = parent_pt
+        ver_mid, hor_mid = (parent_pt + child_pt) /2
+        ver_c, hor_c = child_pt
+        #
+        psi = np.deg2rad(90) - np.arctan2(ver_c - ver_p, hor_c - hor_p)
+        if psi > np.deg2rad(180):
+            psi = (np.deg2rad(360) - psi) * (-1.0)
+        
+        # nomalize
+        contact_mid = self.sample_map.ship_domain_cost(
+            ver_mid, hor_mid, psi, self.SD, self.enclosing
+        )
+        normalized_contact_cost_mid = (contact_mid / Glaph.length_of_theta_list) * 100.0
+        return normalized_contact_cost_mid
+    
+    def SD_checkpoint(self, parent_pt, current_pt, child_pt):
+        """
+        parent_pt, current_pt, child_pt: (ver, hor)
+        戻り値: 正規化 Ship Domain コスト（%）
+        """
+        ver_p, hor_p = parent_pt
+        ver_c, hor_c = current_pt
+        ver_n, hor_n = child_pt
+
+        v1 = np.array([hor_c - hor_p, ver_c - ver_p])
+        v2 = np.array([hor_n - hor_c, ver_n - ver_c])
+
+        mag1 = np.linalg.norm(v1)
+        mag2 = np.linalg.norm(v2)
+
+        if mag1 == 0.0 or mag2 == 0.0:
+            angle_rad = 0.0
+            direction = 0
+        else:
+            cos_theta = np.clip(np.dot(v1, v2) / (mag1 * mag2), -1.0, 1.0)
+            angle_rad = np.arccos(cos_theta)
+            cross = np.cross(v1, v2)
+            direction = -1 if cross > 0 else (1 if cross < 0 else 0)  # 反時計回り: -1, 時計回り: 1
+
+        psi = np.deg2rad(90.0) - np.arctan2(ver_c - ver_p, hor_c - hor_p)
+        if psi > np.deg2rad(180.0):
+            psi = (np.deg2rad(360.0) - psi) * (-1.0)
+
+        psi = psi + 0.5 * angle_rad * direction
+        psi = (psi + np.pi) % (2.0 * np.pi) - np.pi  # [-pi, pi] に正規化
+
+        contact_cp = self.sample_map.ship_domain_cost(ver_c, hor_c, psi, self.SD, self.enclosing)
+        normalized_contact_cost_cp = (contact_cp / Glaph.length_of_theta_list) * 100.0
+        return normalized_contact_cost_cp
+    
+    def elem(self, parent_pt, current_pt, child_pt):
+        """
+        parent_pt, current_pt, child_pt: (ver, hor)
+        戻り値: 要素コスト（100 - 出現回数）
+        """
+        ver_p, hor_p = parent_pt
+        ver_c, hor_c = current_pt
+        ver_ch, hor_ch = child_pt
+
+        # --- 船速[kts]の推定（current→endの距離でモデル化） ---
+        end_ver, end_hor = self.sample_map.end_xy[0, 0], self.sample_map.end_xy[0, 1]
+        dist_ce = np.hypot(ver_c - end_ver, hor_c - end_hor)
+        current_speed = (
+            self.sample_map.b_ave * dist_ce ** (self.sample_map.a_ave)
+            + self.sample_map.b_SD * dist_ce ** (self.sample_map.a_SD)
+        )
+
+        # --- 速度ビンの決定 ---
+        if current_speed < self.speed_min:
+            speed_key = self.speed_min
+        elif current_speed >= self.speed_max:
+            speed_key = self.speed_max
+        else:
+            speed_key = None
+            for s0 in self.speed_bins:
+                if s0 <= current_speed < s0 + self.speed_interval:
+                    speed_key = s0
+                    break
+            if speed_key is None:
+                speed_key = self.speed_max  # フォールバック
+
+        # --- 角度（currentでの折れ角度：0~180°） ---
+        v1 = np.array([hor_c - hor_p,  ver_c - ver_p],  dtype=float)
+        v2 = np.array([hor_ch - hor_c, ver_ch - ver_c], dtype=float)
+        m1 = np.linalg.norm(v1)
+        m2 = np.linalg.norm(v2)
+        if m1 == 0.0 or m2 == 0.0:
+            angle_deg = 0.0
+        else:
+            cos_theta = np.clip(np.dot(v1, v2) / (m1 * m2), -1.0, 1.0)
+            angle_deg = float(np.degrees(np.arccos(cos_theta)))
+
+        # --- 角度ビンの決定 ---
+        if angle_deg >= self.angle_max:
+            angle_key = self.angle_max
+        else:
+            angle_key = None
+            for a0 in self.angle_bins:
+                if a0 <= angle_deg < a0 + self.angle_interval:
+                    angle_key = a0
+                    break
+            if angle_key is None:
+                angle_key = self.angle_max  # フォールバック
+
+        # --- 出現頻度からコスト化 ---
+        occurrences = self.new_filtered_dict[speed_key][angle_key]
+        return float(100 - occurrences)
+    
 
 def sigmoid(x, a, b, c):
     return a/(b + np.exp(c*x))
@@ -290,7 +408,7 @@ class PathPlanning():
         elem_ratio = 0.0                    # proportion_of_elements
         p2p_dist_ratio = 0.0                # proportion_of_distance_between_point_and_point
         #
-        # length coefficient
+        # 1.length weight
         straight_dist = ((origin_pt[0] - last_pt[0]) ** 2 + (origin_pt[1] - last_pt[1]) ** 2) ** 0.5
         seg  = np.diff(points, axis=0)
         total_dist = np.sum(np.hypot(seg[:, 0], seg[:, 1]))
@@ -300,21 +418,17 @@ class PathPlanning():
             print(f"total_distance is negative value!")
             sys.exit()
         
-        # Ship Domin coefficient
-        w_SD_midpoint = self.calculate_SD_cost_midpoint()
-        w_SD_ccheckpoint = self.calculate_SD_cost_checkpoint()
+        # 2.SD weight
+        w_SD_midpoint = self.calculate_SD_cost_midpoint(origin_pt, initial_pt)
+        w_SD_ccheckpoint = self.calculate_SD_cost_checkpoint(initial_pt[-2], initial_pt[-1], last_pt)
         w_SD = w_SD_midpoint + w_SD_ccheckpoint
 
-        # element coefficient
+        # 3.element weight
+        w_elem = self.caluculate_elem_cost()
         # distance coefficient
         return w_len, w_SD, w_elem, w_dist
     
-    def calculate_SD_cost_midpoint(self):
-        pass
-
-    def calculate_SD_cost_checkpoint(self):
-        pass
-
+        
     def path_evaluate(self):
         
         pass
@@ -376,7 +490,7 @@ class PathPlanning():
         print(f"Generating map from data\n")
         #
         time_start_map_generation = time.time()
-        sample_map = utils.PP.graph_by_taneichi.Map.GenerateMapFromCSV(target_csv, self.ps.gridpitch_for_Astar)
+        sample_map = Glaph.Map.GenerateMapFromCSV(target_csv, self.ps.gridpitch_for_Astar)
         #
         time_end_map_generation = time.time()
         map_generation_caltime = time_end_map_generation - time_start_map_generation
@@ -416,10 +530,10 @@ class PathPlanning():
             ver_max = +10
             hor_min = -20
             hor_max = +20
-        ver_min_round = utils.PP.graph_by_taneichi.Map.RoundRange(None, ver_min, sample_map.grid_pitch, 'min')
-        ver_max_round = utils.PP.graph_by_taneichi.Map.RoundRange(None, ver_max, sample_map.grid_pitch, 'max')
-        hor_min_round = utils.PP.graph_by_taneichi.Map.RoundRange(None, hor_min, sample_map.grid_pitch, 'min')
-        hor_max_round = utils.PP.graph_by_taneichi.Map.RoundRange(None, hor_max, sample_map.grid_pitch, 'max')
+        ver_min_round = Glaph.Map.RoundRange(None, ver_min, sample_map.grid_pitch, 'min')
+        ver_max_round = Glaph.Map.RoundRange(None, ver_max, sample_map.grid_pitch, 'max')
+        hor_min_round = Glaph.Map.RoundRange(None, hor_min, sample_map.grid_pitch, 'min')
+        hor_max_round = Glaph.Map.RoundRange(None, hor_max, sample_map.grid_pitch, 'max')
         sample_map.ver_range = np.arange(ver_min_round, ver_max_round+sample_map.grid_pitch/10, sample_map.grid_pitch)
         sample_map.hor_range = np.arange(hor_min_round, hor_max_round+sample_map.grid_pitch/10, sample_map.grid_pitch)
         #
@@ -465,9 +579,9 @@ class PathPlanning():
             time_start_astar = time.time()
             sample_map = self.sample_map
             #
-            utils.PP.graph_by_taneichi.Map.SetMaze(sample_map)
+            Glaph.Map.SetMaze(sample_map)
             weight = sample_map.grid_pitch * self.weight_of_SD
-            sample_map.path_node, sample_map.psi, astar_iteration = utils.PP.Astar_for_CMAES.astar(
+            sample_map.path_node, sample_map.psi, astar_iteration = Astar.astar(
                 sample_map, 
                 (self.origin_hor_idx[0][0], self.origin_ver_idx[0][0]),
                 (self.last_hor_idx[0][0], self.last_ver_idx[0][0]),
@@ -880,7 +994,8 @@ class PathPlanning():
 
 if __name__ == "__main__":
     ps = Settings()
-    path_planning = PathPlanning(ps)
+    cal = CostCalculator()
+    path_planning = PathPlanning(ps, cal)
     #
     path_planning.main()
     #
