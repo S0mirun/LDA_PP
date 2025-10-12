@@ -854,13 +854,13 @@ class PathPlanning:
         if self.ps.psi_mode == ParamMode.AUTO:
             self.psi_start = np.deg2rad(self.port["psi_start"])
             self.psi_end = np.deg2rad(self.port["psi_end"])
-            print("\npsi_startとpsi_endの値はデフォルト値です\n")
+            print("\npsi    :default\n")
         else:
             self.psi_start = np.deg2rad(self.manual_psi_start)
             self.psi_end = np.deg2rad(self.manual_psi_end)
 
         start_speed = min(sm.b_ave * d_se ** sm.a_ave + sm.b_SD * d_se ** sm.a_SD, self.ps.MAX_SPEED_KTS)
-        print(f"start speed is {start_speed} knots.\n")
+        print(f"start speed :{start_speed}[knots]")
 
         origin_navigation_distance = start_speed * 1852.0 / 60.0
         u_start = np.array([np.cos(self.psi_start), np.sin(self.psi_start)])
@@ -1274,7 +1274,7 @@ class PathPlanning:
         df = pd.concat([df, df_opt], axis=1)
 
         df.to_csv(csv_file_path, index=False)
-        print(f"最適化の詳細情報を {csv_file_path} に保存しました。\n")
+        print(f"CSV saved\n")
 
 
 if __name__ == "__main__":
