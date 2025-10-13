@@ -23,7 +23,7 @@ from tqdm.auto import tqdm
 import utils.PP.Astar_for_CMAES as Astar
 import utils.PP.graph_by_taneichi as Glaph
 from utils.PP.E_ddCMA import DdCma, Checker, Logger
-from utils.PP.Filtered_Dict import new_filtered_dict
+from utils.PP.Filtered_Dict import new_filtered_dict, get_transition_probs
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
 from utils.PP.subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
 
@@ -392,12 +392,6 @@ def calculate_turning_points(initial_coords: np.ndarray, sample_map, last_pt: np
             break
     return turning_points
 
-def _to_numeric_key_dict(d):
-    out = {}
-    for sk, sub in d.items():
-        sk_num = float(sk)
-        out[sk_num] = {int(ak): v for ak, v in sub.items()}
-    return out
 
 
 class PathPlanning:
@@ -804,7 +798,7 @@ class PathPlanning:
         self.cal.sample_map = self.sample_map
         self.cal.SD = self.SD
         self.cal.enclosing = self.enclosing
-        self.cal.new_filtered_dict = _to_numeric_key_dict(new_filtered_dict())
+        self.cal.new_filtered_dict = new_filtered_dict()
         self.cal.MAX_SPEED_KTS = float(self.ps.MAX_SPEED_KTS)
         self.cal.MIN_SPEED_KTS = float(self.ps.MIN_SPEED_KTS)
         self.cal.speed_interval = float(self.ps.speed_interval)

@@ -31,14 +31,14 @@ ANGLE_MIN = 5
 ANGLE_MAX = 60
 ANGLE_INTERVAL = 5
 THRESHOLD_PERCENT = 1
-NORMALIZATION_STANDARD = 100
+NORMALIZATION_STANDARD = 100  # integer percent sum=100
 
 N_STATES = 6
 TOPK_TRIGRAM = 18
 TOPK_FOURGRAM = 24
 ALPHA_SMOOTH = 0.0
 
-FIGURE_PLOT_SWITCH = True
+FIGURE_PLOT_SWITCH = True  # save figures
 # ===================
 
 # paths
@@ -52,7 +52,35 @@ os.makedirs(osp.join(SAVE_DIR, "csv"), exist_ok=True)
 white_red = LinearSegmentedColormap.from_list("white_red", ["#FFFFFF", "#FF0000"])
 
 
-# --------- Part A: コスト用辞書 ---------
+# ---------- utils for integer percent ----------
+def _largest_remainder_percent(row_probs: np.ndarray, total: int = 100) -> np.ndarray:
+    """
+    確率ベクトルを整数パーセントに丸め、合計 total（既定100）にする。
+    行の合計が0のときは全0。
+    """
+    s = float(np.nansum(row_probs))
+    if s <= 0.0:
+        return np.zeros_like(row_probs, dtype=int)
+    x = np.clip(row_probs, 0.0, None) / s * total
+    base = np.floor(x).astype(int)
+    rem = x - base
+    need = total - int(base.sum())
+    if need > 0:
+        idx = np.argsort(rem)[::-1][:need]
+        base[idx] += 1
+    return base.astype(int)
+
+def _matrix_to_percent_ints(P: np.ndarray, total: int = 100) -> np.ndarray:
+    """
+    行ごとに整数パーセントへ変換（合計=total、ゼロ行は全0）。
+    """
+    out = np.zeros_like(P, dtype=int)
+    for i in range(P.shape[0]):
+        out[i, :] = _largest_remainder_percent(P[i, :], total=total)
+    return out
+
+
+# --------- Part A: コスト用辞書（速度=floatキー、角度=intキー、整数%合計=100） ---------
 def load_filtered_df(csv_path: str, selected_elements):
     """
     CSVを読み込み、指定要素のみ抽出したDataFrameを返す。
@@ -71,26 +99,26 @@ def build_bins(speed_min=1.5, speed_max=9.5, interval=1.0,
     angle_cats = [0] + list(range(angle_min, angle_max, angle_interval)) + [60]
     return speed_bins, angle_cats
 
-def bin_speed_to_key(speed: float, speed_bins, speed_max: float) -> str:
+def bin_speed_to_key(speed: float, speed_bins, speed_max: float) -> float:
     """
-    実数速度を速度ビンに割当て、キー（文字列）を返す。speed_max 以上は speed_max。
+    実数速度を速度ビンに割当て、キー（float）を返す。speed_max 以上は speed_max。
     """
     step = speed_bins[1] - speed_bins[0] if len(speed_bins) >= 2 else SPEED_INTERVAL
     for b in speed_bins:
         if b <= speed < b + step:
-            return f"{b:.1f}"
-    return f"{speed_max:.1f}"
+            return float(b)
+    return float(speed_max)
 
-def bin_angle_to_key(diff_psi_abs: float) -> str:
+def bin_angle_to_key(diff_psi_abs: float) -> int:
     """
-    絶対回頭角を 0 / 5..55 / 60 に割当て、キー（文字列）を返す。
+    絶対回頭角を 0 / 5..55 / 60 に割当て、キー（int）を返す。
     """
     if diff_psi_abs < 5:
-        return "0"
+        return 0
     for a in range(5, 60, 5):
         if a <= diff_psi_abs < a + 5:
-            return str(a)
-    return "60"
+            return int(a)
+    return 60
 
 def build_new_filtered_dict(filtered_df: pd.DataFrame,
                             selected_elements=(1, 3, 5),
@@ -98,64 +126,71 @@ def build_new_filtered_dict(filtered_df: pd.DataFrame,
                             angle_min=5, angle_max=60, angle_interval=5,
                             threshold_percent=1, normalization_standard=100):
     """
-    フィルタ済みDFから new_filtered_dict を構築。各速度キーで合計=normalization_standard（整数配分）。
-    要素1,3は角度0とみなす。速度>=speed_maxは speed_max に集約。
+    フィルタ済みDFから new_filtered_dict を構築（キーは数値: 速度=float, 角度=int）。
+    各速度ビンで整数%に正規化し、合計=normalization_standard（既定100）。
+    要素1,3は角度0、速度>=speed_maxは speed_max に集約。
+    戻り値: dict[float, dict[int, int]]
     """
     speed_bins, angle_cats = build_bins(speed_min, speed_max, interval,
                                         angle_min, angle_max, angle_interval)
-    buckets = {f"{b:.1f}": [] for b in speed_bins}
-    buckets[f"{speed_max:.1f}"] = []
+    buckets = {float(b): [] for b in speed_bins}
+    buckets[float(speed_max)] = []
 
+    # assign rows to speed bins
     for _, row in filtered_df.iterrows():
         spd = float(row["knot"])
         key_speed = bin_speed_to_key(spd, speed_bins, speed_max)
         buckets[key_speed].append(row)
 
+    # drop sparse bins
     total_len = len(filtered_df)
     threshold = max(1, round(total_len * (threshold_percent / 100.0)))
     kept = {k: v for k, v in buckets.items() if len(v) >= threshold}
 
-    new_filtered = {}
+    new_filtered: dict[float, dict[int, int]] = {}
     for s_key, rows in kept.items():
-        counts = {str(a): 0 for a in angle_cats}
+        # count angles as raw counts
+        counts = {int(a): 0 for a in angle_cats}
         for row in rows:
             if int(row["element"]) in (1, 3):
-                a_key = "0"
+                a_key = 0
             else:
                 a_key = bin_angle_to_key(abs(float(row["diff_psi_raw"])))
             counts[a_key] = counts.get(a_key, 0) + 1
 
+        # normalize to integer percent sum=normalization_standard
         coef = max(1.0, len(rows) / float(normalization_standard))
-        tmp, tot = [], 0
+        tmp = []
+        total = 0
         for a_key in counts:
             val = counts[a_key] / coef
             integ = int(val)
             frac = val - integ
-            tmp.append((a_key, integ, frac))
-            tot += integ
+            tmp.append((int(a_key), int(integ), float(frac)))
+            total += int(integ)
 
         tmp.sort(key=lambda x: x[2], reverse=True)
         i = 0
-        while tot < normalization_standard and i < len(tmp):
+        while total < normalization_standard and i < len(tmp):
             a_key, integ, frac = tmp[i]
             tmp[i] = (a_key, integ + 1, frac)
-            tot += 1
+            total += 1
             i += 1
 
-        new_filtered[s_key] = {a_key: integ for a_key, integ, _ in tmp}
-        if "60" not in new_filtered[s_key]:
-            new_filtered[s_key]["60"] = 0
+        new_filtered[float(s_key)] = {int(a_key): int(integ) for a_key, integ, _ in tmp}
+        if 60 not in new_filtered[float(s_key)]:
+            new_filtered[float(s_key)][60] = 0
 
     return new_filtered
 
 def save_dictionary_csv(d: dict, path: str):
     """
-    new_filtered_dict を縦長CSVとして保存（speed_key, angle_key, value）。
+    new_filtered_dict を縦長CSVとして保存（speed_key: float, angle_key: int, value: int）。
     """
     rows = []
     for s_key, sub in d.items():
         for a_key, val in sub.items():
-            rows.append({"speed_key": s_key, "angle_key": a_key, "value": int(val)})
+            rows.append({"speed_key": float(s_key), "angle_key": int(a_key), "value": int(val)})
     pd.DataFrame(rows).to_csv(path, index=False, encoding="utf-8-sig")
 
 def plot_stacked_bar(d: dict, interval=1.0, speed_max=9.5, angle_interval=5):
@@ -163,7 +198,7 @@ def plot_stacked_bar(d: dict, interval=1.0, speed_max=9.5, angle_interval=5):
     new_filtered_dict から積み重ね棒を描画・保存。
     """
     plt.rcParams["font.family"] = "Times New Roman"
-    speed_keys = sorted(d.keys(), key=lambda x: float(x))
+    speed_keys = sorted(d.keys(), key=float)
     x = np.arange(len(speed_keys))
     labels = []
     for sk in speed_keys:
@@ -178,18 +213,18 @@ def plot_stacked_bar(d: dict, interval=1.0, speed_max=9.5, angle_interval=5):
     for idx, ang in enumerate(angles_plot):
         if ang == 0:
             lab = "0-5°"
-            vals = [d[sk].get("0", 0) for sk in speed_keys]
+            vals = [d[sk].get(0, 0) for sk in speed_keys]
         elif ang == 30:
             lab = "30°+"
             vals = []
             for sk in speed_keys:
                 s = 0
                 for a in list(range(30, 60, 5)) + [60]:
-                    s += d[sk].get(str(a), 0)
+                    s += d[sk].get(int(a), 0)
                 vals.append(s)
         else:
             lab = f"{ang}-{ang+angle_interval}°"
-            vals = [d[sk].get(str(ang), 0) for sk in speed_keys]
+            vals = [d[sk].get(int(ang), 0) for sk in speed_keys]
         ax.bar(x, vals, bottom=bottom, color=cmap(idx))
         bottom += np.array(vals)
         legends.append(lab)
@@ -210,7 +245,7 @@ def plot_stacked_bar(d: dict, interval=1.0, speed_max=9.5, angle_interval=5):
     return out_png
 
 
-# --------- Part B: n-gram 可視化 & 確率辞書 ---------
+# --------- Part B: n-gram 可視化 & 確率辞書（各行=100の整数%） ---------
 def _save_fig(fig, order, filename="heatmap.png"):
     """
     図を保存して閉じる。
@@ -328,52 +363,40 @@ def _decode_row_indices(idx, N, ctx_dims, labels=None):
         out.append(ctx)
     return out
 
-def probs_to_dict_order2(P, labels=None, round_ndigits=6):
+def _matrix_to_int_dict_rows(M: np.ndarray, row_labels, col_labels):
     """
-    2要素（bigram）の確率行列を入れ子辞書に変換。
+    行列M（確率）を各行ごと整数%にして辞書へ。各行合計は100（ゼロ行は合計0）。
     """
-    n = P.shape[0]
-    labs = labels or list(range(n))
-    d = {}
-    for i in range(n):
-        d_row = {}
-        for j in range(n):
-            d_row[labs[j]] = round(float(P[i, j]), round_ndigits)
-        d[labs[i]] = d_row
-    return d
-
-def probs_to_dict_higher_with_contexts(M, context_labels, labels=None, round_ndigits=6):
-    """
-    上位文脈の確率行列Mと各行の文脈ラベルから入れ子辞書を作る。
-    """
-    n = M.shape[1]
-    labs = labels or list(range(n))
-    d = {}
-    for i, ctx in enumerate(context_labels):
-        row = {}
-        for j in range(n):
-            row[labs[j]] = round(float(M[i, j]), round_ndigits)
-        d[ctx] = row
-    return d
+    out = {}
+    for i, rlab in enumerate(row_labels):
+        ints = _largest_remainder_percent(M[i, :], total=100)
+        row = {col_labels[j]: int(ints[j]) for j in range(len(col_labels))}
+        out[rlab] = row
+    return out
 
 def build_transition_probs(seqs, N=6, labels=None, topk3=18, topk4=24, alpha=0.0):
     """
-    複数系列から n-gram 確率辞書（2,3,4）を構築。
+    複数系列から n-gram 確率辞書（2,3,4）を構築（各行は整数%で合計100。ゼロ行は全0）。
     """
     labels = labels or list(range(N))
+
+    # bigram
     C2 = ngram_counts_multi(seqs, N, order=2)
     P2 = counts_to_conditional_probs(C2, alpha=alpha)
-    d2 = probs_to_dict_order2(P2, labels=labels)
+    P2_int = _matrix_to_percent_ints(P2, total=100)
+    d2 = {labels[i]: {labels[j]: int(P2_int[i, j]) for j in range(N)} for i in range(N)}
 
+    # trigram
     C3 = ngram_counts_multi(seqs, N, order=3)
     M3, idx3 = topk_context_matrix(C3, topk=topk3, as_prob=True)
     ctx3 = _decode_row_indices(idx3, N=N, ctx_dims=2, labels=labels)
-    d3 = probs_to_dict_higher_with_contexts(M3, ctx3, labels=labels)
+    d3 = _matrix_to_int_dict_rows(M3, ctx3, labels)
 
+    # fourgram
     C4 = ngram_counts_multi(seqs, N, order=4)
     M4, idx4 = topk_context_matrix(C4, topk=topk4, as_prob=True)
     ctx4 = _decode_row_indices(idx4, N=N, ctx_dims=3, labels=labels)
-    d4 = probs_to_dict_higher_with_contexts(M4, ctx4, labels=labels)
+    d4 = _matrix_to_int_dict_rows(M4, ctx4, labels)
 
     return {
         "order_2": d2,
@@ -408,12 +431,13 @@ def export_combined_module(cost_dict: dict, probs_dict: dict, module_path: str,
 
     with open(path_abs, "w", encoding="utf-8") as f:
         f.write(f'"""自動生成ファイル: {stamp}\n')
-        f.write('new_filtered_dict() はコスト用辞書、get_transition_probs() はn-gram確率辞書を返す。\n')
+        f.write('new_filtered_dict() はコスト用辞書（キー: 速度=float, 角度=int。各速度ビン合計=100の整数%）、\n')
+        f.write('get_transition_probs() はn-gram確率辞書（各行の合計=100の整数%。ゼロ行は全0）を返す。\n')
         f.write('このファイルはスクリプトから上書き生成されます。\n')
         f.write('"""\n\n')
         # cost dict function
         f.write(f"def {func_cost}():\n")
-        f.write('    """コスト計算用の辞書を返す。"""\n')
+        f.write('    """コスト計算用の辞書（キー: 速度=float, 角度=int。値は整数%、各速度ビンで合計=100）を返す。"""\n')
         if "\n" not in payload_cost:
             f.write(f"    return {payload_cost}\n\n")
         else:
@@ -423,7 +447,7 @@ def export_combined_module(cost_dict: dict, probs_dict: dict, module_path: str,
             f.write("    )\n\n")
         # probs dict function
         f.write(f"def {func_probs}():\n")
-        f.write('    """n-gram の確率辞書を返す。"""\n')
+        f.write('    """n-gram の確率辞書（各行の合計=100の整数%。ゼロ行は全0）を返す。"""\n')
         if "\n" not in payload_probs:
             f.write(f"    return {payload_probs}\n")
         else:
@@ -440,7 +464,7 @@ if __name__ == "__main__":
     2) n-gram可視化（bigram/trigram/fourgram）とCSV保存
     3) Filtered_Dict.py に new_filtered_dict() / get_transition_probs() を同居で書き出し
     """
-    # A) cost dict
+    # A) cost dict (normalize to 100)
     selected = [1, 3, 5]
     filtered_df = load_filtered_df(CSV_PATH, selected_elements=selected)
     d_cost = build_new_filtered_dict(
@@ -470,6 +494,7 @@ if __name__ == "__main__":
 
     labels = list(range(N_STATES))
 
+    # bigram → PNG & CSV（CSVはfloat確率）
     C2 = ngram_counts_multi(seqs, N_STATES, order=2)
     P2, bigram_png = plot_bigram_heatmap_probs(
         C2, labels=labels, title="N→N+1 transition (probabilities)",
@@ -477,29 +502,28 @@ if __name__ == "__main__":
     )
     bigram_csv = _save_csv(pd.DataFrame(P2, index=labels, columns=labels), order=2, filename="probs.csv")
 
+    # trigram → ヒートマップPNG & CSV（CSVはfloat確率）
     C3 = ngram_counts_multi(seqs, N_STATES, order=3)
     M3, idx3 = topk_context_matrix(C3, topk=TOPK_TRIGRAM, as_prob=True)
     ctx3 = _decode_row_indices(idx3, N=N_STATES, ctx_dims=2, labels=labels)
     rows3 = [{"context": "→".join(map(str, ctx)), "next": j, "prob": float(M3[i, j])}
              for i, ctx in enumerate(ctx3) for j in range(M3.shape[1])]
-    trigram_png = _save_fig(plt.figure(), order=3, filename=f"heatmap_probs_top{TOPK_TRIGRAM}.png")  # placeholder fig
-    plt.close('all')
     trigram_csv = _save_csv(pd.DataFrame(rows3), order=3, filename=f"probs_top{TOPK_TRIGRAM}.csv")
 
+    # fourgram → ヒートマップPNG & CSV（CSVはfloat確率）
     C4 = ngram_counts_multi(seqs, N_STATES, order=4)
     M4, idx4 = topk_context_matrix(C4, topk=TOPK_FOURGRAM, as_prob=True)
     ctx4 = _decode_row_indices(idx4, N=N_STATES, ctx_dims=3, labels=labels)
     rows4 = [{"context": "→".join(map(str, ctx)), "next": j, "prob": float(M4[i, j])}
              for i, ctx in enumerate(ctx4) for j in range(M4.shape[1])]
-    fourgram_png = _save_fig(plt.figure(), order=4, filename=f"heatmap_probs_top{TOPK_FOURGRAM}.png")  # placeholder fig
-    plt.close('all')
     fourgram_csv = _save_csv(pd.DataFrame(rows4), order=4, filename=f"probs_top{TOPK_FOURGRAM}.csv")
 
+    # build int-% probs dict
     probs = build_transition_probs(
         seqs, N=N_STATES, labels=labels, topk3=TOPK_TRIGRAM, topk4=TOPK_FOURGRAM, alpha=ALPHA_SMOOTH
     )
 
-    # C) export one module with two defs
+    # export both defs into one module
     export_combined_module(
         cost_dict=d_cost,
         probs_dict=probs,
