@@ -252,7 +252,7 @@ if __name__ == '__main__':
         plt.tight_layout(rect=[0, 0.3, 1, 1])  # 下の余白を適切に確保
 
         # 画像を保存
-        output_file = f'output/elements/{today_str}/stacked_normalized_histogram_.png'
+        output_file = f'{SAVE_DIR}/stacked_normalized_histogram_.png'
         plt.savefig(output_file, bbox_inches='tight', dpi=150)
         print(f"Saved to '{output_file}'")
                 
