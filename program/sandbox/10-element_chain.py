@@ -23,7 +23,7 @@ seqs = []
 def _save_fig(fig, order):
     """
     図を保存して閉じる。
-    保存先: {SAVE_DIR}/fig/order-<order>/heatmap.png
+    保存先: {SAVE_DIR}/fig//heatmap_order_<order>.png
     引数:
         fig   : matplotlib.figure.Figure
         order : n-gram の長さ (2=bigram, 3=trigram, ...)
@@ -32,7 +32,7 @@ def _save_fig(fig, order):
     """
     out_dir = osp.join(SAVE_DIR, "fig")
     os.makedirs(out_dir, exist_ok=True)
-    fig.savefig(osp.join(out_dir, f"heatmap_order-{order}.png"), dpi=150)
+    fig.savefig(osp.join(out_dir, f"heatmap_order_{order}.png"), dpi=150)
     plt.close(fig)
 
 def ngram_counts_multi(seqs, N, order=2):
