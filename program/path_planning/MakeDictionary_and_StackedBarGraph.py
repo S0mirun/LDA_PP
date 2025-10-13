@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 # paths
 DIR = osp.dirname(__file__)
 dirname = osp.splitext(osp.basename(__file__))[0]
-SAVE_DIR = f"{DIR}/../../../outputs/{dirname}"
+SAVE_DIR = f"{DIR}/../../outputs/{dirname}"
 MODULE_OUT = osp.normpath(osp.join(DIR, "../utils/PP/Filtered_Dict.py"))
 os.makedirs(SAVE_DIR, exist_ok=True)
 os.makedirs(osp.join(SAVE_DIR, "fig"), exist_ok=True)
@@ -24,7 +24,7 @@ os.makedirs(osp.join(SAVE_DIR, "csv"), exist_ok=True)
 
 # settings
 FIGURE_PLOT_SWITCH = True
-CSV_PATH = f"{DIR}/../../../outputs/ClassifyElements/all_ports_classified_elements_fixed.csv"
+CSV_PATH = f"{DIR}/../../outputs/ClassifyElements/all_ports_classified_elements_fixed.csv"
 
 def load_filtered_df(csv_path: str, selected_elements):
     """
