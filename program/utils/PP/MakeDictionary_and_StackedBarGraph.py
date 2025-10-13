@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 DIR = osp.dirname(__file__)
 dirname = osp.splitext(osp.basename(__file__))[0]
 SAVE_DIR = f"{DIR}/../../../outputs/{dirname}"
+MODULE_OUT = osp.normpath(osp.join(DIR, "../utils/PP/Filtered_Dict.py"))
 os.makedirs(SAVE_DIR, exist_ok=True)
 os.makedirs(osp.join(SAVE_DIR, "fig"), exist_ok=True)
 os.makedirs(osp.join(SAVE_DIR, "csv"), exist_ok=True)
@@ -146,15 +147,18 @@ def export_dict_module(d: dict, module_path: str, func_name: str = "new_filtered
     """
     new_filtered_dict を返す関数を含む .py を生成する。
     例:
-        from utils.PP.MakeDictionary_and_StackedBarGraph import new_filtered_dict
+        from utils.PP.Filtered_Dict import new_filtered_dict
         D = new_filtered_dict()
     備考:
-        utils/ および utils/PP/ の __init__.py を自動生成し import 可能にする。
+        program/utils および program/utils/PP に __init__.py を自動生成して import 可能にする。
     """
+    from datetime import datetime
+    from pprint import pformat
     os.makedirs(osp.dirname(module_path), exist_ok=True)
-    # ensure packages
-    pkg_pp = osp.dirname(module_path)
-    pkg_utils = osp.dirname(pkg_pp)
+
+    # ensure packages: program/utils と program/utils/PP
+    pkg_pp = osp.dirname(module_path)          # .../program/utils/PP
+    pkg_utils = osp.dirname(pkg_pp)            # .../program/utils
     for p in [pkg_utils, pkg_pp]:
         initf = osp.join(p, "__init__.py")
         if not osp.exists(initf):
@@ -178,6 +182,7 @@ def export_dict_module(d: dict, module_path: str, func_name: str = "new_filtered
             for line in payload.splitlines():
                 f.write("        " + line + "\n")
             f.write("    )\n")
+
 
 def save_dictionary_csv(d: dict, path: str):
     """
@@ -281,7 +286,12 @@ if __name__ == "__main__":
         plot_stacked_bar(d, interval=1.0, speed_max=9.5, angle_interval=5)
 
     module_path = osp.join(DIR, "../../../utils/PP/MakeDictionary_and_StackedBarGraph.py")
-    export_dict_module(d, module_path=module_path, func_name="new_filtered_dict", pretty=True)
+    export_dict_module(
+        d,
+        module_path=MODULE_OUT,
+        func_name="new_filtered_dict",
+        pretty=True
+    )
 
     print(f"Dict CSV  : {csv_out}")
     print(f"PNG Figure: {osp.join(SAVE_DIR, 'fig', 'stacked_normalized_histogram_.png')}")
