@@ -1,4 +1,4 @@
-from .coord_conv import *
+from . import *
 try:
     from . import lat_lon
 except Exception:
