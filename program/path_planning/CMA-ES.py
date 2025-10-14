@@ -20,6 +20,8 @@ from matplotlib import gridspec
 from tqdm.auto import tqdm
 
 # --- external project modules ---
+from path_planning.ClassifyElements import classify
+import utils.PP.Astar_for_CMAES as Astar
 import utils.PP.graph_by_taneichi as Glaph
 from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.Filtered_Dict import new_filtered_dict, get_transition_probs
@@ -51,7 +53,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 0
         # ship
         self.L = 100
 
@@ -81,6 +83,7 @@ class Settings:
         self.length_ratio: float = 0.1
         self.SD_ratio: float = 0.5
         self.element_ratio: float = 1.0
+        self.trans_ratio: float = 1.0
         self.distance_ratio: float = 0.2
 
         # restart
@@ -290,6 +293,13 @@ class CostCalculator:
 
         occ = self.new_filtered_dict[speed_key][angle_key]
         return float(100.0 - occ)
+    
+    def transition_probs2(self, parent_pt: np.ndarray, current_pt: np.ndarray, child_pt: np.ndarray) -> float:
+        elem1 = classify(parent_pt, current_pt)
+        elem2 = classify(current_pt, child_pt)
+        occ = self.get_transition_probs['order_2'][elem1][elem2]
+        return float(100.0 - occ)
+
 
     def distance_cost_between(self, current_pt: np.ndarray, child_pt: np.ndarray) -> float:
         """
@@ -364,7 +374,7 @@ def calculate_turning_points(initial_coords: np.ndarray, sample_map, last_pt: np
         d = np.hypot(current_point[0] - sample_map.end_xy[0, 0], current_point[1] - sample_map.end_xy[0, 1])
         current_speed = sample_map.b_ave * d ** sample_map.a_ave + sample_map.b_SD * d ** sample_map.a_SD
         current_speed = min(current_speed, 9.5)
-        minute_distance = current_speed * 1852.0 / 60.0
+        minute_distance = current_speed * 1852.0 / 60.0 # km/min
 
         sum_of_distance = 0.0
         broke = False
@@ -613,6 +623,19 @@ class PathPlanning:
         for j in range(1, len(pts) - 1):
             elem_cost += cal.elem(pts[j - 1], pts[j], pts[j + 1])
 
+        # tansition probs (legacy end-side weights)
+        trans_cost = 0.0
+        if len(pts) >= 1:
+            trans_cost += cal.transition_probs2(sm.start_xy[0], origin, pts[0])
+        if len(pts) >= 2:
+            trans_cost += cal.transition_probs2(origin, pts[0], pts[1])
+        if len(pts) >= 2:
+            trans_cost += 2.0 * cal.transition_probs2(pts[-2], pts[-1], last)
+        if len(pts) >= 1:
+            trans_cost += 3.0 * cal.transition_probs2(pts[-1], last, end)
+        for j in range(1, len(pts) - 1):
+            trans_cost += cal.transition_probs2(pts[j - 1], pts[j], pts[j + 1])
+
         # point-to-point distance
         dist_cost = 0.0
         if len(pts) >= 1:
@@ -625,6 +648,7 @@ class PathPlanning:
 
         # coefficients
         self.element_coeff = 1.0 * self.ps.element_ratio
+        self.trans_coeff = 1.0 * self.ps.trans_ratio
         self.length_coeff = (elem_cost / length_cost) * self.ps.length_ratio if length_cost > 0 else 1.0
         self.SD_coeff = (elem_cost / SD_cost) * self.ps.SD_ratio if SD_cost > 0 else 10.0
         self.distance_coeff = (elem_cost / dist_cost) * self.ps.distance_ratio if dist_cost > 0 else 1.0
@@ -701,6 +725,19 @@ class PathPlanning:
             for j in range(1, len(pts) - 1):
                 elem_cost += cal.elem(pts[j - 1], pts[j], pts[j + 1])
 
+            # tansition probs (legacy end-side weights)
+            trans_cost = 0.0
+            if len(pts) >= 1:
+                trans_cost += cal.transition_probs2(sm.start_xy[0], origin, pts[0])
+            if len(pts) >= 2:
+                trans_cost += cal.transition_probs2(origin, pts[0], pts[1])
+            if len(pts) >= 2:
+                trans_cost += 2.0 * cal.transition_probs2(pts[-2], pts[-1], last)
+            if len(pts) >= 1:
+                trans_cost += 3.0 * cal.transition_probs2(pts[-1], last, end)
+            for j in range(1, len(pts) - 1):
+                trans_cost += cal.transition_probs2(pts[j - 1], pts[j], pts[j + 1])
+
             # distance
             dist_cost = 0.0
             if len(pts) >= 1:
@@ -716,6 +753,7 @@ class PathPlanning:
                 + self.SD_coeff * SD_cost
                 + self.element_coeff * elem_cost
                 + self.distance_coeff * dist_cost
+                + self.trans_coeff * trans_cost
             )
             costs[i] = total
 
@@ -798,6 +836,7 @@ class PathPlanning:
         self.cal.SD = self.SD
         self.cal.enclosing = self.enclosing
         self.cal.new_filtered_dict = new_filtered_dict()
+        self.cal.get_transition_probs = get_transition_probs()
         self.cal.MAX_SPEED_KTS = float(self.ps.MAX_SPEED_KTS)
         self.cal.MIN_SPEED_KTS = float(self.ps.MIN_SPEED_KTS)
         self.cal.speed_interval = float(self.ps.speed_interval)
@@ -918,6 +957,10 @@ class PathPlanning:
             )
             initial_points = calculate_turning_points(original_initial_coord, sm, self.last_pt, self.port)
             for i, (x, y) in enumerate(initial_points, 1):
+                print(
+                    f"Initial Turning Points:\n",
+                    f"  P{i:02d}: ({x:.1f}, {y:.1f})"
+                )
                 print(f"  P{i:02d}: ({x:.1f}, {y:.1f})")
 
             if self.ps.save_init_path:
@@ -1028,6 +1071,7 @@ class PathPlanning:
             f"{'Length':<12}{self.ps.length_ratio}\n"
             f"{'SD':<12}{self.ps.SD_ratio}\n"
             f"{'Element':<12}{self.ps.element_ratio}\n"
+            f"{'Transition':<12}{self.ps.trans_ratio}\n"
             f"{'Distance':<12}{self.ps.distance_ratio}\n"
         )
 
