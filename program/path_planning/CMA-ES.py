@@ -20,13 +20,11 @@ from matplotlib import gridspec
 from tqdm.auto import tqdm
 
 # --- external project modules ---
-from program.utils.PP import Astar_for_CMAES as Astar
-from program.utils.PP import graph_by_taneichi as Glaph
-from program.utils.PP.E_ddCMA import DdCma, Checker, Logger
-from program.utils.PP.Filtered_Dict import new_filtered_dict, get_transition_probs
-from program.utils.PP.graph_by_taneichi import ShipDomain_proposal
-from program.utils.PP.subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
-
+import utils.PP.graph_by_taneichi as Glaph
+from utils.PP.E_ddCMA import DdCma, Checker, Logger
+from utils.PP.Filtered_Dict import new_filtered_dict, get_transition_probs
+from utils.PP.graph_by_taneichi import ShipDomain_proposal
+from utils.PP.subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
 PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
 PYSIM_DIR = os.path.join(PROGRAM_DIR, "py-ship-simulator-main/py-ship-simulator-main")
 if PYSIM_DIR not in sys.path:
@@ -53,7 +51,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 0
+        self.port_number: int = 2
         # ship
         self.L = 100
 
