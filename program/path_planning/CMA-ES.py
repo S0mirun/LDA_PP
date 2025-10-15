@@ -295,8 +295,27 @@ class CostCalculator:
         return float(100.0 - occ)
     
     def transition_probs2(self, parent_pt: np.ndarray, current_pt: np.ndarray, child_pt: np.ndarray) -> float:
-        elem1 = classify(parent_pt, current_pt)
-        elem2 = classify(current_pt, child_pt)
+        ver_c, hor_c = current_pt
+
+        # estimated speed at current_pt (kts)
+        current_speed = self.speed_from_end_distance(ver_c, hor_c)
+
+        # speed bin key
+        if current_speed < self.MIN_SPEED_KTS:
+            speed_key = self.MIN_SPEED_KTS
+        elif current_speed >= self.MAX_SPEED_KTS:
+            speed_key = self.MAX_SPEED_KTS
+        else:
+            speed_key = None
+            for s0 in self.speed_bins:
+                if s0 <= current_speed < s0 + self.speed_interval:
+                    speed_key = float(s0)
+                    break
+            if speed_key is None:
+                speed_key = self.MAX_SPEED_KTS
+        
+        elem1 = classify(parent_pt, current_pt, current_speed)
+        elem2 = classify(current_pt, child_pt, current_speed)
         occ = self.get_transition_probs['order_2'][elem1][elem2]
         return float(100.0 - occ)
 
@@ -956,11 +975,8 @@ class PathPlanning:
                 self.ps.gridpitch,
             )
             initial_points = calculate_turning_points(original_initial_coord, sm, self.last_pt, self.port)
+            print("Initial Turning Points:\n",)
             for i, (x, y) in enumerate(initial_points, 1):
-                print(
-                    f"Initial Turning Points:\n",
-                    f"  P{i:02d}: ({x:.1f}, {y:.1f})"
-                )
                 print(f"  P{i:02d}: ({x:.1f}, {y:.1f})")
 
             if self.ps.save_init_path:

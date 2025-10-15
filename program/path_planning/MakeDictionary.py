@@ -306,7 +306,8 @@ def counts_to_conditional_probs(counts, alpha=0.0):
     return P
 
 def plot_bigram_heatmap_probs(counts_mat, labels=None, title=None,
-                              annotate=True, fmt=".1%", filename="heatmap_probs.png"):
+                              annotate=True, fmt=".1%", filename="heatmap_probs.png",
+                              show_row_totals=False):
     """
     2要素（bigram）の確率ヒートマップを描画・保存（セル注記可）。返り値は確率行列P。
     """
@@ -315,8 +316,13 @@ def plot_bigram_heatmap_probs(counts_mat, labels=None, title=None,
     im = ax.imshow(P, cmap=white_red, vmin=0.0, vmax=1.0)
     n = P.shape[0]
     labs = labels or list(range(n))
+    if show_row_totals:
+        totals = counts_mat.sum(axis=1).astype(int)
+        yticks = [f"{labs[i]} [n={totals[i]}]" for i in range(n)]
+    else:
+        yticks = labs
     ax.set_xticks(np.arange(n), labels=labs)
-    ax.set_yticks(np.arange(n), labels=labs)
+    ax.set_yticks(np.arange(n), labels=yticks)
     ax.set_xlabel("N+1-th element")
     ax.set_ylabel("N-th element")
     ax.set_aspect("equal")
@@ -333,6 +339,46 @@ def plot_bigram_heatmap_probs(counts_mat, labels=None, title=None,
     fig.tight_layout()
     path = _save_fig(fig, order=2, filename=filename)
     return P, path
+
+def plot_ngram_context_heatmap_probs(M: np.ndarray, row_labels, col_labels,
+                                     order: int, title=None, annotate=False,
+                                     fmt=".1%", filename="context_heatmap_probs.png",
+                                     row_counts: np.ndarray | None = None):
+    """
+    上位コンテキスト×次状態の確率ヒートマップを描画・保存。
+    M: 行=コンテキスト（top-kで抽出済み）, 列=次状態（0..N-1）の確率行列
+    row_labels: 行ラベル（例: "a→b", "c→d" / "a→b→c"）
+    col_labels: 列ラベル（例: list(range(N))）
+    order: n-gramの次数（3 または 4）
+    """
+    fig_h = max(4, 0.35 * len(row_labels))  # 行数に応じて縦サイズ自動調整
+    fig, ax = plt.subplots(figsize=(8, fig_h))
+    im = ax.imshow(M, cmap=white_red, vmin=0.0, vmax=1.0, aspect="auto")
+    if row_counts is not None:
+        ylabels = [f"{lab} [n={int(row_counts[i])}]" for i, lab in enumerate(row_labels)]
+    else:
+        ylabels = row_labels
+
+    n_cols = len(col_labels)
+    ax.set_xticks(np.arange(n_cols), labels=col_labels)
+    ax.set_yticks(np.arange(len(row_labels)), labels=ylabels)
+    ax.set_xlabel("N+1-th element")
+    ax.set_ylabel("Context (previous elements)")
+    ax.set_title(title or f"Top contexts → next (order={order})")
+    plt.colorbar(im, ax=ax)
+
+    if annotate and len(row_labels) <= 24:  # 行数が少ないときだけ注記
+        thresh = 0.6
+        for i in range(M.shape[0]):
+            for j in range(M.shape[1]):
+                v = M[i, j]
+                ax.text(j, i, format(v, fmt),
+                        ha="center", va="center",
+                        fontsize=9, color=("white" if v >= thresh else "black"))
+
+    fig.tight_layout()
+    return _save_fig(fig, order=order, filename=filename)
+
 
 def topk_context_matrix(counts, topk=20, as_prob=True):
     """
@@ -497,8 +543,13 @@ if __name__ == "__main__":
     # bigram → PNG & CSV（CSVはfloat確率）
     C2 = ngram_counts_multi(seqs, N_STATES, order=2)
     P2, bigram_png = plot_bigram_heatmap_probs(
-        C2, labels=labels, title="N→N+1 transition (probabilities)",
-        annotate=True, fmt=".1%", filename="heatmap_probs.png"
+        C2,
+        labels=labels,
+        title="N→N+1 transition (probabilities)",
+        annotate=True,
+        fmt=".1%",
+        filename="heatmap_probs.png",
+        show_row_totals=True
     )
     bigram_csv = _save_csv(pd.DataFrame(P2, index=labels, columns=labels), order=2, filename="probs.csv")
 
@@ -509,6 +560,18 @@ if __name__ == "__main__":
     rows3 = [{"context": "→".join(map(str, ctx)), "next": j, "prob": float(M3[i, j])}
              for i, ctx in enumerate(ctx3) for j in range(M3.shape[1])]
     trigram_csv = _save_csv(pd.DataFrame(rows3), order=3, filename=f"probs_top{TOPK_TRIGRAM}.csv")
+    totals3 = C3.reshape(N_STATES**2, N_STATES).sum(axis=1)[idx3].astype(int)
+    trigram_png = plot_ngram_context_heatmap_probs(
+        M3,
+        row_labels=["→".join(map(str, ctx)) for ctx in ctx3],
+        col_labels=labels,
+        order=3,
+        title=f"Top-{TOPK_TRIGRAM} trigram contexts → next (probabilities)",
+        annotate=True,
+        filename=f"heatmap_probs_top{TOPK_TRIGRAM}.png",
+        row_counts=totals3
+    )
+
 
     # fourgram → ヒートマップPNG & CSV（CSVはfloat確率）
     C4 = ngram_counts_multi(seqs, N_STATES, order=4)
@@ -517,6 +580,18 @@ if __name__ == "__main__":
     rows4 = [{"context": "→".join(map(str, ctx)), "next": j, "prob": float(M4[i, j])}
              for i, ctx in enumerate(ctx4) for j in range(M4.shape[1])]
     fourgram_csv = _save_csv(pd.DataFrame(rows4), order=4, filename=f"probs_top{TOPK_FOURGRAM}.csv")
+    totals4 = C4.reshape(N_STATES**3, N_STATES).sum(axis=1)[idx4].astype(int)
+    fourgram_png = plot_ngram_context_heatmap_probs(
+        M4,
+        row_labels=["→".join(map(str, ctx)) for ctx in ctx4],
+        col_labels=labels,
+        order=4,
+        title=f"Top-{TOPK_FOURGRAM} fourgram contexts → next (probabilities)",
+        annotate=True,
+        filename=f"heatmap_probs_top{TOPK_FOURGRAM}.png",
+        row_counts=totals4
+    )
+
 
     # build int-% probs dict
     probs = build_transition_probs(
@@ -539,7 +614,9 @@ if __name__ == "__main__":
         print(f"Stacked PNG     : {fig_out_path}")
     print(f"Bigram PNG      : {bigram_png}")
     print(f"Bigram CSV      : {bigram_csv}")
+    print(f"Trigram PNG     : {trigram_png}")
     print(f"Trigram CSV     : {trigram_csv}")
+    print(f"Fourgram PNG    : {fourgram_png}")
     print(f"Fourgram CSV    : {fourgram_csv}")
     print(f"Module (both)   : {osp.normpath(osp.join(DIR, FILTERED_DICT_MODULE_OUT))}")
     print("\nDone\n")
