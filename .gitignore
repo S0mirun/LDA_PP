@@ -22,4 +22,4 @@ raw_datas/raw_data/*
 !/raw_datas/raw_data/topography
 raw_datas/tmp/*
 !/raw_datas/tmp/.gitkeep
-
+raw_datas/内航船-要素/*
