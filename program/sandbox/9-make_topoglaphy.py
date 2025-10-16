@@ -10,7 +10,7 @@ import unicodedata
 
 from utils.LDA.ship_geometry import *
 from utils.LDA.visualization import *
-
+from program.sandbox.test import draw_waterdepth, draw_bui
 
 DIR = os.path.dirname(__file__)
 dirname =os.path.splitext(os.path.basename(__file__))[0]
@@ -284,9 +284,12 @@ def MAKE_YOKKAICHI_SUM(top_df, coast_df,
 
     plt.savefig(os.path.join(SAVE_DIR, "YOKKAICHI_PATH_1A2B_ZOOM.png"),
                 dpi=400, bbox_inches="tight", pad_inches=0.05)
+    draw_waterdepth(ax)
+    draw_bui(ax)
+    plt.savefig(os.path.join(SAVE_DIR, "YOKKAICHI_PATH_1A2B_ZOOM_DEPTH.png"),
+                dpi=400, bbox_inches="tight", pad_inches=0.05)
+
     print("\nfigure saved   : YOKKAICHI_PATH\n")
-
-
 
 if __name__ == "__main__":
     top_df, coast_df = prepare(top_path, coast_path)

@@ -4,6 +4,7 @@ import re
 import unicodedata
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
 import numpy as np
@@ -167,6 +168,7 @@ def draw_waterdepth(ax):
                 continue
             color = PALETTE[str(name)]
             ax.scatter(g[xcol], g[ycol], s=12, color=color, edgecolors="none")
+    #
     raw_df = pd.read_excel(
         depth_path,
         sheet_name=None
@@ -179,9 +181,9 @@ def draw_waterdepth(ax):
 
     PALETTE = {  # ビンごとの固定色（必要なら色を変更）
         "<0":   "#1f77b4",
-        "0–5":  "skyblue",
-        "5–10": "blue",
-        ">=10": "navy",
+        "0–5":  "red",
+        "5–10": "orange",
+        ">=10": "blue",
     }
     for name in SHEET_NAMES:
         df = depth_df[name]
@@ -192,6 +194,11 @@ def draw_waterdepth(ax):
         df["p_y [m]"] = conv_df[:, 1]
         # plot
         plot_by_bins(df, ax, xcol='p_x [m]', ycol='p_y [m]', valcol='depth\n(m)')
+        
+    handles = [Line2D([0],[0], marker="o", linestyle="", color=PALETTE[l], label=l, markersize=6)
+               for l in LABELS]
+    ax.legend(handles=handles, title="water depth (bins)", frameon=False)
+    
 
 def plot_one_route_and_save(ax, csv_path, top_df, coast_df, linewidth=0.5):
     raw_df = pd.read_csv(
