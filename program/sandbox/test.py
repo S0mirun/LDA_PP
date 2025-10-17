@@ -182,9 +182,9 @@ def draw_waterdepth(ax):
 
     PALETTE = {  # ビンごとの固定色（必要なら色を変更）
         "<0":   "#1f77b4",
-        "0–5":  "red",
-        "5–10": "orange",
-        ">=10": "blue",
+        "0–5":  "white",
+        "5–10": "white",
+        ">=10": "skyblue",
     }
     for name in SHEET_NAMES:
         df = depth_df[name]
@@ -205,16 +205,14 @@ def draw_bui(ax):
         bui_path,
         sheet_name=None
     )
-    print(raw_df)
-    print(raw_df.sheet_names)
-    df = raw_df['四日市港内Buoy']
+    df = raw_df['伊良湖-シーバース西側']
     df["latitude [deg]"] = df["Unnamed: 5"]
     df["longitude [deg]"] = df["Unnamed: 6"]
     conv_df = df_to_xy(df)
     df["p_x [m]"] = conv_df[:, 0]
     df["p_y [m]"] = conv_df[:, 1]
     # plot
-    ax.scatter(df["p_x [m]"], df["p_y [m]"], s=12, color='black', edgecolors="none")
+    ax.scatter(df["p_x [m]"], df["p_y [m]"], s=12, color='red', edgecolors="none")
     
     
 
