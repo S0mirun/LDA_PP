@@ -5,7 +5,7 @@ import sys
 import time
 
 import matplotlib.pyplot as plt
-import numpy
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import unicodedata
@@ -26,7 +26,7 @@ LON_ORIGIN = 135.4275805
 ANGLE_FROM_NORTH = -53
 #
 REGION =  [sakai_bay, yokkaichi_bay, Tokyo_bay,
-           Hokkaido.hakodate_bay, Hokkaido.ishikari_bay,
+           Hokkaido.hakodate_bay, Hokkaido.ishikari_bay, Hokkaido.tomakomai, Hokkaido.kushiro,
            Honsyu.akita, Honsyu.aomori_bay, Honsyu.hachinohe,
            Honsyu.isinomaki_bay, Honsyu.kagoshima_bay, Honsyu.kanazawa,
            Honsyu.miho_bay, Honsyu.nigata, Honsyu.onahama, Honsyu.suruga_bay,
@@ -99,7 +99,7 @@ def to_float(s):
 def read_one(path: str) -> pd.DataFrame:
     df = pd.read_csv(
         path,
-        skiprows=[0],          # skip first note line
+        skiprows=[0],
         usecols=[2, 3, 6],     # lat, lon, u
         encoding="shift-jis",
         converters={6: to_float},
@@ -127,7 +127,7 @@ def draw_Japan(ax):
             data,
             encoding='shift-jis'
         )
-        ax.plot(df["y [m]"] * (-1), df["x [m]"] * (-1), linewidth=0.5)
+        ax.plot(df["y [m]"] * (-1), df["x [m]"] * (-1), c='gray', linewidth=0.5)
     
     ax.set_aspect('equal')
     # save
