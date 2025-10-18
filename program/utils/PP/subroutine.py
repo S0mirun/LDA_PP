@@ -402,6 +402,108 @@ class else_bay:
         type = 'port'
     port_list = [port1, port2]
 
+class Hokkaido:
+    class tomakomai:
+        minY_lat = 42.5
+        maxY_lat = 42.6
+        minY_long = 141.5
+        maxY_long = 141.9
+        name = '_Tomakomai'
+
+    class ishikari_bay:
+        minY_lat = 43.1
+        maxY_lat = 43.2
+        minY_long = 140.9
+        maxY_long = 141.0
+        name = '_Otaru'
+
+    class hakodate_bay:
+        minY_lat = 41.7
+        maxY_lat = 41.8
+        minY_long = 140.6
+        maxY_long = 140.7
+        name = '_Hakodate'
+
+class Honsyu:
+    class hachinohe:
+        minY_lat = 40.5
+        maxY_lat = 40.54
+        minY_long = 141.5
+        maxY_long = 141.55
+        name = '_Hachinohe'
+
+    class aomori_bay:
+        minY_lat = 40.8
+        maxY_lat = 40.9
+        minY_long = 140.6
+        maxY_long = 140.8
+        name = '_Aomori'
+
+    class akita:
+        minY_lat = 39.7
+        maxY_lat = 39.8
+        minY_long = 140.0
+        maxY_long = 140.1
+        name = '_Akita'
+
+    class isinomaki_bay:
+        minY_lat = 38.32
+        maxY_lat = 38.44
+        minY_long = 141.2
+        maxY_long = 141.4
+        name = '_Ishinomaki'
+
+    class onahama:
+        minY_lat = 36.91
+        maxY_lat = 36.94
+        minY_long = 140.8
+        maxY_long = 140.9
+        name = '_Onahama'
+
+    class nigata:
+        minY_lat = 37.1
+        maxY_lat = 37.2
+        minY_long = 138.2
+        maxY_long = 138.3
+        name = '_Sekikawa'
+
+    class kanazawa:
+        minY_lat = 36.5
+        maxY_lat = 36.6
+        minY_long = 136.5
+        maxY_long = 136.6
+        name = '_Kanazawa'
+
+    class suruga_bay:
+        minY_lat = 34.9
+        maxY_lat = 35.1
+        minY_long = 138.4
+        maxY_long = 138.9
+        name = '_Shimizu'
+
+    class miho_bay:
+        minY_lat = 35.5
+        maxY_lat = 35.55
+        minY_long = 133.2
+        maxY_long = 133.3
+        name = '_Sakaiminato'
+        
+    class tokuyama_bay:
+        minY_lat = 34.04
+        maxY_lat = 34.05
+        minY_long = 131.78
+        maxY_long = 131.8
+        name = '_Tokuyama'
+        
+    class kagoshima_bay:
+        minY_lat = 31.4
+        maxY_lat = 31.6
+        minY_long = 130.5
+        maxY_long = 130.7
+        name = '_kagoshima'
+
+
+
 class latlon_parameter: #地球を楕円体と見た時のパラメータだけど、使ってない？
     POLE_RADIUS = 6356752    # 極半径(m)(短半径)
     EQUATOR_RADIUS = 6378137 # 赤道半径(m)(長半径)
