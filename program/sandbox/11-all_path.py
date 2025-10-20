@@ -5,6 +5,7 @@ import sys
 import time
 
 import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -12,7 +13,7 @@ import unicodedata
 
 from utils.LDA.ship_geometry import *
 from utils.LDA.visualization import *
-from utils.PP.subroutine import (sakai_bay, yokkaichi_bay, Tokyo_bay, Hokkaido, Honsyu)
+from utils.PP.subroutine import (yokkaichi_bay, Tokyo_bay, Hokkaido, Honsyu)
 
 DIR = os.path.dirname(__file__)
 dirname =os.path.splitext(os.path.basename(__file__))[0]
@@ -23,14 +24,14 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 #
 LAT_ORIGIN = 34.57597199
 LON_ORIGIN = 135.4275805
-ANGLE_FROM_NORTH = -53
+ANGLE_FROM_NORTH = -53.25
 #
-REGION =  [sakai_bay, yokkaichi_bay, Tokyo_bay,
+REGION =  [Honsyu.osaka_bay, yokkaichi_bay, Tokyo_bay,
            Hokkaido.hakodate_bay, Hokkaido.ishikari_bay, Hokkaido.tomakomai, Hokkaido.kushiro,
            Honsyu.akita, Honsyu.aomori_bay, Honsyu.hachinohe,
            Honsyu.isinomaki_bay, Honsyu.kagoshima_bay, Honsyu.kanazawa,
            Honsyu.miho_bay, Honsyu.nigata, Honsyu.onahama, Honsyu.suruga_bay,
-           Honsyu.tokuyama_bay
+           Honsyu.tokuyama_bay, Honsyu.osaka_bay_2
             ]
 counts = {getattr(r, "name"): 0 for r in REGION if getattr(r, "name", None)}
 keys   = [getattr(r, "name") for r in REGION]
@@ -134,6 +135,38 @@ def draw_Japan(ax):
     plt.savefig(os.path.join(SAVE_DIR, "Japan.png"),
                 dpi=400, bbox_inches="tight", pad_inches=0.05)
     print("\nJapan fig saned\n")
+
+def draw_Japan_Poly(ax):
+    for data in glob.glob(f"{TOPO_DIR}/*.csv"):
+        df = pd.read_csv(
+            data,
+            encoding='shift-jis'
+        )
+        x = -1 * df["y [m]"].to_numpy()
+        y = -1 * df["x [m]"].to_numpy()
+        xy = np.column_stack([x, y])
+        # settings
+        ax.set_xticks([])
+        ax.set_xticklabels([])
+        ax.set_yticks([])
+        ax.set_yticklabels([])
+        # plot
+        ax.add_patch(
+            Polygon(
+                xy,
+                closed=True,
+                edgecolor='gray',
+                facecolor='gray',
+                linewidth=0.5,
+            )
+        )
+        ax.update_datalim(xy)
+    ax.autoscale()
+    ax.set_aspect('equal')
+    # save
+    plt.savefig(os.path.join(SAVE_DIR, "Japan_Poly.png"),
+                dpi=400, bbox_inches="tight", pad_inches=0.05)
+    print("\nJapan fig saved\n")
     
 def draw_AIS(ax):
     for dir in tqdm(glob.glob(f"{AIS_DIR}/*"), desc="Reading CSVs", unit="file"):
@@ -167,7 +200,7 @@ def draw_AIS(ax):
                 continue
             ax.plot(x[m], y[m], c=Colors.black, linewidth=0.5, alpha=0.5)
     # save
-    plt.savefig(os.path.join(SAVE_DIR, "AIS.png"),
+    plt.savefig(os.path.join(SAVE_DIR, "AIS_Poly.png"),
                 dpi=400, bbox_inches="tight", pad_inches=0.05)
     print("\nAIS fig saved\n")
     
@@ -180,7 +213,7 @@ def count_stay_port(ax):
     df["u"] = pd.to_numeric(df["u"], errors="coerce")
     df = df.sort_values("file_date", kind="mergesort").reset_index(drop=True)
     # chaeck
-    show_counts(counts, keys, first=True)
+    #show_counts(counts, keys, first=True)
     place_before = None
     for idx, lat, lon in df[["latitude", "longitude"]].itertuples(index=True, name=None):
         #
@@ -190,11 +223,12 @@ def count_stay_port(ax):
             # plot
             y, x = convert_to_xy(lat, lon,
                                  LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH)
-            ax.scatter(x, y, c='green')
+            ax.scatter(x, y, color='green', s=1)
         place_before = place
 
-        if idx % 50 == 0:
-            show_counts(counts, keys)
+        # if idx % 50 == 0:
+        #     show_counts(counts, keys)
+    show_counts(counts, keys)
     # save
     plt.savefig(os.path.join(SAVE_DIR, "stay_port.png"),
                 dpi=400, bbox_inches="tight", pad_inches=0.05)
@@ -202,7 +236,8 @@ def count_stay_port(ax):
     
 if __name__ == "__main__":
     fig, ax = plt.subplots(figsize=(8, 6))
-    draw_Japan(ax)
+    #draw_Japan(ax)
+    draw_Japan_Poly(ax)
     draw_AIS(ax)
     count_stay_port(ax)
 

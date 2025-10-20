@@ -418,10 +418,10 @@ class Hokkaido:
         name = '_Kushiro'
 
     class ishikari_bay:
-        minY_lat = 43.1
-        maxY_lat = 43.2
-        minY_long = 140.0
-        maxY_long = 141.0
+        minY_lat = 43.17
+        maxY_lat = 43.21
+        minY_long = 140.9
+        maxY_long = 141.04
         name = '_Otaru'
 
     class hakodate_bay:
@@ -482,11 +482,25 @@ class Honsyu:
         name = '_Kanazawa'
 
     class suruga_bay:
-        minY_lat = 34.8
-        maxY_lat = 35.1
-        minY_long = 138.3
-        maxY_long = 138.9
+        minY_lat = 34.97
+        maxY_lat = 35.05
+        minY_long = 138.48
+        maxY_long = 138.55
         name = '_Shimizu'
+
+    class osaka_bay:
+        minY_lat = 34.56
+        maxY_lat = 34.59
+        minY_long = 135.39
+        maxY_long = 135.43
+        name = '_Sakai'
+
+    class osaka_bay_2:
+        minY_lat = 34.67
+        maxY_lat = 34.68
+        minY_long = 135.18
+        maxY_long = 135.20
+        name = '_Kobe'
 
     class miho_bay:
         minY_lat = 35.5
