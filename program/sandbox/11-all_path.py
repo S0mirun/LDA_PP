@@ -22,9 +22,16 @@ TOPO_DIR = f"{DIR}/../../outputs/Japan_xy"
 SAVE_DIR = f"{DIR}/../../outputs/{dirname}"
 os.makedirs(SAVE_DIR, exist_ok=True)
 #
-LAT_ORIGIN = 34.57597199
-LON_ORIGIN = 135.4275805
+# LAT_ORIGIN = 34.57597199
+# LON_ORIGIN = 135.4275805
+LAT_ORIGIN = 34.5868 # +
+LON_ORIGIN = 135.4255 # -
 ANGLE_FROM_NORTH = -53.25
+#
+ZOOM = True
+x_lim = (325000, 345000)
+y_lim = (-283000, -263000)
+
 #
 REGION =  [Honsyu.osaka_bay, yokkaichi_bay, Tokyo_bay,
            Hokkaido.hakodate_bay, Hokkaido.ishikari_bay, Hokkaido.tomakomai, Hokkaido.kushiro,
@@ -146,10 +153,10 @@ def draw_Japan_Poly(ax):
         y = -1 * df["x [m]"].to_numpy()
         xy = np.column_stack([x, y])
         # settings
-        ax.set_xticks([])
-        ax.set_xticklabels([])
-        ax.set_yticks([])
-        ax.set_yticklabels([])
+        # ax.set_xticks([])
+        # ax.set_xticklabels([])
+        # ax.set_yticks([])
+        # ax.set_yticklabels([])
         # plot
         ax.add_patch(
             Polygon(
@@ -161,11 +168,20 @@ def draw_Japan_Poly(ax):
             )
         )
         ax.update_datalim(xy)
-    ax.autoscale()
-    ax.set_aspect('equal')
     # save
-    plt.savefig(os.path.join(SAVE_DIR, "Japan_Poly.png"),
-                dpi=400, bbox_inches="tight", pad_inches=0.05)
+    if ZOOM:
+        ax.set_xlim(x_lim)
+        ax.set_ylim(y_lim)
+        ax.set_aspect('equal')
+        # zoom
+        plt.savefig(os.path.join(SAVE_DIR, "Japan_Poly_Zoom.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+    else:
+        ax.autoscale()
+        ax.set_aspect('equal')
+        # save
+        plt.savefig(os.path.join(SAVE_DIR, "Japan_Poly.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
     print("\nJapan fig saved\n")
     
 def draw_AIS(ax):
@@ -198,10 +214,14 @@ def draw_AIS(ax):
             m = np.isfinite(x) & np.isfinite(y)
             if m.sum() < 2:
                 continue
-            ax.plot(x[m], y[m], c=Colors.black, linewidth=0.5, alpha=0.5)
+            ax.plot(x[m], y[m], c=Colors.black, linewidth=1, alpha=0.5)
     # save
-    plt.savefig(os.path.join(SAVE_DIR, "AIS_Poly.png"),
-                dpi=400, bbox_inches="tight", pad_inches=0.05)
+    if ZOOM :
+        plt.savefig(os.path.join(SAVE_DIR, "AIS_Zoom.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+    else:
+        plt.savefig(os.path.join(SAVE_DIR, "AIS.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
     print("\nAIS fig saved\n")
     
 
@@ -232,13 +252,13 @@ def count_stay_port(ax):
     # save
     plt.savefig(os.path.join(SAVE_DIR, "stay_port.png"),
                 dpi=400, bbox_inches="tight", pad_inches=0.05)
-
     
+
 if __name__ == "__main__":
     fig, ax = plt.subplots(figsize=(8, 6))
     #draw_Japan(ax)
     draw_Japan_Poly(ax)
     draw_AIS(ax)
-    count_stay_port(ax)
+    #count_stay_port(ax)
 
     print("\nDone\n")

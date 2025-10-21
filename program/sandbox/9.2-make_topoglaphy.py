@@ -22,7 +22,6 @@ RAW_DATAS_DIR = f"{DIR}/../../raw_datas"
 SAVE_DIR = f"{DIR}/../../outputs/{dirname}"
 os.makedirs(SAVE_DIR, exist_ok=True)
 #
-top_path = f"{RAW_DATAS_DIR}/tmp/csv/yokkaichi_port2.csv"
 coast_path = f"{RAW_DATAS_DIR}/海岸線データ/四日市港 海岸線データ(国土地理院地図から抽出).csv"
 depth_path = f"{RAW_DATAS_DIR}/内航船-要素/水深-Yokkaichi/水深-ブイ等/2-Yokkaichi_waterdepth.xlsx"
 #
@@ -42,13 +41,7 @@ LAT_ORIGIN = 35.00627778
 LON_ORIGIN = 136.6740283
 ANGLE_FROM_NORTH = 0.0
 
-def prepare(top_path, coast_path):
-    raw_top_df = pd.read_csv(
-        top_path,
-        usecols=[0, 1],
-        encoding="shift-jis"
-    )
-    top_df = pd.DataFrame({"latitude [deg]": raw_top_df.iloc[:, 1], "longitude [deg]": raw_top_df.iloc[:, 0]})
+def prepare(coast_path):
     #
     raw_coast_df = pd.read_csv(
         coast_path,
@@ -56,7 +49,7 @@ def prepare(top_path, coast_path):
     )
     coast_df = pd.DataFrame({"latitude [deg]": raw_coast_df.iloc[:, 0], "longitude [deg]": raw_coast_df.iloc[:, 1]})
 
-    return top_df, coast_df
+    return coast_df
 
 def convert_coordinate(value):
     s = unicodedata.normalize("NFKC", str(value)).strip()
@@ -124,26 +117,19 @@ def JST_str_to_float(str):
     t = float(l[0]) * 3600.0 + float(l[1]) * 60.0 + float(l[2])
     return t
 
-def draw_base_map(ax, top_df, coast_df, apply_port_extra=False, apply_coast_extra=True, x_const=-6000.0):
+def draw_base_map(ax, coast_df, apply_coast_extra=True, x_const=-6000.0):
     coords_coast = df_to_xy(coast_df)
-    coords_port = df_to_xy(top_df)
     coords_coast = maybe_add_extra(coords_coast, apply_coast_extra, x_const)
-    coords_port = maybe_add_extra(coords_port, apply_port_extra, x_const)
     #
     if not np.allclose(coords_coast[0], coords_coast[-1]):
         coords_coast = np.vstack([coords_coast, coords_coast[0]])
-    if not np.allclose(coords_port[0], coords_port[-1]):
-        coords_port = np.vstack([coords_port, coords_port[0]])
     #
     poly_coast = Polygon(coords_coast, closed=True, facecolor=Colors.black,
                          edgecolor="none", alpha=0.5, linewidth=0, zorder=1)
-    poly_port = Polygon(coords_port, closed=True, facecolor=Colors.red,
-                        edgecolor="none", alpha=1.0, linewidth=0, zorder=2)
     #
     ax.add_patch(poly_coast)
-    ax.add_patch(poly_port)
     ax.set_xlim(-4500, 1500)
-    y_min = float(min(coords_coast[:, 1].min(), coords_port[:, 1].min()))
+    y_min = float(coords_coast[:, 1].min())
     ax.set_ylim(y_min, -3000)
     ax.set_aspect("equal")
     x_ticks = np.arange(ax.get_xlim()[0], ax.get_xlim()[1] + 1000, 1000)
@@ -200,7 +186,7 @@ def draw_waterdepth(ax):
     ax.legend(handles=handles, title="water depth (bins)", frameon=False)
     
 
-def plot_one_route_and_save(ax, csv_path, top_df, coast_df, linewidth=0.5):
+def plot_one_route_and_save(ax, csv_path, coast_df, linewidth=0.5):
     raw_df = pd.read_csv(
         csv_path,
         encoding="shift-jis"
@@ -236,8 +222,7 @@ def plot_one_route_and_save(ax, csv_path, top_df, coast_df, linewidth=0.5):
     #zoom
     axins = inset_axes(ax, width="35%", height="35%", loc="upper right", borderpad=0.6)
     axins.set_aspect("equal")
-    draw_base_map(axins, top_df, coast_df,
-                  apply_port_extra=False, apply_coast_extra=True, x_const=-6000.0)
+    draw_base_map(axins, coast_df,apply_coast_extra=True, x_const=-6000.0)
     axins.plot(df["p_x [m]"], df["p_y [m]"], c=Colors.black, lw=1.0, zorder=3)
     if folder == "_Yokkaichi_port1A":
         axins.set_xlim(-2500, -1500)
@@ -278,15 +263,14 @@ def plot_ship(ax,df):
     return ax
 
 def main():
-    top_df, coast_df = prepare(top_path, coast_path)
+    coast_df = prepare(coast_path)
     set_rcParams()
     paths = sorted(glob.glob(f"{DIR}/../../raw_datas/tmp/_Yokkaichi_port*/*.csv"))
     for csv_path in paths:
         fig, ax = plt.subplots(figsize=(10, 8))
-        draw_base_map(ax, top_df, coast_df,
-                      apply_port_extra=False, apply_coast_extra=True, x_const=-6000.0)
-        draw_waterdepth(ax)
-        plot_one_route_and_save(ax, csv_path, top_df, coast_df, linewidth=0.5)
+        draw_base_map(ax, coast_df,apply_coast_extra=True, x_const=-6000.0)
+        #draw_waterdepth(ax)
+        plot_one_route_and_save(ax, csv_path, coast_df, linewidth=0.5)
         plt.close(fig)
         print(f"\nsaved:    {os.path.splitext(os.path.basename(csv_path))[0]}\n")
 

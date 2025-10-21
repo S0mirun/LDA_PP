@@ -164,7 +164,7 @@ def MAKE_YOKKAICHI_BAY(df):
 from matplotlib.patches import Polygon
 import numpy as np
 
-def MAKE_YOKKAICHI_SUM(top_df, coast_df,
+def MAKE_FIG(top_df, coast_df,
                        apply_port_extra=False,
                        apply_coast_extra=True,
                        x_const=-6000.0):
@@ -296,4 +296,4 @@ if __name__ == "__main__":
     print("\nprepare finished\n")
     #MAKE_YOKKAICHI(top_df)
     #MAKE_YOKKAICHI_BAY(coast_df)
-    MAKE_YOKKAICHI_SUM(top_df, coast_df)
+    MAKE_FIG(top_df, coast_df)

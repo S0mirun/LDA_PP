@@ -32,11 +32,15 @@ TOP_HEADER = [
     "longitude [deg]", "GPS deg [deg]", "gyro deg [deg]",
     "GPS speed [knot]", "log speed [knot]", "wind dir [deg]", "wind sped [knot]"
 ]
-SHEET_NAMES = [
+DEPTH_SHEET = [
     'Passage-3-LNG',
     'Passage-3-South',
     'Passage-2-East',
     'Passage-1'
+]
+BUI_SHEET = [
+    '伊良湖-シーバース東',
+    '伊良湖-シーバース西側'
 ]
 #
 LAT_ORIGIN = 35.00627778
@@ -186,7 +190,7 @@ def draw_waterdepth(ax):
         "5–10": "white",
         ">=10": "skyblue",
     }
-    for name in SHEET_NAMES:
+    for name in DEPTH_SHEET:
         df = depth_df[name]
         df["latitude [deg]"] = df["Lat"]
         df["longitude [deg]"] = df["Long"]
@@ -205,14 +209,15 @@ def draw_bui(ax):
         bui_path,
         sheet_name=None
     )
-    df = raw_df['伊良湖-シーバース西側']
-    df["latitude [deg]"] = df["Unnamed: 5"]
-    df["longitude [deg]"] = df["Unnamed: 6"]
-    conv_df = df_to_xy(df)
-    df["p_x [m]"] = conv_df[:, 0]
-    df["p_y [m]"] = conv_df[:, 1]
-    # plot
-    ax.scatter(df["p_x [m]"], df["p_y [m]"], s=12, color='red', edgecolors="none")
+    for name in BUI_SHEET:
+        df = raw_df[name]
+        df["latitude [deg]"] = df["Unnamed: 5"]
+        df["longitude [deg]"] = df["Unnamed: 6"]
+        conv_df = df_to_xy(df)
+        df["p_x [m]"] = conv_df[:, 0]
+        df["p_y [m]"] = conv_df[:, 1]
+        # plot
+        ax.scatter(df["p_x [m]"], df["p_y [m]"], s=12, color='red', edgecolors="none")
     
     
 
