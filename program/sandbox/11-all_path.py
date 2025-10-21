@@ -18,17 +18,15 @@ from utils.PP.subroutine import (yokkaichi_bay, Tokyo_bay, Hokkaido, Honsyu)
 DIR = os.path.dirname(__file__)
 dirname =os.path.splitext(os.path.basename(__file__))[0]
 AIS_DIR = f"{DIR}/../../raw_datas/【秘密情報】航海記録"
-TOPO_DIR = f"{DIR}/../../outputs/Japan_xy"
+TOPO_DIR = f"{DIR}/../../raw_datas/tmp/csv"
 SAVE_DIR = f"{DIR}/../../outputs/{dirname}"
 os.makedirs(SAVE_DIR, exist_ok=True)
 #
-# LAT_ORIGIN = 34.57597199
-# LON_ORIGIN = 135.4275805
-LAT_ORIGIN = 34.5868 # +
-LON_ORIGIN = 135.4255 # -
-ANGLE_FROM_NORTH = -53.25
+LAT_ORIGIN = 34.57597199
+LON_ORIGIN = 135.4275805
+ANGLE_FROM_NORTH = 0
 #
-ZOOM = True
+ZOOM = False
 x_lim = (325000, 345000)
 y_lim = (-283000, -263000)
 
@@ -128,46 +126,46 @@ def label_region(lat: float, lon: float) -> str | None:
             return region_cls.name
 
 
-
-def draw_Japan(ax):
-    for data in glob.glob(f"{TOPO_DIR}/*.csv"):
-        df = pd.read_csv(
-            data,
-            encoding='shift-jis'
-        )
-        ax.plot(df["y [m]"] * (-1), df["x [m]"] * (-1), c='gray', linewidth=0.5)
-    
-    ax.set_aspect('equal')
-    # save
-    plt.savefig(os.path.join(SAVE_DIR, "Japan.png"),
-                dpi=400, bbox_inches="tight", pad_inches=0.05)
-    print("\nJapan fig saned\n")
-
 def draw_Japan_Poly(ax):
-    for data in glob.glob(f"{TOPO_DIR}/*.csv"):
-        df = pd.read_csv(
+    for data in glob.glob(f"{TOPO_DIR}/*_LATLONG.csv"):
+        raw_df = pd.read_csv(
             data,
             encoding='shift-jis'
         )
-        x = -1 * df["y [m]"].to_numpy()
-        y = -1 * df["x [m]"].to_numpy()
-        xy = np.column_stack([x, y])
-        # settings
-        # ax.set_xticks([])
-        # ax.set_xticklabels([])
-        # ax.set_yticks([])
-        # ax.set_yticklabels([])
+        #
+        df = pd.DataFrame({
+            "latitude":  raw_df.iloc[:, 0].map(convert_coordinate),
+            "longitude": raw_df.iloc[:, 1].map(convert_coordinate),
+        })
+        print(df)
+        #
+        lat = df["latitude"].to_numpy(dtype=np.float64, copy=False)
+        lon = df["longitude"].to_numpy(dtype=np.float64, copy=False)
+        x = np.empty_like(lat, dtype=np.float64)
+        y = np.empty_like(lat, dtype=np.float64)
         # plot
-        ax.add_patch(
-            Polygon(
-                xy,
-                closed=True,
-                edgecolor='gray',
-                facecolor='gray',
-                linewidth=0.5,
-            )
-        )
-        ax.update_datalim(xy)
+        for i in range(lat.size):
+            y[i], x[i] = convert_to_xy(float(lat[i]), float(lon[i]),
+                                    LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH)
+        m = np.isfinite(x) & np.isfinite(y)
+        if m.sum() < 2:
+            continue
+        ax.plot(x[m], y[m], c=Colors.black, linewidth=1, alpha=0.5)
+        # xy = np.column_stack([x, y])
+        # ax.add_patch(
+        #     Polygon(
+        #         xy,
+        #         closed=True,
+        #         edgecolor='gray',
+        #         facecolor='gray',
+        #         linewidth=0.5,
+        #     )
+        # )
+        # settings
+        ax.set_xticks([])
+        ax.set_xticklabels([])
+        ax.set_yticks([])
+        ax.set_yticklabels([])
     # save
     if ZOOM:
         ax.set_xlim(x_lim)
@@ -202,7 +200,6 @@ def draw_AIS(ax):
                 "longitude": raw_df.iloc[:, 1].map(convert_coordinate),
                 "u":         raw_df.iloc[:, 2],
             })
-            #
             lat = df["latitude"].to_numpy(dtype=np.float64, copy=False)
             lon = df["longitude"].to_numpy(dtype=np.float64, copy=False)
             x = np.empty_like(lat, dtype=np.float64)
@@ -256,9 +253,8 @@ def count_stay_port(ax):
 
 if __name__ == "__main__":
     fig, ax = plt.subplots(figsize=(8, 6))
-    #draw_Japan(ax)
     draw_Japan_Poly(ax)
-    draw_AIS(ax)
+    #draw_AIS(ax)
     #count_stay_port(ax)
 
     print("\nDone\n")
