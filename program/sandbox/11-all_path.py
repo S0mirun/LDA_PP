@@ -1,24 +1,23 @@
 import glob
 import os
 import re
-import sys
-import time
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 import numpy as np
 import pandas as pd
+from pathlib import Path
 from tqdm import tqdm
 import unicodedata
 
 from utils.LDA.ship_geometry import *
 from utils.LDA.visualization import *
-from utils.PP.subroutine import (yokkaichi_bay, Tokyo_bay, Hokkaido, Honsyu)
+from utils.PP.stay_ports import Hokkaido, Honsyu, Sea
 
 DIR = os.path.dirname(__file__)
 dirname =os.path.splitext(os.path.basename(__file__))[0]
 AIS_DIR = f"{DIR}/../../raw_datas/【秘密情報】航海記録"
-TOPO_DIR = f"{DIR}/../../raw_datas/tmp/csv"
+TPGRPH_DIR = f"{DIR}/../../raw_datas/tmp/csv"
 SAVE_DIR = f"{DIR}/../../outputs/{dirname}"
 os.makedirs(SAVE_DIR, exist_ok=True)
 #
@@ -26,31 +25,13 @@ LAT_ORIGIN = 34.57597199
 LON_ORIGIN = 135.4275805
 ANGLE_FROM_NORTH = 0
 #
-ZOOM = False
-x_lim = (325000, 345000)
-y_lim = (-283000, -263000)
-
+ZOOM = True
 #
-REGION =  [Honsyu.osaka_bay, yokkaichi_bay, Tokyo_bay,
-           Hokkaido.hakodate_bay, Hokkaido.ishikari_bay, Hokkaido.tomakomai, Hokkaido.kushiro,
-           Honsyu.akita, Honsyu.aomori_bay, Honsyu.hachinohe,
-           Honsyu.isinomaki_bay, Honsyu.kagoshima_bay, Honsyu.kanazawa,
-           Honsyu.miho_bay, Honsyu.nigata, Honsyu.onahama, Honsyu.suruga_bay,
-           Honsyu.tokuyama_bay, Honsyu.osaka_bay_2
-            ]
+REGION = Hokkaido.ALL + Honsyu.ALL
+SEA = Sea.ALL
+#
 counts = {getattr(r, "name"): 0 for r in REGION if getattr(r, "name", None)}
 keys   = [getattr(r, "name") for r in REGION]
-
-
-
-def show_counts(d, keys, first=False):
-    # redraw N lines in place
-    lines = [f"{k:<12}: {d.get(k, 0):6d}" for k in keys]
-    if not first:
-        sys.stdout.write(f"\x1b[{len(lines)}A")  # move cursor up N
-    for s in lines:
-        sys.stdout.write("\r\x1b[2K" + s + "\n")  # clear + rewrite
-    sys.stdout.flush()
 
 def df_to_coords(df):
     lat_idx = df.columns.get_loc("latitude")
@@ -127,112 +108,100 @@ def label_region(lat: float, lon: float) -> str | None:
 
 
 def draw_Japan_Poly(ax):
-    for data in glob.glob(f"{TOPO_DIR}/*_LATLONG.csv"):
+    for data in glob.glob(f"{TPGRPH_DIR}/*_LATLONG.csv"):
         raw_df = pd.read_csv(
             data,
+            usecols=[0,1],
             encoding='shift-jis'
         )
         #
-        df = pd.DataFrame({
-            "latitude":  raw_df.iloc[:, 0].map(convert_coordinate),
-            "longitude": raw_df.iloc[:, 1].map(convert_coordinate),
+        df_tpgrph = pd.DataFrame({
+            "latitude":  raw_df.iloc[:, 1].map(convert_coordinate),
+            "longitude": raw_df.iloc[:, 0].map(convert_coordinate),
         })
-        print(df)
         #
-        lat = df["latitude"].to_numpy(dtype=np.float64, copy=False)
-        lon = df["longitude"].to_numpy(dtype=np.float64, copy=False)
-        x = np.empty_like(lat, dtype=np.float64)
-        y = np.empty_like(lat, dtype=np.float64)
-        # plot
-        for i in range(lat.size):
-            y[i], x[i] = convert_to_xy(float(lat[i]), float(lon[i]),
-                                    LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH)
-        m = np.isfinite(x) & np.isfinite(y)
-        if m.sum() < 2:
-            continue
-        ax.plot(x[m], y[m], c=Colors.black, linewidth=1, alpha=0.5)
-        # xy = np.column_stack([x, y])
-        # ax.add_patch(
-        #     Polygon(
-        #         xy,
-        #         closed=True,
-        #         edgecolor='gray',
-        #         facecolor='gray',
-        #         linewidth=0.5,
-        #     )
-        # )
-        # settings
-        ax.set_xticks([])
-        ax.set_xticklabels([])
-        ax.set_yticks([])
-        ax.set_yticklabels([])
-    # save
-    if ZOOM:
-        ax.set_xlim(x_lim)
-        ax.set_ylim(y_lim)
-        ax.set_aspect('equal')
-        # zoom
-        plt.savefig(os.path.join(SAVE_DIR, "Japan_Poly_Zoom.png"),
-                    dpi=400, bbox_inches="tight", pad_inches=0.05)
-    else:
-        ax.autoscale()
-        ax.set_aspect('equal')
-        # save
-        plt.savefig(os.path.join(SAVE_DIR, "Japan_Poly.png"),
-                    dpi=400, bbox_inches="tight", pad_inches=0.05)
-    print("\nJapan fig saved\n")
-    
-def draw_AIS(ax):
-    for dir in tqdm(glob.glob(f"{AIS_DIR}/*"), desc="Reading CSVs", unit="file"):
-        for path in glob.glob(f"{dir}/*.csv"):
-            raw_df = pd.read_csv(
-                path,
-                skiprows=[0],
-                usecols=[2,3,6],
-                encoding='shift-jis'
+        p_x_arrtpgrph = np.empty(len(df_tpgrph))
+        p_y_arrtpgrph = np.empty(len(df_tpgrph))
+        for i in range(len(df_tpgrph)):
+            p_y_temp, p_x_temp = convert_to_xy(
+                df_tpgrph.iloc[i, df_tpgrph.columns.get_loc("latitude")],
+                df_tpgrph.iloc[i, df_tpgrph.columns.get_loc("longitude")],
+                LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH
             )
-            raw_df.iloc[:,0] = raw_df.iloc[:,0].map(convert_coordinate)
-            raw_df.iloc[:,1] = raw_df.iloc[:,1].map(convert_coordinate)
-            raw_df.iloc[:, 2] = pd.to_numeric(raw_df.iloc[:, 2], errors="coerce")
-            # latlon → xy
-            df = pd.DataFrame({
-                "latitude":  raw_df.iloc[:, 0].map(convert_coordinate),
-                "longitude": raw_df.iloc[:, 1].map(convert_coordinate),
-                "u":         raw_df.iloc[:, 2],
-            })
-            lat = df["latitude"].to_numpy(dtype=np.float64, copy=False)
-            lon = df["longitude"].to_numpy(dtype=np.float64, copy=False)
-            x = np.empty_like(lat, dtype=np.float64)
-            y = np.empty_like(lat, dtype=np.float64)
-            # plot
-            for i in range(lat.size):
-                y[i], x[i] = convert_to_xy(float(lat[i]), float(lon[i]),
-                                        LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH)
-            m = np.isfinite(x) & np.isfinite(y)
-            if m.sum() < 2:
-                continue
-            ax.plot(x[m], y[m], c=Colors.black, linewidth=1, alpha=0.5)
+            p_x_arrtpgrph[i] = p_x_temp
+            p_y_arrtpgrph[i] = p_y_temp
+        #
+        xy = np.vstack([p_x_arrtpgrph, p_y_arrtpgrph]).T
+        set_rcParams()
+        ax.add_patch(
+            Polygon(
+                xy,
+                closed=True,
+                edgecolor='black',
+                facecolor='gray',
+                linewidth=0.5,
+                alpha=0.3,
+            )
+        )
+    # settings
+    ax.set_xticks([])
+    ax.set_xticklabels([])
+    ax.set_yticks([])
+    ax.set_yticklabels([])
     # save
-    if ZOOM :
-        plt.savefig(os.path.join(SAVE_DIR, "AIS_Zoom.png"),
-                    dpi=400, bbox_inches="tight", pad_inches=0.05)
-    else:
-        plt.savefig(os.path.join(SAVE_DIR, "AIS.png"),
-                    dpi=400, bbox_inches="tight", pad_inches=0.05)
-    print("\nAIS fig saved\n")
-    
+    ax.autoscale()
+    ax.set_aspect('equal')
+    plt.savefig(os.path.join(SAVE_DIR, "Japan.png"),
+                dpi=400, bbox_inches="tight", pad_inches=0.05)
+    print("\nJapan fig saved\n")
 
-def count_stay_port(ax):
+def read_AIS():
     paths = sorted(glob.glob(f"{AIS_DIR}/*/S*.csv"))
     raw_dfs = []
     raw_dfs = [read_one(p) for p in tqdm(paths, total=len(paths), desc="Reading CSVs", unit="file")]
     df = pd.concat(raw_dfs, ignore_index=True)
-    df["u"] = pd.to_numeric(df["u"], errors="coerce")
     df = df.sort_values("file_date", kind="mergesort").reset_index(drop=True)
+    print("\nfinished   : read AIS\n")
+    return df
+
+def draw_AIS(ax, df):
+    p_x_arrtpgrph = np.empty(len(df))
+    p_y_arrtpgrph = np.empty(len(df))
+    for i in tqdm(range(len(df)), desc="Drawing Paths", unit="file"):
+        p_y_temp, p_x_temp = convert_to_xy(
+            df.iloc[i, df.columns.get_loc("latitude")],
+            df.iloc[i, df.columns.get_loc("longitude")],
+            LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH
+        )
+        p_x_arrtpgrph[i] = p_x_temp
+        p_y_arrtpgrph[i] = p_y_temp
+    ax.plot(p_x_arrtpgrph, p_y_arrtpgrph, color='black', linewidth=0.5, alpha=0.5)
+    # save
+    plt.savefig(os.path.join(SAVE_DIR, "AIS.png"),
+                dpi=400, bbox_inches="tight", pad_inches=0.05)
+    if ZOOM :
+        os.makedirs(f"{SAVE_DIR}/AIS", exist_ok=True)
+        for port in REGION + SEA:
+            y_min, x_min = convert_to_xy(
+                port.minY_lat,
+                port.minY_long,
+                LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH
+            )
+            y_max, x_max = convert_to_xy(
+                port.maxY_lat,
+                port.maxY_long,
+                LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH
+            )
+            ax.set_xlim(x_min, x_max)
+            ax.set_ylim(y_min, y_max)
+            plt.savefig(os.path.join(f"{SAVE_DIR}/AIS", f"{port.name}.png"),
+                        dpi=400, bbox_inches="tight", pad_inches=0.05)
+    print("\nAIS fig saved\n")
+
+def count_stay_port(ax, df):
     # chaeck
-    #show_counts(counts, keys, first=True)
     place_before = None
-    for idx, lat, lon in df[["latitude", "longitude"]].itertuples(index=True, name=None):
+    for lat, lon in df[["latitude", "longitude"]].itertuples(index=False, name=None):
         #
         place = label_region(lat, lon)
         if place_before is None and place is not None:
@@ -240,13 +209,20 @@ def count_stay_port(ax):
             # plot
             y, x = convert_to_xy(lat, lon,
                                  LAT_ORIGIN, LON_ORIGIN, ANGLE_FROM_NORTH)
-            ax.scatter(x, y, color='green', s=1)
+            ax.scatter(x, y, color='red', s=2, zorder=10)
         place_before = place
 
-        # if idx % 50 == 0:
-        #     show_counts(counts, keys)
-    show_counts(counts, keys)
-    # save
+    # result
+    sorted_items = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    width = max((len(k) for k, _ in sorted_items), default=0)
+    out_path = Path(SAVE_DIR) / "result.txt"
+    with out_path.open("w", encoding='utf-8') as f:
+        for name, cnt in sorted_items:
+            f.write(f"{name:<{width}} : {cnt}\n")
+        f.write(f"(total={sum(v for _, v in sorted_items)}, unique={len(sorted_items)})\n") 
+    # save fig
+    ax.autoscale()
+    ax.set_aspect('equal')
     plt.savefig(os.path.join(SAVE_DIR, "stay_port.png"),
                 dpi=400, bbox_inches="tight", pad_inches=0.05)
     
@@ -254,7 +230,9 @@ def count_stay_port(ax):
 if __name__ == "__main__":
     fig, ax = plt.subplots(figsize=(8, 6))
     draw_Japan_Poly(ax)
-    #draw_AIS(ax)
-    #count_stay_port(ax)
-
+    #
+    df = read_AIS()
+    draw_AIS(ax, df)
+    count_stay_port(ax, df)
+    #
     print("\nDone\n")
