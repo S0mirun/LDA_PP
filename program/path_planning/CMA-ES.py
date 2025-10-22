@@ -8,6 +8,7 @@ CMA-ES path optimization (A* init → element-based turning points → CMA-ES)
 
 from __future__ import annotations
 from enum import StrEnum
+import glob
 import os
 import sys
 import time
@@ -25,6 +26,7 @@ import utils.PP.graph_by_taneichi as Glaph
 from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.Filtered_Dict import new_filtered_dict
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
+from utils.PP.MultiPlot import RealTraj
 from utils.PP.subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
 PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
 PYSIM_DIR = os.path.join(PROGRAM_DIR, "py-ship-simulator-main/py-ship-simulator-main")
@@ -52,7 +54,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 0
+        self.port_number: int = 3
         # ship
         self.L = 100
 
@@ -1147,7 +1149,7 @@ class PathPlanning:
         if not self.ps.enable_multiplot:
             return
 
-        # ---- multiplot (no captain routes) ----
+        # ---- multiplot ----
         pointsize = 2
         fig = plt.figure(figsize=(12, 8), dpi=150, constrained_layout=True)
         gs = gridspec.GridSpec(4, 3, figure=fig)
@@ -1158,6 +1160,19 @@ class PathPlanning:
         map_X, map_Y = df_map["x [m]"].values, df_map["y [m]"].values
         ax1.fill_betweenx(map_X, map_Y, facecolor="gray", alpha=0.3)
         ax1.plot(map_Y, map_X, color="k", linestyle="--", lw=0.5, alpha=0.8)
+
+        # captain's route
+        df_cap = glob.glob(f"{TMP_DIR}/_{port['name']}/*.csv")
+        for df in df_cap:
+            traj = RealTraj()
+            traj.input_csv(df, f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
+            ax1.plot(traj.Y, traj.X, 
+                     color = 'gray', ls = '-', marker = 'D',
+                     markersize = 2, alpha = 0.8, lw = 1.0, zorder = 1)
+            legend_captain = plt.Line2D([0], [0],
+                                        color = 'gray', ls = '-', marker = 'D',
+                                        markersize = 2, alpha = 0.8, lw = 1.0, label="captain's Route"
+            )
 
         # key points
         start_point = (sm.start_xy[0, 0], sm.start_xy[0, 1])
@@ -1234,7 +1249,7 @@ class PathPlanning:
         ax1.grid()
         ax1.set_xlabel(r"$Y\,\rm{[m]}$")
         ax1.set_ylabel(r"$X\,\rm{[m]}$")
-        ax1.legend(handles=[legend_initial, legend_way, legend_fixed, legend_SD])
+        ax1.legend(handles=[legend_initial, legend_way, legend_fixed, legend_captain, legend_SD])
 
         fig.savefig(f"{folder_path}/Multiplot_{port['name']}.png", bbox_inches="tight", pad_inches=0.05)
         plt.close()
