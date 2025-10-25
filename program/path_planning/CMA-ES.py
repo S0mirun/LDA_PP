@@ -54,7 +54,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 3
+        self.port_number: int = 2
         # ship
         self.L = 100
 
