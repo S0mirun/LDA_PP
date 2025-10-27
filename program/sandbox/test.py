@@ -39,7 +39,7 @@ DEPTH_SHEET = [
     'Passage-1'
 ]
 BUI_SHEET = [
-    '伊良湖-シーバース東',
+    #'伊良湖-シーバース東',
     '伊良湖-シーバース西側'
 ]
 #
@@ -47,7 +47,7 @@ LAT_ORIGIN = 35.00627778
 LON_ORIGIN = 136.6740283
 ANGLE_FROM_NORTH = 0.0
 
-def prepare(top_path, coast_path):
+def prepare():
     raw_top_df = pd.read_csv(
         top_path,
         usecols=[0, 1],
@@ -299,7 +299,7 @@ def plot_ship(ax,df):
     return ax
 
 def main():
-    top_df, coast_df = prepare(top_path, coast_path)
+    top_df, coast_df = prepare()
     set_rcParams()
     paths = sorted(glob.glob(f"{DIR}/../../raw_datas/tmp/_Yokkaichi_port*/*.csv"))
     for csv_path in paths:
@@ -307,6 +307,7 @@ def main():
         draw_base_map(ax, top_df, coast_df,
                       apply_port_extra=False, apply_coast_extra=True, x_const=-6000.0)
         draw_waterdepth(ax)
+        draw_bui(ax)
         plot_one_route_and_save(ax, csv_path, top_df, coast_df, linewidth=0.5)
         plt.close(fig)
         print(f"\nsaved:    {os.path.splitext(os.path.basename(csv_path))[0]}\n")
