@@ -1,3 +1,8 @@
+"""
+CMA-ESのためのBezier Curve初期経路計画アルゴリズム
+
+"""
+
 import glob
 import os
 
@@ -106,7 +111,14 @@ def bezier(buoy_xy: list, start_xy: list, end_xy: list, num: int = 400):
     t = np.linspace(0.0, 1.0, num)
     B = _bernstein_matrix(n, t)                      # (num, n+1)
     C = B @ pts                                      # (num, 2)
-    return C
+    # get psi
+    dpts = n * (pts[1:] - pts[:-1])
+    B1   = _bernstein_matrix(n-1, t)
+    dC   = B1 @ dpts 
+    psi_rad = ((-np.arctan2(dC[:, 1], dC[:, 0])) + np.pi/2) % (2*np.pi) # [0, 2π)
+    psi_deg = (np.degrees(psi_rad)) % 360.0
+
+    return C, psi_rad, psi_deg
 
 if __name__ == '__main__':
     time_start_bezier = time.time()
@@ -115,26 +127,22 @@ if __name__ == '__main__':
     buoy = Buoy()
     buoy.input_csv(df_buoy[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
     #
-    C = bezier([buoy.X, buoy.Y], port["start"], port["end"])
-    #
+    C, _, _ = bezier([buoy.X, buoy.Y], [511.0, 616.0], [177.0, 303.0])
     print(C)
+    #
     fig, ax = plt.subplots(figsize=(5,5))
     ax.plot(C[:, 1], C[:, 0], linewidth=2, label="bezier")
     #
-    buoy_xy = np.column_stack([buoy.X, buoy.Y])
-    xy = np.vstack([port["start"], buoy_xy, port["end"]])
-    #
-    d   = np.linalg.norm(xy - xy[-1], axis=1)
-    D0  = np.linalg.norm(xy[0] - xy[-1])
-
-    mask = d <= D0                      # これより遠いものを除外
-    keep = xy[mask]
-    dk   = d[mask]
-    pts = keep[np.argsort(-dk)]
-    print(pts)
-    ax.scatter(pts[:, 1], pts[:, 0],color='orange', s=20, zorder=4)
+    ax.scatter(buoy.Y, buoy.X, color='orange', s=20, zorder=4)
+    for i, (x, y) in enumerate(zip(buoy.Y, buoy.X)):
+        ax.annotate(f"{i}", (x, y),
+                    xytext=(3, 3), textcoords="offset points",
+                    fontsize=8, ha="left", va="bottom",
+                    zorder=5, clip_on=True)
 
     ax.set_aspect("equal", adjustable="datalim")
     ax.legend()
     ax.set_title("Bézier curve")
-    plt.show()
+    plt.savefig(os.path.join(SAVE_DIR, "BezierCurve.png"),
+                dpi=400, bbox_inches="tight", pad_inches=0.05)
+    print("\nDone\n")
