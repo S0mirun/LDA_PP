@@ -65,7 +65,7 @@ class Settings:
         self.start_end_mode: ParamMode = ParamMode.AUTO
         self.psi_mode: ParamMode = ParamMode.AUTO
         self.steady_course_coeff_mode: ParamMode = ParamMode.AUTO
-        self.init_path_algo: InitPathAlgo = InitPathAlgo.ASTAR
+        self.init_path_algo: InitPathAlgo = InitPathAlgo.BEZIER
         self.enable_pre_berthing_straight_segment: bool = True
 
         self.save_init_path: bool = True
@@ -329,9 +329,21 @@ def round_by_pitch(value, pitch):
 
 def undo_conversion(reference_hor_index, reference_ver_index, end_hor_coord, end_ver_coord, indices, grid_pitch):
     """
-    Convert grid indices (hor_idx, ver_idx) back to real coordinates using END as a reference.
+    Convert grid indices (hor, ver) to real coords using END as reference.
 
-    Returns real coordinates as [[ver, hor], ...].
+    Parameters
+    ----------
+    reference_hor_index, reference_ver_index : int
+    end_hor_coord, end_ver_coord : float
+    indices : array-like, shape (N, 2)
+        Grid (hor, ver) pairs.
+    grid_pitch : float
+        Cell size [m].
+
+    Returns
+    -------
+    ndarray, shape (N, 2)
+        Real coords: (ver, hor) = (y, x) [m]
     """
     idx = np.asarray(indices, dtype=float)  # (N, 2) as (hor_idx, ver_idx)
     ref_idx = np.array([reference_hor_index, reference_ver_index], dtype=float)
@@ -894,13 +906,15 @@ class PathPlanning:
         self.last_hor_idx = np.where(sm.hor_range == sm.last_xy[0, 1])
 
     def gen_init_path(self):
+        print("Initial Path generation starts")
+        time_start_init_path = time.time()
+        sm = self.sample_map
+        sm.path_xy = np.empty((0, 2))
+        #
         if self.ps.init_path_algo == InitPathAlgo.ASTAR:
-            print("Initial Path generation starts")
-            time_start_astar = time.time()
-            sm = self.sample_map
-
             Glaph.Map.SetMaze(sm)
             weight = sm.grid_pitch * 20  # default
+            #
             sm.path_node, sm.psi, _ = Astar.astar(
                 sm,
                 (self.origin_hor_idx[0][0], self.origin_ver_idx[0][0]),
@@ -910,11 +924,9 @@ class PathPlanning:
                 SD=self.SD,
                 weight=weight,
                 enclosing_checker=self.enclosing,
-            )
-            astar_caltime = time.time() - time_start_astar
-            print(f"Astar algorithm took {astar_caltime:.3f} [s]\n")
-
-            original_initial_coord = undo_conversion(
+            ) # return : index=[i, j]
+            # [i, j] -> [ver, hor]
+            initial_coord_xy = undo_conversion(
                 self.end_hor_idx[0][0],
                 self.end_ver_idx[0][0],
                 sm.end_xy[0, 1],
@@ -922,55 +934,46 @@ class PathPlanning:
                 sm.path_node,
                 self.ps.gridpitch,
             )
-            initial_points = calculate_turning_points(original_initial_coord, sm, self.last_pt, self.port)
-            print("Initial Turning Points:\n",)
-            for i, (x, y) in enumerate(initial_points, 1):
-                print(f"  P{i:02d}: ({x:.1f}, {y:.1f})")
-
-            if self.ps.save_init_path:
-                self.save_init_path(sm, initial_points)
-
-            self.initial_points = np.array(initial_points, dtype=float)
+            caltime = time.time() - time_start_init_path
+            print(f"Astar algorithm took {caltime:.3f} [s]\n")
 
         elif self.ps.init_path_algo == InitPathAlgo.BEZIER:
-            print("Initial Path generation starts")
             port = self.port
             #
-            time_start_bezier = time.time()
             df_buoy = glob.glob(f"{Buoy_DIR}/_{port['name']}.csv")
             buoy = Buoy()
             buoy.input_csv(df_buoy[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
-            C = Bezier.bezier([buoy.X, buoy.Y], port["start"], port["end"], num=400)
-            #
+            initial_coord_xy, sm.psi, _ = Bezier.bezier([buoy.X, buoy.Y],
+                                                        sm.origin_xy, # calculate start point
+                                                        sm.last_xy, # calculate end point
+                                                        num=400
+                                                        ) # return : [ver, hor]
+            caltime = time.time() - time_start_init_path
+            print(f"Bezier algorithm took {caltime:.3f} [s]\n")
 
-            #
-            bezier_caltime = time.time() - time_start_bezier
-            print(f"Bezier algorithm took {bezier_caltime:.3f} [s]\n")            
-
-            if self.ps.save_init_path:
-                self.save_init_path(sm, initial_points)
-
-            self.initial_points = np.array(initial_points, dtype=float)                
-        
         else:
             # manual configuration (not used here)
             pass
 
+        initial_points = calculate_turning_points(initial_coord_xy, sm, self.last_pt, self.port)
+        print("Initial Turning Points:\n",)
+        for i, (x, y) in enumerate(initial_points, 1):
+            print(f"  P{i:02d}: ({x:.1f}, {y:.1f})")
+
+        if self.ps.save_init_path:
+            sm.path_xy = initial_coord_xy
+            self.save_init_path(sm, initial_points)
+
+        self.initial_points = np.array(initial_points, dtype=float)
+
     def save_init_path(self, sm, initial_points):
-        sm.path_xy = np.empty((0, 2))
-        for i in range(len(sm.path_node)):
-            sm.path_xy = np.append(
-                sm.path_xy,
-                np.array([[sm.ver_range[sm.path_node[i][1]], sm.hor_range[sm.path_node[i][0]]]]),
-                axis=0,
-            )
-        filename_astar = (
-            f"{SAVE_DIR}/{self.port['name']}/Initial_Path_by_Astar_with_SD.png"
+        filename = (
+            f"{SAVE_DIR}/{self.port['name']}/Initial_Path_by_{self.ps.init_path_algo.name}_with_SD.png"
             if self.ps.show_SD_on_init_path
             else f"{SAVE_DIR}/{self.port['name']}/Initial_Path_by_Astar_without_SD.png"
         )
         sm.ShowMap_for_astar(
-            filename=filename_astar,
+            filename=filename,
             SD=self.SD,
             SD_sw=self.ps.show_SD_on_init_path,
             initial_point_list=initial_points,
@@ -1201,10 +1204,13 @@ class PathPlanning:
 
         # buoy
         df_buoy = glob.glob(f"{Buoy_DIR}/_{port['name']}.csv")
-        buoy = Buoy()
-        buoy.input_csv(df_buoy[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
-        ax1.scatter(buoy.Y, buoy.X,
-                    color='orange', s=20, zorder=4)
+        if len(df_buoy) != 0:
+            buoy = Buoy()
+            buoy.input_csv(df_buoy[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
+            ax1.scatter(buoy.Y, buoy.X,
+                        color='orange', s=20, zorder=4)
+            legend_buoy = plt.Line2D([0], [0], marker="o", color="w",
+                                     markerfacecolor="orange", markersize=pointsize, label="Buoy Point")
 
         # key points
         start_point = (sm.start_xy[0, 0], sm.start_xy[0, 1])
