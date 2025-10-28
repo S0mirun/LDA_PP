@@ -22,11 +22,12 @@ from tqdm.auto import tqdm
 
 # --- external project modules ---
 import utils.PP.Astar_for_CMAES as Astar
+import utils.PP.Bezier_curve as Bezier
 import utils.PP.graph_by_taneichi as Glaph
 from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.Filtered_Dict import new_filtered_dict
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
-from utils.PP.MultiPlot import RealTraj
+from utils.PP.MultiPlot import RealTraj, Buoy
 from utils.PP.subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
 PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
 PYSIM_DIR = os.path.join(PROGRAM_DIR, "py-ship-simulator-main/py-ship-simulator-main")
@@ -40,6 +41,7 @@ dirname = os.path.splitext(os.path.basename(__file__))[0]
 SAVE_DIR = f"{DIR}/../../outputs/{dirname}"
 os.makedirs(SAVE_DIR, exist_ok=True)
 TMP_DIR = f"{DIR}/../../raw_datas/tmp"
+Buoy_DIR = f"{DIR}/../../raw_datas/buoy"
 
 
 class ParamMode(StrEnum):
@@ -49,6 +51,7 @@ class ParamMode(StrEnum):
 
 class InitPathAlgo(StrEnum):
     ASTAR = "astar"
+    BEZIER = "bezier"
 
 
 class Settings:
@@ -928,6 +931,27 @@ class PathPlanning:
                 self.save_init_path(sm, initial_points)
 
             self.initial_points = np.array(initial_points, dtype=float)
+
+        elif self.ps.init_path_algo == InitPathAlgo.BEZIER:
+            print("Initial Path generation starts")
+            port = self.port
+            #
+            time_start_bezier = time.time()
+            df_buoy = glob.glob(f"{Buoy_DIR}/_{port['name']}.csv")
+            buoy = Buoy()
+            buoy.input_csv(df_buoy[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
+            C = Bezier.bezier([buoy.X, buoy.Y], port["start"], port["end"], num=400)
+            #
+
+            #
+            bezier_caltime = time.time() - time_start_bezier
+            print(f"Bezier algorithm took {bezier_caltime:.3f} [s]\n")            
+
+            if self.ps.save_init_path:
+                self.save_init_path(sm, initial_points)
+
+            self.initial_points = np.array(initial_points, dtype=float)                
+        
         else:
             # manual configuration (not used here)
             pass
@@ -951,6 +975,7 @@ class PathPlanning:
             SD_sw=self.ps.show_SD_on_init_path,
             initial_point_list=initial_points,
         )
+
 
     def cal_sigma_for_ddCMA(
         self,
@@ -1173,6 +1198,13 @@ class PathPlanning:
                                         color = 'gray', ls = '-', marker = 'D',
                                         markersize = 2, alpha = 0.8, lw = 1.0, label="captain's Route"
             )
+
+        # buoy
+        df_buoy = glob.glob(f"{Buoy_DIR}/_{port['name']}.csv")
+        buoy = Buoy()
+        buoy.input_csv(df_buoy[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
+        ax1.scatter(buoy.Y, buoy.X,
+                    color='orange', s=20, zorder=4)
 
         # key points
         start_point = (sm.start_xy[0, 0], sm.start_xy[0, 1])

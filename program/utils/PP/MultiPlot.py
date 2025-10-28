@@ -209,10 +209,40 @@ class RealTraj(Traj):
         self.u_knot = SHIP_SPEED_GPS[:]
         self.psi_raw = HEAD_ANGLE_GYRO[:] #degree
         self.psi_GPS_raw = HEAD_ANGLE_GPS[:] #degree
-        
-        
 
+class Buoy(Traj):
+    def __init__(self):
+        super().__init__()
+    #
+    def input_csv(self, filename_buoy, filename_berth):
+        # check the existance of csv file
+        filelist = [filename_berth, filename_buoy]
+        for file in filelist:
+            if os.path.isfile(file) == True:
+                pass
+            else:
+                print(file + ' does not exist.')
+                sys.exit()
+        #
+        df = pd.read_csv(filename_buoy
+                         , header=None, skiprows=0
+                         , usecols=[5, 6]
+                         , names=['latitude', 'longitude']
+                         , encoding="utf-8-sig"
+                         )
+        # convert latlong to XY
+        df_berth = pd.read_csv(filename_berth)
+        xy = convert_to_xy(
+            df,
+            df_berth['Latitude'].iloc[0],
+            df_berth['Longitude'].iloc[0],
+            df_berth['Psi[deg]'].iloc[0]
+        ).values
 
+        mask = ~np.all(np.isnan(xy), axis=1)  # [nan,nan] のみ除外
+        xy = xy[mask]
+
+        self.X, self.Y = xy.T
 
 class SimlationTraj(Traj):
     def __init__(self):
@@ -247,8 +277,6 @@ class SimlationTraj(Traj):
         self.delta_r[:] = df[' delta_rudder(real)'][:]     ; self.n_prop_r[:] = df[' n_prop(real)'][:]
         self.n_bt[:]    = df[' n_bt'][:]                   ; self.n_st[:]     = df[' n_st'][:]
         self.windd[:]   = df[' windd'][:]                  ; self.windv[:]    = df[' windv'][:]
-
-
 
 class CheckPoint(Traj): #CheckPoint使ってない？
     def __init__(self):
@@ -288,7 +316,6 @@ class CheckPoint(Traj): #CheckPoint使ってない？
         #データフレームからガイドラインの平均値（a_ave、b_ave）および標準偏差（a_SD、b_SD）を読み込み、各属性に格納します。
         self.a_ave = df['a_ave']; self.b_ave = df['b_ave']
         self.a_SD = df['a_SD']  ; self.b_SD = df['b_SD']
-
 
 
 
