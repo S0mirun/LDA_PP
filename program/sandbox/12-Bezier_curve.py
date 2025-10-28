@@ -27,7 +27,7 @@ def read_bui():
         sheet_name=None
     )
     for name in BUI_SHEET:
-        df = raw_df[name].iloc[[6,7,8,9,10,15], :]
+        df = raw_df[name].iloc[[6,7,8,9,10,11,15], :]
         print(df)
         df["latitude [deg]"] = df["Unnamed: 5"]
         df["longitude [deg]"] = df["Unnamed: 6"]
