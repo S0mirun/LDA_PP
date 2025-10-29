@@ -95,9 +95,9 @@ def _bernstein_matrix(n: int, t: np.ndarray) -> np.ndarray:
     return coeff * T * U 
 
 
-def bezier(buoy_xy: list, start_xy: list, end_xy: list, num: int = 400):
+def bezier(buoy_xy: list, start_xy: list, mid_xy, end_xy: list, num: int = 400):
     buoy_xy = np.column_stack([buoy_xy[0], buoy_xy[1]])
-    xy = np.vstack([start_xy, buoy_xy, end_xy])
+    xy = np.vstack([start_xy, buoy_xy, mid_xy, end_xy])
     #
     d   = np.linalg.norm(xy - xy[-1], axis=1)
     D0  = np.linalg.norm(xy[0] - xy[-1])
@@ -115,7 +115,7 @@ def bezier(buoy_xy: list, start_xy: list, end_xy: list, num: int = 400):
     dpts = n * (pts[1:] - pts[:-1])
     B1   = _bernstein_matrix(n-1, t)
     dC   = B1 @ dpts 
-    psi_rad = ((-np.arctan2(dC[:, 1], dC[:, 0])) + np.pi/2) % (2*np.pi) # [0, 2π)
+    psi_rad = (-np.arctan2(dC[:, 1], dC[:, 0])) % (2*np.pi) # [0, 2π)
     psi_deg = (np.degrees(psi_rad)) % 360.0
 
     return C, psi_rad, psi_deg
@@ -127,7 +127,7 @@ if __name__ == '__main__':
     buoy = Buoy()
     buoy.input_csv(df_buoy[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
     #
-    C, _, _ = bezier([buoy.X, buoy.Y], [511.0, 616.0], [177.0, 303.0])
+    C, _, _ = bezier([buoy.X, buoy.Y], [1880.0, 1775.0], [700.0, 85.0], [315.0, 85.0])
     print(C)
     #
     fig, ax = plt.subplots(figsize=(5,5))

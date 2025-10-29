@@ -3,7 +3,7 @@ CMA-ES path optimization (A* init → element-based turning points → CMA-ES)
 - Max speed: 9.5 knots
 - Ship Domain at segment midpoint + checkpoint
 - Angle convention: vertical (X) = 0 deg, clockwise positive
-- Coordinate note: (ver, hor) = (X, Y)
+- Coordinate note: (ver, hor) = (Y, X)
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 0
         # ship
         self.L = 100
 
@@ -69,7 +69,7 @@ class Settings:
         self.enable_pre_berthing_straight_segment: bool = True
 
         self.save_init_path: bool = True
-        self.show_SD_on_init_path: bool = True
+        self.show_SD_on_init_path: bool = False
         self.gridpitch: float = 5.0  # [m]
         self.gridpitch_for_Astar: float = 5.0  # [m]
         self.range_type: float = 1
@@ -939,15 +939,25 @@ class PathPlanning:
 
         elif self.ps.init_path_algo == InitPathAlgo.BEZIER:
             port = self.port
+            sm.isect_xy = self.calcurate_intersection(sm)
             #
-            df_buoy = glob.glob(f"{Buoy_DIR}/_{port['name']}.csv")
-            buoy = Buoy()
-            buoy.input_csv(df_buoy[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
-            initial_coord_xy, sm.psi, _ = Bezier.bezier([buoy.X, buoy.Y],
-                                                        sm.origin_xy, # calculate start point
-                                                        sm.last_xy, # calculate end point
-                                                        num=400
-                                                        ) # return : [ver, hor]
+            buoy_file = glob.glob(f"{Buoy_DIR}/_{port['name']}.csv")
+            if buoy_file:
+                buoy = Buoy()
+                buoy.input_csv(buoy_file[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
+                initial_coord_xy, sm.psi, _ = Bezier.bezier([buoy.X, buoy.Y],
+                                                            sm.origin_xy, # calculate start point
+                                                            sm.isect_xy, # sub goal
+                                                            sm.last_xy, # calculate end point
+                                                            num=400
+                                                            ) # return : [ver, hor]
+            else:
+                initial_coord_xy, _, sm.psi = Bezier.bezier(sm.isect_xy,
+                                                            sm.origin_xy, # calculate start point
+                                                            sm.isect_xy, # sub goal
+                                                            sm.last_xy, # calculate end point
+                                                            num=400
+                                                            ) # return : [ver, hor]
             caltime = time.time() - time_start_init_path
             print(f"Bezier algorithm took {caltime:.3f} [s]\n")
 
@@ -966,6 +976,24 @@ class PathPlanning:
 
         self.initial_points = np.array(initial_points, dtype=float)
 
+    def calcurate_intersection(self, sm):
+        """
+        概要
+            start-originを結ぶ直線とlast-endを結ぶ直線の交点を求める。
+        出力
+            交点の座標[ver, hor]
+        """
+        start = sm.start_xy[0] ; origin = sm.origin_xy[0]
+        end = sm.end_xy[0] ; last = sm.last_xy[0]
+        #
+        a = (start[0] - origin[0]) / (start[1] - origin[1])
+        b = start[0] - a * start[1] # b = y - ax
+        c = (end[0] - last[0]) / (end[1] - last[1])
+        d = end[0] - c * end[1]
+        hor = (d - b) / (a - c)
+        ver = (a*d - b*c) / (a - c)
+        return np.array([ver, hor], dtype=float)
+
     def save_init_path(self, sm, initial_points):
         filename = (
             f"{SAVE_DIR}/{self.port['name']}/Initial_Path_by_{self.ps.init_path_algo.name}_with_SD.png"
@@ -978,7 +1006,6 @@ class PathPlanning:
             SD_sw=self.ps.show_SD_on_init_path,
             initial_point_list=initial_points,
         )
-
 
     def cal_sigma_for_ddCMA(
         self,
@@ -1017,41 +1044,15 @@ class PathPlanning:
         port = self.dict_of_port(self.ps.port_number)
         self.port = port
 
-        # --- start & end ---
-        if self.ps.start_end_mode == ParamMode.AUTO:
-            self.weight_of_SD = 20
-            print("start_end : default")
-        else:
-            self.weight_of_SD = 20
-            self.start_coord = [-600.0, -400.0]
-            self.end_coord = [0.0, 0.0]
-            print("start_end : manual")
-
-        # --- psi (heading) ---
-        if self.ps.psi_mode == ParamMode.AUTO:
-            print("psi : default")
-        else:
-            self.manual_psi_start = -20
-            self.manual_psi_end = 10
-            print("psi : manual")
-
-        # --- steady course coefficient ---
-        if self.ps.steady_course_coeff_mode == ParamMode.AUTO:
-            print("steady_course_coeff : default")
-        else:
-            print("steady_course_coeff : 0")
-
-        # --- init path algorithm & related flags ---
-        if self.ps.init_path_algo == InitPathAlgo.ASTAR:
-            print("init_path_algo : Astar")
-            print(f"weight_SD : grid_pitch*{self.weight_of_SD}")
-            if self.ps.save_init_path:
-                print("save_init_path : on")
-                print(f"init_SD : {'on' if self.ps.show_SD_on_init_path else 'off'}")
-            else:
-                print("save_init_path : off")
-        else:
-            print("init_path_algo : Manual")
+        # ---- pretty print helper ----
+        LABELS = (
+            "start_end", "psi", "steady_course_coeff",
+            "init_path_algo", "weight_SD", "save_init_path", "init_SD",
+            "save_opt_path", "csv"
+        )
+        LABEL_W = max(len(s) for s in LABELS)
+        def p(key, value):
+            print(f"{key:<{LABEL_W}}  : {value}")
 
         # --- ratios for cost weights (concise one-liner) ---
         print(
@@ -1063,10 +1064,48 @@ class PathPlanning:
             f"{'Distance':<12}{self.ps.distance_ratio}\n"
         )
 
+        # --- start & end ---
+        self.weight_of_SD = 20
+        if self.ps.start_end_mode == ParamMode.AUTO:
+            p("start_end", "default")
+        else:
+            self.start_coord = [-600.0, -400.0]
+            self.end_coord = [0.0, 0.0]
+            p("start_end", "manual")
+
+        # --- psi (heading) ---
+        if self.ps.psi_mode == ParamMode.AUTO:
+            p("psi", "default")
+        else:
+            self.manual_psi_start = -20
+            self.manual_psi_end = 10
+            p("psi", "manual")
+
+        # --- steady course coefficient ---
+        if self.ps.steady_course_coeff_mode == ParamMode.AUTO:
+            p("steady_course_coeff", "default")
+        else:
+            p("steady_course_coeff", "0")
+
+        # --- init path algorithm & related flags ---
+        if self.ps.init_path_algo == InitPathAlgo.ASTAR:
+            p("init_path_algo", "Astar")
+            p("weight_SD", f"grid_pitch*{self.weight_of_SD}")
+        elif self.ps.init_path_algo == InitPathAlgo.BEZIER:
+            p("init_path_algo", "Bezier")    
+        else:
+            p("init_path_algo", "Manual")
+
+        # -- init path fig --
+        if self.ps.save_init_path:
+            p("save_init_path", "on")
+            p("init_SD", "on" if self.ps.show_SD_on_init_path else "off")
+        else:
+            p("save_init_path", "off")
+
         # --- save options ---
-        print(f"save_opt_path : {'on' if self.ps.save_opt_path else 'off'}\n"
-              f"csv : {'on' if self.ps.save_csv else 'off'}"
-            )
+        p("save_opt_path", "on" if self.ps.save_opt_path else "off")
+        p("csv", "on" if self.ps.save_csv else "off")
 
     def dict_of_port(self, num):
         dictionary_of_port = {
@@ -1095,7 +1134,7 @@ class PathPlanning:
             2: {
                 "name": "Yokkaichi_port2B",
                 "bay": yokkaichi_bay.port2B,
-                "start": [2050.0, 2000.0],
+                "start": [2000.0, 2000.0],
                 "end": [200.0, 100.0],
                 "psi_start": -125,
                 "psi_end": 175,
@@ -1209,8 +1248,8 @@ class PathPlanning:
             buoy.input_csv(df_buoy[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
             ax1.scatter(buoy.Y, buoy.X,
                         color='orange', s=20, zorder=4)
-            legend_buoy = plt.Line2D([0], [0], marker="o", color="w",
-                                     markerfacecolor="orange", markersize=pointsize, label="Buoy Point")
+        legend_buoy = plt.Line2D([0], [0], marker="o", color="w",
+                                    markerfacecolor="orange", markersize=pointsize, label="Buoy Point")
 
         # key points
         start_point = (sm.start_xy[0, 0], sm.start_xy[0, 1])
@@ -1287,7 +1326,7 @@ class PathPlanning:
         ax1.grid()
         ax1.set_xlabel(r"$Y\,\rm{[m]}$")
         ax1.set_ylabel(r"$X\,\rm{[m]}$")
-        ax1.legend(handles=[legend_initial, legend_way, legend_fixed, legend_captain, legend_SD])
+        ax1.legend(handles=[legend_initial, legend_way, legend_fixed, legend_buoy, legend_captain, legend_SD])
 
         fig.savefig(f"{folder_path}/Multiplot_{port['name']}.png", bbox_inches="tight", pad_inches=0.05)
         plt.close()

@@ -126,13 +126,6 @@ class Map():
                     ax.plot(self.path_xy[j,1] + 0.5 + np.array(r_list) * np.sin(theta_list_closed + self.psi[j]),
                             self.path_xy[j,0] + 0.5 + np.array(r_list) * np.cos(theta_list_closed + self.psi[j]), 
                             lw=0.5, color='g', ls='--')
-                        
-                    """  
-                    ax.plot(self.path_xy[j,1]+ 0.5 + r_list[:] * np.sin(theta_list[:] + self.psi[j]),
-                            self.path_xy[j,0]+ 0.5 + r_list[:] * np.cos(theta_list[:] + self.psi[j]), 
-                            lw = 0.5, color = 'g', ls = '--'
-                            )
-                    """
                     
         # Set axis limits
         ax.set_xlim(self.hor_range[0], self.hor_range[-1] + self.grid_pitch)
@@ -177,37 +170,6 @@ class Map():
         plt.tight_layout()
         fig.savefig(filename, bbox_inches='tight', pad_inches=0.05)
         plt.close()
-
-
-        # ax.scatter(self.path_xy[:,1]+0.5, self.path_xy[:,0]+0.5, lw = 0.1, color = 'r')
-        # show the smoothed path
-        # if 'smoothed_path_xy' in dir(self):
-            # ax.plot(   self.smoothed_path_xy[:,1]+0.5, self.smoothed_path_xy[:,0]+0.5, lw = 1.5, color = 'b', zorder = 2)
-        """
-        ax.set_xlim(self.hor_range[0], self.hor_range[-1]+self.grid_pitch)
-        ax.set_ylim(self.ver_range[0], self.ver_range[-1]+self.grid_pitch)
-
-        ax.set_xticks(self.hor_range[::20])
-        ax.set_yticks(self.ver_range[::20])
-
-        ax.set_xticklabels(self.hor_range[::20], rotation=90)
-        ax.set_yticklabels(self.ver_range[::20], rotation=0)
-
-
-        ax.set_xlabel(r'$Y\\,\\rm{[m]}$')
-        ax.set_ylabel(r'$X\\,\\rm{[m]}$')
-
-        if 'txt' in dir(self):
-            ax.text(self.hor_range[-1]+self.grid_pitch, self.ver_range[-1]+self.grid_pitch,self.txt,  ha = 'right', va = 'top')
-
-        plt.grid(which='major',color='k',linestyle='--',linewidth = 0.4,alpha = 0.5)
-        # plt.grid(which='minor',color='k',linestyle='--',linewidth = 0.3,alpha = 0.5)
-
-        plt.gca().set_aspect('equal', adjustable='box')
-        plt.tight_layout()
-        fig.savefig(filename, pad_inches=0.05)
-        plt.close()
-        """
 
     def ShowMap(self, filename=None, SD=None, initial_point_list=None, optimized_point_list=None, SD_sw=True):
         # set glaph
