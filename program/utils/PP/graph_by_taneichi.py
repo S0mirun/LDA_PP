@@ -6,6 +6,7 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from utils.PP.subroutine import mpl_config
 
@@ -66,9 +67,9 @@ class Map():
         Map.AddObstacleNode(target_map, obstacles, 'berth')
         return target_map
 
-    def ShowMap_for_astar(self, filename=None, SD=None, SD_sw=True, initial_point_list=None):
+    def ShowInitialMap(self, filename=None, SD=None, SD_sw=True, initial_point_list=None):
         """
-        Plot map for A* initial path (start/origin/path/last/end + optional SD).
+        Plot map for initial path (start/origin/path/last/end + optional SD).
         Args:
             filename (str|None): Output image path.
             SD: Ship-domain model (has distance()).
@@ -179,7 +180,13 @@ class Map():
         fig.savefig(filename, bbox_inches='tight', pad_inches=0.05)
         plt.close()
 
-    def ShowMap(self, filename=None, SD=None, initial_point_list=None, optimized_point_list=None, SD_sw=True):
+    def ShowMap(self,
+        filename=None,
+        SD=None,
+        initial_point_list=None,
+        optimized_point_list=None,
+        SD_sw=True,
+    ):
         """
         Plot map with path and optional SD at checkpoints & midpoints.
         Args:
@@ -224,7 +231,7 @@ class Map():
 
         # optimized points
         if optimized_point_list is not None:
-            optimized_points = np.array(O.scatterized_point_list)
+            optimized_points = np.array(optimized_point_list)
             ax.scatter(
                 optimized_points[:, 1],
                 optimized_points[:, 0],
@@ -341,9 +348,8 @@ class Map():
                 ax.plot(mid_point_hor + np.array(r_list) * np.sin(theta_list_closed + psi_list_at_mp[j]),
                         mid_point_ver + np.array(r_list) * np.cos(theta_list_closed + psi_list_at_mp[j]),
                         lw=0.5, color='b', ls='--')
-
-        print(f"出力された図を見て、CPでの角度がおかしくないか確認せよ")
-        print("Psi List (degrees):", np.degrees(psi_list_at_cp))
+                
+            print("Psi List (degrees):", np.degrees(psi_list_at_cp))
 
         # axes limits
         ax.set_xlim(self.hor_range[0], self.hor_range[-1] + self.grid_pitch)
@@ -386,7 +392,8 @@ class Map():
         fig.savefig(filename, bbox_inches='tight', pad_inches=0.05)
         plt.close()
         # return (ver, hor) lists and psi lists
-        return cp_list, mp_list, psi_list_at_cp, psi_list_at_mp
+        if optimized_point_list is not None:
+            return cp_list, mp_list, psi_list_at_cp, psi_list_at_mp
 
     def DetictCollision(self, start, end):
         """
@@ -495,13 +502,16 @@ class Map():
         """
         name = name
         num = 0
-        while True:
-            key = name + '-' + str(num)
-            if key in self.obstacle_dict:
-                num += 1
-            else:
-                self.obstacle_dict[key] = array
-                break
+        with tqdm(total=None, desc=f"AddObstacleLine[{name}]", unit='probe', leave=False) as pbar:
+            while True:
+                key = name + '-' + str(num)
+                if key in self.obstacle_dict:
+                    num += 1
+                    pbar.update(1)
+                else:
+                    self.obstacle_dict[key] = array
+                    pbar.update(1)
+                    break
 
     def AddObstacleNode(self, array, name='Noname'):
         """
@@ -513,7 +523,7 @@ class Map():
             None
         """
         inner_node = self.fill_inner_concave_obstacle(array, self.grid_pitch)
-        for i in range(len(array) - 1):
+        for i in tqdm(range(len(array) - 1), desc='Add Node'):
             tmp_array = self.DetictCollision(array[i, :], array[i + 1, :])
             self.obstacle_node = np.concatenate([self.obstacle_node, tmp_array])
         self.obstacle_node = np.append(self.obstacle_node, inner_node, axis=0)

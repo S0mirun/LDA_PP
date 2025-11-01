@@ -57,7 +57,8 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 0
+        self.port_number: int = 2
+         # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
         # ship
         self.L = 100
 
@@ -939,25 +940,16 @@ class PathPlanning:
 
         elif self.ps.init_path_algo == InitPathAlgo.BEZIER:
             port = self.port
-            sm.isect_xy = self.calcurate_intersection(sm)
+            # sm.isect_xy = self.calcurate_intersection(sm)
             #
-            buoy_file = glob.glob(f"{Buoy_DIR}/_{port['name']}.csv")
-            if buoy_file:
+            if (files := glob.glob(f"{Buoy_DIR}/_{port['name']}.csv")):
                 buoy = Buoy()
-                buoy.input_csv(buoy_file[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
-                initial_coord_xy, sm.psi, _ = Bezier.bezier([buoy.X, buoy.Y],
-                                                            sm.origin_xy, # calculate start point
-                                                            sm.isect_xy, # sub goal
-                                                            sm.last_xy, # calculate end point
-                                                            num=400
-                                                            ) # return : [ver, hor]
+                buoy.input_csv(files[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
+                buoy_xy = [buoy.X, buoy.Y]
             else:
-                initial_coord_xy, _, sm.psi = Bezier.bezier(sm.isect_xy,
-                                                            sm.origin_xy, # calculate start point
-                                                            sm.isect_xy, # sub goal
-                                                            sm.last_xy, # calculate end point
-                                                            num=400
-                                                            ) # return : [ver, hor]
+                buoy_xy = None
+
+            initial_coord_xy, _, sm.psi = Bezier.bezier(sm=sm, buoy_xy=buoy_xy, num=400)
             caltime = time.time() - time_start_init_path
             print(f"Bezier algorithm took {caltime:.3f} [s]\n")
 
@@ -976,35 +968,18 @@ class PathPlanning:
 
         self.initial_points = np.array(initial_points, dtype=float)
 
-    def calcurate_intersection(self, sm):
-        """
-        概要
-            start-originを結ぶ直線とlast-endを結ぶ直線の交点を求める。
-        出力
-            交点の座標[ver, hor]
-        """
-        start = sm.start_xy[0] ; origin = sm.origin_xy[0]
-        end = sm.end_xy[0] ; last = sm.last_xy[0]
-        #
-        a = (start[0] - origin[0]) / (start[1] - origin[1])
-        b = start[0] - a * start[1] # b = y - ax
-        c = (end[0] - last[0]) / (end[1] - last[1])
-        d = end[0] - c * end[1]
-        hor = (d - b) / (a - c)
-        ver = (a*d - b*c) / (a - c)
-        return np.array([ver, hor], dtype=float)
-
     def save_init_path(self, sm, initial_points):
         filename = (
             f"{SAVE_DIR}/{self.port['name']}/Initial_Path_by_{self.ps.init_path_algo.name}_with_SD.png"
             if self.ps.show_SD_on_init_path
             else f"{SAVE_DIR}/{self.port['name']}/Initial_Path_by_Astar_without_SD.png"
         )
-        sm.ShowMap_for_astar(
+        sm.ShowMap(
             filename=filename,
             SD=self.SD,
-            SD_sw=self.ps.show_SD_on_init_path,
             initial_point_list=initial_points,
+            optimized_point_list=None,
+            SD_sw=self.ps.show_SD_on_init_path,
         )
 
     def cal_sigma_for_ddCMA(
@@ -1135,7 +1110,7 @@ class PathPlanning:
                 "name": "Yokkaichi_port2B",
                 "bay": yokkaichi_bay.port2B,
                 "start": [2000.0, 2000.0],
-                "end": [200.0, 100.0],
+                "end": [300.0, 80.0],
                 "psi_start": -125,
                 "psi_end": 175,
                 "berth_type": 1,
@@ -1146,9 +1121,9 @@ class PathPlanning:
                 "name": "Else_port1",
                 "bay": else_bay.port1,
                 "start": [2500.0, 0.0],
-                "end": [350.0, 20.0],
-                "psi_start": -145,
-                "psi_end": 160,
+                "end": [450.0, 20.0],
+                "psi_start": -150,
+                "psi_end": 135,
                 "berth_type": 1,
                 "ver_range": [0, 3000],
                 "hor_range": [-1000, 2000],

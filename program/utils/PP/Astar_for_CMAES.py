@@ -173,3 +173,6 @@ def astar(
 
     # not found
     raise RuntimeError("A* failed to find a path")
+
+def drow_basemap(ax):
+    pass

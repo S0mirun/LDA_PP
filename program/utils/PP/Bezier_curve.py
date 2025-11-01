@@ -141,10 +141,11 @@ def compute_control_points(sm, *, k=0.9, beta=0.5, phi_min=0.05, phi_max=0.7):
 
     # --- P1: via intercepts on line (start-origin)
     x_int1, y_int1 = intercept_points(start, origin)
-    cands1 = [pt for pt in (x_int1, y_int1) if pt is not None]
-    if not cands1:
-        raise ValueError("No intercept candidate for (start, origin).")
-    P1 = cands1[np.argmin([np.linalg.norm(start - pt) for pt in cands1])]
+    # cands1 = [pt for pt in (x_int1, y_int1) if pt is not None]
+    # if not cands1:
+    #     raise ValueError("No intercept candidate for (start, origin).")
+    # P1 = cands1[np.argmin([np.linalg.norm(start - pt) for pt in cands1])]
+    P1 = (x_int1 + y_int1) / 2
 
     # --- base lengths
     L1 = np.linalg.norm(P1 - start)
@@ -181,7 +182,8 @@ def compute_control_points(sm, *, k=0.9, beta=0.5, phi_min=0.05, phi_max=0.7):
 def bezier(sm, buoy_xy: Optional[Sequence]=None, num: int = 400):
     """Allow buoy_xy=None; accept (ys, xs) or (N,2). Return stacked control polygon."""
     start_xy   = np.asarray(sm.origin_xy[0], dtype=float)
-    control_xy = np.asarray(compute_control_points(sm), dtype=float)
+    isect_xy   = np.asarray(calcurate_intersection(sm), dtype=float)
+    #control_xy = np.asarray(compute_control_points(sm), dtype=float)
     end_xy     = np.asarray(sm.last_xy[0],   dtype=float)
 
     if buoy_xy is None:
@@ -194,7 +196,7 @@ def bezier(sm, buoy_xy: Optional[Sequence]=None, num: int = 400):
             by, bx = buoy_xy
             buoy_mat = np.column_stack([by, bx])
 
-    xy = np.vstack([start_xy, buoy_mat, control_xy, end_xy])
+    xy = np.vstack([start_xy, buoy_mat, isect_xy, end_xy])
     #
     d   = np.linalg.norm(xy - xy[-1], axis=1)
     D0  = np.linalg.norm(xy[0] - xy[-1])
