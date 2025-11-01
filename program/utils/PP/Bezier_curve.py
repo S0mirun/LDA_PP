@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import time
+from typing import Optional, Sequence
 
 from utils.PP.MultiPlot import Buoy
 from utils.PP.subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
@@ -94,10 +95,106 @@ def _bernstein_matrix(n: int, t: np.ndarray) -> np.ndarray:
     U = (1.0 - t) ** (n - k)                                  # (M, n+1)
     return coeff * T * U 
 
+def calcurate_intersection(sm):
+    """
+    概要
+        start-originを結ぶ直線とlast-endを結ぶ直線の交点を求める。
+    出力
+        交点の座標[ver, hor]
+    """
+    start = sm.start_xy[0] ; origin = sm.origin_xy[0]
+    end = sm.end_xy[0] ; last = sm.last_xy[0]
+    #
+    a = (start[0] - origin[0]) / (start[1] - origin[1])
+    b = start[0] - a * start[1] # b = y - ax
+    c = (end[0] - last[0]) / (end[1] - last[1])
+    d = end[0] - c * end[1]
+    hor = (d - b) / (a - c)
+    ver = (a*d - b*c) / (a - c)
+    return np.array([ver, hor], dtype=float)
 
-def bezier(buoy_xy: list, start_xy: list, mid_xy, end_xy: list, num: int = 400):
-    buoy_xy = np.column_stack([buoy_xy[0], buoy_xy[1]])
-    xy = np.vstack([start_xy, buoy_xy, mid_xy, end_xy])
+def compute_control_points(sm, *, k=0.9, beta=0.5, phi_min=0.05, phi_max=0.7):
+    """
+    P1: closest axis-intercept to start. 
+    P2: length uses (5) P1-ratio, then (6) angle-based shrink. (ver,hor)=(y,x)
+    """
+
+    def intercept_points(p, q):
+        """Return (x_intercept, y_intercept) in (y,x); None if undefined."""
+        p = np.asarray(p, dtype=float)
+        q = np.asarray(q, dtype=float)
+        dy = p[0] - q[0]; dx = p[1] - q[1]
+        if np.isclose(dx, 0.0):
+            x_int = np.array([0.0, p[1]])                 # y=0 crossing
+            y_int = np.array([0.0, 0.0]) if np.isclose(p[1], 0.0) else None  # x=0 crossing only if x==0
+            return x_int, y_int
+        a = dy / dx; b = p[0] - a * p[1]                  # y = a x + b
+        y_int = np.array([b, 0.0])                        # x=0
+        x_int = None if np.isclose(a, 0.0) else np.array([0.0, -b / a])  # y=0
+        return x_int, y_int
+
+    # endpoints (y,x)
+    start  = np.asarray(sm.start_xy[0],  float)
+    origin = np.asarray(sm.origin_xy[0], float)
+    end    = np.asarray(sm.end_xy[0],    float)
+    last   = np.asarray(sm.last_xy[0],   float)
+
+    # --- P1: via intercepts on line (start-origin)
+    x_int1, y_int1 = intercept_points(start, origin)
+    cands1 = [pt for pt in (x_int1, y_int1) if pt is not None]
+    if not cands1:
+        raise ValueError("No intercept candidate for (start, origin).")
+    P1 = cands1[np.argmin([np.linalg.norm(start - pt) for pt in cands1])]
+
+    # --- base lengths
+    L1 = np.linalg.norm(P1 - start)
+    dist_se = np.linalg.norm(end - start)
+
+    # --- (5) P1-ratio: base φ in (0,1)
+    base_phi = k * (L1 / (L1 + dist_se + 1e-9))          # larger L1 -> relatively shorter P2
+    phi = float(np.clip(base_phi, phi_min, phi_max))
+
+    # --- (6) angle shrink by entry/exit directions
+    u = origin - start                                   # start -> origin
+    v = last - end                                       # end -> last
+    nu = np.linalg.norm(u); nv = np.linalg.norm(v)
+    if nu > 0.0 and nv > 0.0:
+        cos_th = float(np.clip(np.dot(u, v) / (nu * nv), -1.0, 1.0))
+        w = 0.5 * (1.0 - cos_th)                         # 0..1 (sharper -> larger)
+        phi = phi * (1.0 - beta * w)
+        phi = float(np.clip(phi, phi_min, phi_max))
+
+    # --- P2 direction and placement
+    if nv <= 0.0:                                        # fallback dir if end==last
+        wdir = end - start
+        nw = np.linalg.norm(wdir)
+        dir_vec = wdir / (nw + 1e-9)
+    else:
+        dir_vec = v / nv
+
+    s = L1 * phi
+    P2 = end + s * dir_vec
+
+    return np.vstack([P1, P2], dtype=float)
+
+
+def bezier(sm, buoy_xy: Optional[Sequence]=None, num: int = 400):
+    """Allow buoy_xy=None; accept (ys, xs) or (N,2). Return stacked control polygon."""
+    start_xy   = np.asarray(sm.origin_xy[0], dtype=float)
+    control_xy = np.asarray(compute_control_points(sm), dtype=float)
+    end_xy     = np.asarray(sm.last_xy[0],   dtype=float)
+
+    if buoy_xy is None:
+        buoy_mat = np.empty((0, 2), dtype=float)  # no buoys
+    else:
+        arr = np.asarray(buoy_xy, dtype=float)
+        if arr.ndim == 2 and arr.shape[-1] == 2:   # already (N,2)
+            buoy_mat = arr
+        else:                                      # expect (ys, xs)
+            by, bx = buoy_xy
+            buoy_mat = np.column_stack([by, bx])
+
+    xy = np.vstack([start_xy, buoy_mat, control_xy, end_xy])
     #
     d   = np.linalg.norm(xy - xy[-1], axis=1)
     D0  = np.linalg.norm(xy[0] - xy[-1])
