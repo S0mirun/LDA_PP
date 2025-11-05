@@ -46,6 +46,16 @@ BUI_SHEET = [
 LAT_ORIGIN = 35.00627778
 LON_ORIGIN = 136.6740283
 ANGLE_FROM_NORTH = 0.0
+#
+BINS   = [0, 5, 10, np.inf]
+LABELS = ["0–5", "5–10", ">=10"]
+DEPTH_BIN_DTYPE = CategoricalDtype(categories=LABELS, ordered=True)
+
+PALETTE = {  # ビンごとの固定色（必要なら色を変更）
+    "0–5":  "#BFE3EC",
+    "5–10": "#2BB3C0",
+    ">=10": "#123D8B",
+}
 
 def prepare():
     raw_top_df = pd.read_csv(
@@ -180,16 +190,7 @@ def draw_waterdepth(ax):
     )
     depth_df = raw_df.copy()
     #
-    BINS   = [-np.inf, 0, 5, 10, np.inf]
-    LABELS = ["<0", "0–5", "5–10", ">=10"]
-    DEPTH_BIN_DTYPE = CategoricalDtype(categories=LABELS, ordered=True)
 
-    PALETTE = {  # ビンごとの固定色（必要なら色を変更）
-        "<0":   "#1f77b4",
-        "0–5":  "white",
-        "5–10": "white",
-        ">=10": "skyblue",
-    }
     for name in DEPTH_SHEET:
         df = depth_df[name]
         df["latitude [deg]"] = df["Lat"]
@@ -199,10 +200,6 @@ def draw_waterdepth(ax):
         df["p_y [m]"] = conv_df[:, 1]
         # plot
         plot_by_bins(df, ax, xcol='p_x [m]', ycol='p_y [m]', valcol='depth\n(m)')
-
-    handles = [Line2D([0],[0], marker="o", linestyle="", color=PALETTE[l], label=l, markersize=6)
-               for l in LABELS]
-    ax.legend(handles=handles, title="water depth (bins)", frameon=False)
 
 def draw_bui(ax):
     raw_df = pd.read_excel(
@@ -217,7 +214,11 @@ def draw_bui(ax):
         df["p_x [m]"] = conv_df[:, 0]
         df["p_y [m]"] = conv_df[:, 1]
         # plot
-        ax.scatter(df["p_x [m]"], df["p_y [m]"], s=12, color='red', edgecolors="none")
+        ax.scatter(df["p_x [m]"], df["p_y [m]"], s=12, color='#F97316', edgecolors="none")
+        depth = [Line2D([0],[0], marker="o", linestyle="", color=PALETTE[l], label=l, markersize=6)
+                for l in LABELS]
+        buoy = Line2D([0],[0], marker="o", linestyle="", color='#F97316', markersize=6, label="Buoy")
+        ax.legend(handles=depth + [buoy], title="water depth (bins)", frameon=False)
     
     
 

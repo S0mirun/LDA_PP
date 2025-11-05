@@ -57,7 +57,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 3
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
         # ship
         self.L = 100
@@ -949,7 +949,7 @@ class PathPlanning:
             else:
                 buoy_xy = None
 
-            initial_coord_xy, _, sm.psi = Bezier.bezier(sm=sm, buoy_xy=buoy_xy, num=400)
+            initial_coord_xy, sm.psi, sm.isect_xy = Bezier.bezier(sm=sm, buoy_xy=buoy_xy, num=400)
             caltime = time.time() - time_start_init_path
             print(f"Bezier algorithm took {caltime:.3f} [s]\n")
 
@@ -972,7 +972,7 @@ class PathPlanning:
         filename = (
             f"{SAVE_DIR}/{self.port['name']}/Initial_Path_by_{self.ps.init_path_algo.name}_with_SD.png"
             if self.ps.show_SD_on_init_path
-            else f"{SAVE_DIR}/{self.port['name']}/Initial_Path_by_Astar_without_SD.png"
+            else f"{SAVE_DIR}/{self.port['name']}/Initial_Path_by_{self.ps.init_path_algo.name}_without_SD.png"
         )
         sm.ShowMap(
             filename=filename,
@@ -1139,6 +1139,17 @@ class PathPlanning:
                 "ver_range": [-1500, 500],
                 "hor_range": [-1000, 500],
             },
+            5: {
+                "name": "Else_port2",
+                "bay": else_bay.port2,
+                "start": [-2500.0, 800.0],
+                "end": [0.0, 0.0],
+                "psi_start": 40,
+                "psi_end": 0,
+                "berth_type": 2,
+                "ver_range": [-3000, 500],
+                "hor_range": [-1500, 1500],
+            },
         }
         return dictionary_of_port[num]
 
@@ -1279,6 +1290,7 @@ class PathPlanning:
         ax1.text(sm.end_xy[0, 1], sm.end_xy[0, 0] + (60 * self.ps.end_label_offset_sign), "end", va="center", ha="left", fontsize=20)
         ax1.scatter(sm.origin_xy[0, 1], sm.origin_xy[0, 0], color="#FF4B00", s=20, zorder=4)
         ax1.scatter(sm.last_xy[0, 1], sm.last_xy[0, 0], color="#FF4B00", s=20, zorder=4)
+        ax1.scatter(sm.isect_xy[1], sm.isect_xy[0], color="#FF4B00", s=20, zorder=4)
         legend_fixed = plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="#FF4B00", markersize=pointsize, label="Fixed Point")
 
         # axes/ticks
@@ -1303,7 +1315,8 @@ class PathPlanning:
         ax1.set_ylabel(r"$X\,\rm{[m]}$")
         ax1.legend(handles=[legend_initial, legend_way, legend_fixed, legend_buoy, legend_captain, legend_SD])
 
-        fig.savefig(f"{folder_path}/Multiplot_{port['name']}.png", bbox_inches="tight", pad_inches=0.05)
+        fig.savefig(f"{folder_path}/Multiplot_{port['name']}_{self.ps.init_path_algo.name}.png",
+                    bbox_inches="tight", pad_inches=0.05)
         plt.close()
 
     def save_csv(self, best_dict: dict, cma_caltime: float):

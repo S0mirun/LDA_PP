@@ -217,7 +217,7 @@ def bezier(sm, buoy_xy: Optional[Sequence]=None, num: int = 400):
     psi_rad = (-np.arctan2(dC[:, 1], dC[:, 0])) % (2*np.pi) # [0, 2π)
     psi_deg = (np.degrees(psi_rad)) % 360.0
 
-    return C, psi_rad, psi_deg
+    return C, psi_deg, isect_xy
 
 if __name__ == '__main__':
     time_start_bezier = time.time()

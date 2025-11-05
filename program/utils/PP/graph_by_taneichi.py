@@ -48,24 +48,27 @@ class Map():
         Returns:
             Map: Initialized map with obstacle line & nodes added.
         """
-        df = pd.read_csv(file)
-        ver = np.array(df['x [m]'])
-        hor = np.array(df['y [m]'])
-        obstacles = np.stack([ver, hor], 1)
 
-        # round ranges to pitch
-        ver_min_round = Map.RoundRange(None, np.amin(ver), grid_pitch, 'min')
-        ver_max_round = Map.RoundRange(None, np.amax(ver), grid_pitch, 'max')
-        hor_min_round = Map.RoundRange(None, np.amin(hor), grid_pitch, 'min')
-        hor_max_round = Map.RoundRange(None, np.amax(hor), grid_pitch, 'max')
+        with tqdm(total=13, desc="Build target map", unit="step") as pbar:
+            df = pd.read_csv(file); pbar.update()
+            ver = np.array(df['x [m]']); pbar.update()
+            hor = np.array(df['y [m]']); pbar.update()
+            obstacles = np.stack([ver, hor], 1); pbar.update()
 
-        ver_range = np.arange(ver_min_round, ver_max_round + grid_pitch / 10, grid_pitch)
-        hor_range = np.arange(hor_min_round, hor_max_round + grid_pitch / 10, grid_pitch)
+            ver_min_round = Map.RoundRange(None, np.amin(ver), grid_pitch, 'min'); pbar.update()
+            ver_max_round = Map.RoundRange(None, np.amax(ver), grid_pitch, 'max'); pbar.update()
+            hor_min_round = Map.RoundRange(None, np.amin(hor), grid_pitch, 'min'); pbar.update()
+            hor_max_round = Map.RoundRange(None, np.amax(hor), grid_pitch, 'max'); pbar.update()
 
-        target_map = Map(ver_range, hor_range, grid_pitch, Miss_Corner=True)
-        Map.AddObstacleLine(target_map, obstacles, 'berth')
-        Map.AddObstacleNode(target_map, obstacles, 'berth')
+            ver_range = np.arange(ver_min_round, ver_max_round + grid_pitch / 10, grid_pitch); pbar.update()
+            hor_range = np.arange(hor_min_round, hor_max_round + grid_pitch / 10, grid_pitch); pbar.update()
+
+            target_map = Map(ver_range, hor_range, grid_pitch, Miss_Corner=True); pbar.update()
+            Map.AddObstacleLine(target_map, obstacles, 'berth'); pbar.update()
+            Map.AddObstacleNode(target_map, obstacles, 'berth'); pbar.update()
+
         return target_map
+
 
     def ShowInitialMap(self, filename=None, SD=None, SD_sw=True, initial_point_list=None):
         """

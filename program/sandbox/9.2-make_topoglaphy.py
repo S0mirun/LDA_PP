@@ -13,6 +13,7 @@ from pandas.api.types import CategoricalDtype
 
 from utils.LDA.ship_geometry import *
 from utils.LDA.visualization import *
+from program.sandbox.test import draw_waterdepth, draw_bui
 
 
 
@@ -224,7 +225,7 @@ def plot_one_route_and_save(ax, csv_path, coast_df, linewidth=0.5):
     axins.set_aspect("equal")
     draw_base_map(axins, coast_df,apply_coast_extra=True, x_const=-6000.0)
     axins.plot(df["p_x [m]"], df["p_y [m]"], c=Colors.black, lw=1.0, zorder=3)
-    if folder == "_Yokkaichi_port1A":
+    if re.fullmatch(r"_Yokkaichi_port1[A-E]", folder):
         axins.set_xlim(-2500, -1500)
         axins.set_ylim(-4500, -3500)
     else:
@@ -265,11 +266,12 @@ def plot_ship(ax,df):
 def main():
     coast_df = prepare(coast_path)
     set_rcParams()
-    paths = sorted(glob.glob(f"{DIR}/../../raw_datas/tmp/_Yokkaichi_port*/*.csv"))
+    paths = sorted(glob.glob(f"{DIR}/../../raw_datas/tmp/_Yokkaichi_port**/*.csv"))
     for csv_path in paths:
         fig, ax = plt.subplots(figsize=(10, 8))
         draw_base_map(ax, coast_df,apply_coast_extra=True, x_const=-6000.0)
         #draw_waterdepth(ax)
+        draw_bui(ax)
         plot_one_route_and_save(ax, csv_path, coast_df, linewidth=0.5)
         plt.close(fig)
         print(f"\nsaved:    {os.path.splitext(os.path.basename(csv_path))[0]}\n")
