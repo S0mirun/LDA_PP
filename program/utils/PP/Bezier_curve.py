@@ -201,7 +201,7 @@ def bezier(sm, buoy_xy: Optional[Sequence]=None, num: int = 400):
     d   = np.linalg.norm(xy - xy[-1], axis=1)
     D0  = np.linalg.norm(xy[0] - xy[-1])
 
-    mask = d <= D0                      # これより遠いものを除外
+    mask = d <= D0
     keep = xy[mask]
     dk   = d[mask]
     pts = keep[np.argsort(-dk)]

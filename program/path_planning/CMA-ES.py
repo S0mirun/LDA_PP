@@ -57,7 +57,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 3
+        self.port_number: int = 1
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
         # ship
         self.L = 100
@@ -945,11 +945,11 @@ class PathPlanning:
             if (files := glob.glob(f"{Buoy_DIR}/_{port['name']}.csv")):
                 buoy = Buoy()
                 buoy.input_csv(files[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
-                buoy_xy = [buoy.X, buoy.Y]
+                sm.buoy_xy = [buoy.X, buoy.Y]
             else:
-                buoy_xy = None
+                sm.buoy_xy = None
 
-            initial_coord_xy, sm.psi, sm.isect_xy = Bezier.bezier(sm=sm, buoy_xy=buoy_xy, num=400)
+            initial_coord_xy, sm.psi, sm.isect_xy = Bezier.bezier(sm=sm, buoy_xy=sm.buoy_xy, num=400)
             caltime = time.time() - time_start_init_path
             print(f"Bezier algorithm took {caltime:.3f} [s]\n")
 
@@ -1098,9 +1098,9 @@ class PathPlanning:
             1: {
                 "name": "Tokyo_port2C",
                 "bay": Tokyo_bay.port2C,
-                "start": [-1400.0, -1100.0],
+                "start": [-2400.0, -1600.0],
                 "end": [0.0, 0.0],
-                "psi_start": 45,
+                "psi_start": 25,
                 "psi_end": 10,
                 "berth_type": 2,
                 "ver_range": [-2500, 500],

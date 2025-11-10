@@ -227,6 +227,12 @@ class Map():
         ax.scatter(self.origin_xy[0, 1] + 0.5, self.origin_xy[0, 0] + 0.5, color='purple', s=15, zorder=3, label='Fixed Points')
         ax.scatter(self.last_xy[0, 1] + 0.5, self.last_xy[0, 0] + 0.5, color='purple', s=15, zorder=3)
 
+        # buoy, intersection
+        if getattr(self, 'buoy_xy', None) is not None : 
+            ax.scatter(self.buoy_xy[1] + 0.5, self.buoy_xy[0] + 0.5, color='orange', s=15, zorder=3, label='control point')
+        if 'isect_xy' in dir(self):
+            ax.scatter(self.isect_xy[1] + 0.5, self.isect_xy[0] + 0.5, color='orange', s=15, zorder=3)
+
         # initial points
         if initial_point_list is not None:
             initial_points = np.array(initial_point_list).reshape(-1, 2)
