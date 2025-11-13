@@ -57,7 +57,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 3
+        self.port_number: int = 5
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
         # ship
         self.L = 100
@@ -318,7 +318,13 @@ class CostCalculator:
         if ideal <= 1e-9:
             return 0.0
         return float(abs(ideal - real) / ideal * 100.0)
+    
+    def straightness_cost_between(self, parent_pt: np.ndarray, current_pt: np.ndarray, child_pt: np.ndarray) -> float:
+        ver_p, hor_p = parent_pt
+        ver_c, hor_c = current_pt
+        ver_n, hor_n = child_pt
 
+        
 
 def sigmoid(x, a, b, c):
     return a / (b + np.exp(c * x))
@@ -689,24 +695,6 @@ class PathPlanning:
             if length_cost < 0:
                 length_cost = 0.0
 
-            # SD
-            SD_cost = 0.0
-            if len(pts) >= 2:
-                SD_cost += cal.SD_checkpoint(origin, pts[0], pts[1])
-                SD_cost += cal.SD_checkpoint(pts[-2], pts[-1], last)
-            elif len(pts) == 1:
-                SD_cost += cal.SD_checkpoint(origin, pts[0], last)
-            for j in range(1, len(pts) - 1):
-                SD_cost += cal.SD_checkpoint(pts[j - 1], pts[j], pts[j + 1])
-
-            if len(pts) >= 1:
-                SD_cost += cal.SD_midpoint(origin, pts[0])
-                SD_cost += cal.SD_midpoint(pts[-1], last)
-            else:
-                SD_cost += cal.SD_midpoint(origin, last)
-            for j in range(len(pts) - 1):
-                SD_cost += cal.SD_midpoint(pts[j], pts[j + 1])
-
             # element
             elem_cost = 0.0
             if len(pts) >= 1:
@@ -730,11 +718,20 @@ class PathPlanning:
             for j in range(len(pts) - 1):
                 dist_cost += cal.distance_cost_between(pts[j], pts[j + 1])
 
+            # straightness
+            if len(pts) >= 1:
+                straight_cost += cal.staraightness_cost_between(origin, pts[0])
+                straight_cost += cal.staraightness_cost_between(pts[-1], last)
+            else:
+                straight_cost += cal.staraightness_cost_between(origin, last)
+            for j in range(len(pts) - 1):
+                straight_cost += cal.staraightness_cost_between(pts[j], pts[j + 1])
+
             total = (
                 self.length_coeff * length_cost
-                + self.SD_coeff * SD_cost
                 + self.element_coeff * elem_cost
                 + self.distance_coeff * dist_cost
+                + self.straightness_coeff * straight_cost
             )
             costs[i] = total
 
@@ -1021,7 +1018,7 @@ class PathPlanning:
 
         # ---- pretty print helper ----
         LABELS = (
-            "start_end", "psi", "steady_course_coeff",
+            "target", "start_end", "psi", "steady_course_coeff",
             "init_path_algo", "weight_SD", "save_init_path", "init_SD",
             "save_opt_path", "csv"
         )
@@ -1082,6 +1079,9 @@ class PathPlanning:
         p("save_opt_path", "on" if self.ps.save_opt_path else "off")
         p("csv", "on" if self.ps.save_csv else "off")
 
+        # --- target ---
+        p("target", f"{port['name']}")
+
     def dict_of_port(self, num):
         dictionary_of_port = {
             0: {
@@ -1131,13 +1131,13 @@ class PathPlanning:
             4: {
                 "name": "Osaka_port1B",
                 "bay": sakai_bay.port1B,
-                "start": [-1400.0, -800.0],
-                "end": [0.0, 15.0],
-                "psi_start": 40,
-                "psi_end": -10,
+                "start": [-3000.0, -1080.0],
+                "end": [-480.0, -80.0],
+                "psi_start": -7,
+                "psi_end": 45,
                 "berth_type": 2,
-                "ver_range": [-1500, 500],
-                "hor_range": [-1000, 500],
+                "ver_range": [-3200, 500],
+                "hor_range": [-1600, 500],
             },
             5: {
                 "name": "Else_port2",

@@ -108,7 +108,7 @@ def label_region(lat: float, lon: float) -> str | None:
 
 
 def draw_Japan_Poly(ax):
-    for data in glob.glob(f"{TPGRPH_DIR}/*_LATLONG.csv"):
+    for data in glob.glob(f"{TPGRPH_DIR}/hokkaidou_*_LATLONG.csv"):
         raw_df = pd.read_csv(
             data,
             usecols=[0,1],

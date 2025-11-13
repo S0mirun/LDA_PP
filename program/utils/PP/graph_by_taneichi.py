@@ -229,9 +229,9 @@ class Map():
 
         # buoy, intersection
         if getattr(self, 'buoy_xy', None) is not None : 
-            ax.scatter(self.buoy_xy[1] + 0.5, self.buoy_xy[0] + 0.5, color='orange', s=15, zorder=3, label='control point')
+            ax.scatter(self.buoy_xy[1] + 0.5, self.buoy_xy[0] + 0.5, color='orange', s=15, zorder=3)
         if 'isect_xy' in dir(self):
-            ax.scatter(self.isect_xy[1] + 0.5, self.isect_xy[0] + 0.5, color='orange', s=15, zorder=3)
+            ax.scatter(self.isect_xy[1] + 0.5, self.isect_xy[0] + 0.5, color='orange', s=15, zorder=3, label='control point')
 
         # initial points
         if initial_point_list is not None:

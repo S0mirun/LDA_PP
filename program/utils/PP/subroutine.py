@@ -483,13 +483,6 @@ def convert_to_xy(df, lat_origin, lon_origin, theta_berth):
 
     lonlat_df = df
 
-    # theta_berth = 0.0 # 17.6 - 90 
-    # lon_origin = 136.65065 # 2021/11/12 16:13 fix
-    # # 135 + 31.484779127149817 / 60 135.52474631878584
-    # lat_origin = 34.97186 # 2021/11/12 16:13 fix
-    # # 34 + 49.365327040533202 / 60 34.82275545067555
-
-
     xy_array = np.empty((len(lonlat_df), 2))
     for i in range(len(lonlat_df)):
         longitude_point = lonlat_df.loc[lonlat_df.index[i], 'longitude']
