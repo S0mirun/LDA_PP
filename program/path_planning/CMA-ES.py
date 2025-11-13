@@ -1144,7 +1144,7 @@ class PathPlanning:
                 "bay": else_bay.port2,
                 "start": [-2500.0, 800.0],
                 "end": [0.0, 0.0],
-                "psi_start": 40,
+                "psi_start": -50,
                 "psi_end": 0,
                 "berth_type": 2,
                 "ver_range": [-3000, 500],
