@@ -1,6 +1,0 @@
-TARGET_ELEMENT : ['u [m/s]', 'vm [m/s]'], 
-dim_vec : 2, 
-K_EACH : 5, 
-n_code : 25, 
-trial_id : dim_vec_2_n_code_25, 
-log_dir : ./outputs/dim_vec_2_n_code_25/, 
