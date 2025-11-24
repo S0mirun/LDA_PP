@@ -31,7 +31,7 @@ from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.Filtered_Dict import new_filtered_dict
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
 from utils.PP.MultiPlot import RealTraj, Buoy
-from utils.PP.subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
+
 PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
 PYSIM_DIR = os.path.join(PROGRAM_DIR, "py-ship-simulator-main/py-ship-simulator-main")
 if PYSIM_DIR not in sys.path:
@@ -60,7 +60,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 0
+        self.port_number: int = 3
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
         # ship
         self.L = 100
@@ -93,6 +93,7 @@ class Settings:
         self.element_ratio: float = 1.0
         self.distance_ratio: float = 0.2
         self.straight_ratio: float = 1.0
+        self.near_buoy_ratio: float = 1.0
 
         # restart
         self.restarts: int = 3
@@ -324,11 +325,6 @@ class CostCalculator:
         return float(abs(ideal - real) / ideal * 100.0)
     
     def carvature(self, parent_pt: np.ndarray, current_pt: np.ndarray, child_pt: np.ndarray) -> float:
-        def norm(x1, x2):
-            x1_ver, x1_hor = x1
-            x2_ver, x2_hor = x2
-            return ((x2_ver - x1_ver)**2 + (x2_hor - x1_hor)**2)**0.5
-        
         def square(x1, x2, x3):
             x1_ver, x1_hor = x1
             x2_ver, x2_hor = x2
@@ -346,6 +342,11 @@ class CostCalculator:
 
 def sigmoid(x, a, b, c):
     return a / (b + np.exp(c * x))
+
+def norm(x1, x2):
+    x1_ver, x1_hor = x1
+    x2_ver, x2_hor = x2
+    return ((x2_ver - x1_ver)**2 + (x2_hor - x1_hor)**2)**0.5
 
 
 def round_by_pitch(value, pitch):
@@ -611,6 +612,7 @@ class PathPlanning:
         """
         sm = self.sample_map
         cal = self.cal
+        SD = self.SD
 
         pts = np.asarray(initial_pts, float).reshape(-1, 2)
         origin = np.asarray(self.origin_pt, float)
@@ -678,6 +680,16 @@ class PathPlanning:
             straight_cost += cal.carvature(pts[-1], last, end)
         for j in range(1, len(pts) - 1):
             straight_cost += cal.carvature(pts[j - 1], pts[j], pts[j + 1])
+        
+        # nearest_buoy_distance
+        # near_buoy_cost = 0.0
+        # poly = np.vstack([origin, pts, last])
+        # for pt in pts:
+        #     for buoy in sm.buoy_xy:
+        #         dist = norm(buoy, pt)
+        #         theta = 60
+        #         speed = sm.b_ave * dist ** (sm.a_ave) + sm.b_SD * dist ** (sm.a_SD)
+        #         near_buoy_cost += 1 / (dist / SD.distance(speed, theta))
 
         # coefficients
         self.element_coeff = 1.0 * self.ps.element_ratio
@@ -685,6 +697,7 @@ class PathPlanning:
         self.SD_coeff = (elem_cost / SD_cost) * self.ps.SD_ratio if SD_cost > 0 else 10.0
         self.distance_coeff = (elem_cost / dist_cost) * self.ps.distance_ratio if dist_cost > 0 else 1.0
         self.straight_coeff = (elem_cost / straight_cost) * self.ps.straight_ratio
+        # self.near_bay_coeff = (elem_cost / near_buoy_cost) * self.ps.near_buoy_ratio 
 
 
     def path_evaluate(self, X: np.ndarray) -> np.ndarray | float:
@@ -710,6 +723,7 @@ class PathPlanning:
 
         sm = self.sample_map
         cal = self.cal
+        SD = self.SD
         origin = np.asarray(self.origin_pt, float)
         last = np.asarray(self.last_pt, float)
         end = sm.end_xy[0].astype(float)
@@ -781,6 +795,17 @@ class PathPlanning:
                 straight_cost += cal.carvature(pts[-1], last, end)
             for j in range(1, len(pts) - 1):
                 straight_cost += cal.carvature(pts[j - 1], pts[j], pts[j + 1])
+
+            # nearest_buoy_distance
+            # near_buoy_cost = 0.0
+            # poly = np.vstack([origin, pts, last])
+            # for pt in pts:
+            #     for buoy in sm.buoy_xy:
+            #         dist = norm(buoy, pt)
+            #         theta = 60
+            #         speed = sm.b_ave * dist ** (sm.a_ave) + sm.b_SD * dist ** (sm.a_SD)
+            #         near_buoy_cost += 1 / (dist / SD.distance(speed, theta))
+
 
             total = (
                 self.length_coeff * length_cost
@@ -1420,6 +1445,15 @@ class PathPlanning:
 
         df.to_csv(csv_file_path, index=False)
         print(f"CSV saved\n")
+
+        print(
+            f"{'-'*25}\n"
+            f"{'Length':<12}{self.ps.length_ratio}\n"
+            f"{'SD':<12}{self.ps.SD_ratio}\n"
+            f"{'Element':<12}{self.ps.element_ratio}\n"
+            f"{'Distance':<12}{self.ps.distance_ratio}\n"
+            f"{'Straight':<12}{self.ps.straight_ratio}\n"
+        )
 
 
 if __name__ == "__main__":
