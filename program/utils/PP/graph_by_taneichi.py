@@ -9,11 +9,6 @@ import pandas as pd
 from tqdm import tqdm
 
 from utils.PP.subroutine import mpl_config
-
-PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
-PYSIM_DIR = os.path.join(PROGRAM_DIR, "py-ship-simulator-main/py-ship-simulator-main")
-if PYSIM_DIR not in sys.path:
-    sys.path.append(PYSIM_DIR)
 import pyshipsim
 plt.rcParams.update(mpl_config)
 

@@ -24,6 +24,20 @@ from scipy import ndimage
 from tqdm.auto import tqdm
 
 # --- external project modules ---
+PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(PROGRAM_DIR)
+
+PYSIM_DIR = os.path.join(
+    PROJECT_ROOT,
+    "utils",
+    "py-ship-simulator-main",
+    "py-ship-simulator-main",
+)
+if PYSIM_DIR not in sys.path:
+    sys.path.append(PYSIM_DIR)
+
+import pyshipsim
+
 import utils.PP.Astar_for_CMAES as Astar
 import utils.PP.Bezier_curve as Bezier
 import utils.PP.graph_by_taneichi as Glaph
@@ -31,12 +45,6 @@ from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.Filtered_Dict import new_filtered_dict
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
 from utils.PP.MultiPlot import RealTraj, Buoy
-
-PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
-PYSIM_DIR = os.path.join(PROGRAM_DIR, "py-ship-simulator-main/py-ship-simulator-main")
-if PYSIM_DIR not in sys.path:
-    sys.path.append(PYSIM_DIR)
-import pyshipsim
 
 
 DIR = os.path.dirname(__file__)

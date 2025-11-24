@@ -18,8 +18,6 @@ from utils.PP.subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
 
 DIR = os.path.dirname(__file__)
 dirname = os.path.splitext(os.path.basename(__file__))[0]
-SAVE_DIR = f"{DIR}/../../../outputs/{dirname}"
-os.makedirs(SAVE_DIR, exist_ok=True)
 #
 TMP_DIR = f"{DIR}/../../../raw_datas/tmp"
 Buoy_DIR = f"{DIR}/../../../raw_datas/buoy"
@@ -220,6 +218,8 @@ def bezier(sm, buoy_xy: Optional[Sequence]=None, num: int = 400):
     return C, psi_deg, isect_xy
 
 if __name__ == '__main__':
+    SAVE_DIR = f"{DIR}/../../../outputs/{dirname}"
+    os.makedirs(SAVE_DIR, exist_ok=True)
     time_start_bezier = time.time()
     port = dictionary_of_port[2]
     df_buoy = glob.glob(f"{Buoy_DIR}/_{port['name']}.csv")

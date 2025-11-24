@@ -1,5 +1,2 @@
-from . import *
-try:
-    from . import lat_lon
-except Exception:
-    pass
+from . import lat_lon
+__all__ = ["lat_lon"]
