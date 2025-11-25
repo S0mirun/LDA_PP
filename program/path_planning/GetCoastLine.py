@@ -1,44 +1,44 @@
 import os
-
-import pandas as pd
-from tqdm import tqdm
 import xml.etree.ElementTree as ET
+import csv
 
-
-# データ取得関数
-# file_path：海岸線データのパス
-# prefecture_name: 都道府県名
-def get_coastlines_df(file_path, prefecture_name):
-    if not(os.path.isfile(file_path)):
-        print("file path not found")
-        return pd.DataFrame()
-        
-    #xmlデータを読み込みます
-    tree = ET.parse(file_path)
-    #一番上の階層の要素を取り出します
-    root = tree.getroot()
-    
-    lat = [] #緯度
-    lon = [] #経度
-
-    for value in tqdm(root.iter('DirectPosition.coordinate'), leave=False):
-        tmp = value.text
-        tmp = tmp.split(' ')
-        lat.append(tmp[0])
-        lon.append(tmp[1])
-        
-    df = pd.DataFrame()
-    df['緯度'] = lat
-    df['経度'] = lon
-    
-    df.index = [prefecture_name] * len(lat)
-    
-    return df
-
-# 実行
-prefecture_name = "茨城県"
 DIR = os.path.dirname(__file__)
 RAW_DATAS = f"{DIR}/../../raw_datas"
-file_path = f"{RAW_DATAS}/*/C23-06_08-g.xml"
-print(os.path.abspath(file_path))
-coastline = get_coastlines_df(file_path, prefecture_name)
+num = "24"
+gml_path = os.path.abspath(f"{RAW_DATAS}/C23-06_{num}_GML/C23-06_{num}-g.xml")
+SAVE_DIR = os.path.dirname(gml_path)
+
+# XML を読む
+tree = ET.parse(gml_path)
+root = tree.getroot()
+
+# 名前空間の指定（gml: ～ を探すため）
+ns = {"gml": "http://www.opengis.net/gml/3.2"}
+
+rows = []
+
+# すべての gml:Curve ごとに
+for curve in root.findall("gml:Curve", ns):
+    curve_id = curve.attrib.get("{http://www.opengis.net/gml/3.2}id")
+
+    # その中の gml:posList を探す
+    poslist_elem = curve.find(".//gml:posList", ns)
+    if poslist_elem is None:
+        continue
+
+    # 空白区切りで数値を取り出す
+    nums = poslist_elem.text.split()
+
+    # 2つずつ（lat, lon）にまとめる
+    for i in range(0, len(nums), 2):
+        lat = float(nums[i])
+        lon = float(nums[i + 1])
+        rows.append([curve_id, lat, lon])
+
+# CSV に書き出し
+with open(f"{SAVE_DIR}/C23-06_{num}-g.csv", "w", newline="", encoding="utf-8") as f:
+    writer = csv.writer(f)
+    writer.writerow(["curve_id", "lat", "lon"])
+    writer.writerows(rows)
+
+print("書き出し完了")

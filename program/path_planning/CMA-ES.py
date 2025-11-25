@@ -68,7 +68,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 3
+        self.port_number: int = 2
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
         # ship
         self.L = 100
@@ -96,10 +96,10 @@ class Settings:
         self.angle_interval: float = 5
 
         # initial weight ratios (auto-scaled from initial solution)
-        self.length_ratio: float = 0.1
-        self.SD_ratio: float = 0.5
+        self.length_ratio: float = 1.0
+        self.SD_ratio: float = 1.0
         self.element_ratio: float = 1.0
-        self.distance_ratio: float = 0.2
+        self.distance_ratio: float = 1.0
         self.straight_ratio: float = 1.0
         self.near_buoy_ratio: float = 1.0
 
@@ -820,7 +820,7 @@ class PathPlanning:
                 + self.SD_coeff * SD_cost
                 + self.element_coeff * elem_cost
                 + self.distance_coeff * dist_cost
-                # + self.straight_coeff * straight_cost
+                + self.straight_coeff * straight_cost
             )
             costs[i] = total
 
