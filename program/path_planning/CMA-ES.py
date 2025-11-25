@@ -820,7 +820,7 @@ class PathPlanning:
                 + self.SD_coeff * SD_cost
                 + self.element_coeff * elem_cost
                 + self.distance_coeff * dist_cost
-                + self.straight_coeff * straight_cost
+                # + self.straight_coeff * straight_cost
             )
             costs[i] = total
 
@@ -1453,16 +1453,6 @@ class PathPlanning:
 
         df.to_csv(csv_file_path, index=False)
         print(f"CSV saved\n")
-
-        print(
-            f"{'-'*25}\n"
-            f"{'Length':<12}{self.ps.length_ratio}\n"
-            f"{'SD':<12}{self.ps.SD_ratio}\n"
-            f"{'Element':<12}{self.ps.element_ratio}\n"
-            f"{'Distance':<12}{self.ps.distance_ratio}\n"
-            f"{'Straight':<12}{self.ps.straight_ratio}\n"
-        )
-
 
 if __name__ == "__main__":
     ps = Settings()

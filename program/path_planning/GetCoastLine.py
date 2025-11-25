@@ -37,5 +37,8 @@ def get_coastlines_df(file_path, prefecture_name):
 
 # 実行
 prefecture_name = "茨城県"
-file_path = f"/Users/tokudashintarou/Downloads/C23-06_08_GML/C23-06_08-g.xml"
+DIR = os.path.dirname(__file__)
+RAW_DATAS = f"{DIR}/../../raw_datas"
+file_path = f"{RAW_DATAS}/*/C23-06_08-g.xml"
+print(os.path.abspath(file_path))
 coastline = get_coastlines_df(file_path, prefecture_name)
