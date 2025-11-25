@@ -1,13 +1,14 @@
 #outputs
 /outputs/*
-/program/LDA/outputs/*
 !/outputs/LDA/outputs/.gitkeep
-
+!/outputs/303
+!/outputs/data
+/program/LDA/outputs/*
 /program/path_planning/outputs/*
-
 /program/sandbox/outputs/*
 
 #program
+/program/coord_conv
 /program/LDA/src/*.so
 /program/LDA/src/*.o
 /program/LDA/src/*.mod
