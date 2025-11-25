@@ -9,9 +9,10 @@
 
 #program
 *.pyc
-/program/LDA/src/*.so
-/program/LDA/src/*.o
-/program/LDA/src/*.mod
+*.dat
+*.so
+*.o
+*.mod
 
 /program/sandnox/*.so
 /program/sandnox/*.o
