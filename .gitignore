@@ -8,7 +8,7 @@
 /program/sandbox/outputs/*
 
 #program
-/program/coord_conv
+*.pyc
 /program/LDA/src/*.so
 /program/LDA/src/*.o
 /program/LDA/src/*.mod
