@@ -56,6 +56,7 @@ class Hokkaido:
         minY_long = 140.672654
         maxY_long = 140.731750
         name = '_Hakodate'
+        num = "01"
     
     ALL = [tomakomai, kushiro, ishikari_bay, hakodate_bay]
 
@@ -136,6 +137,7 @@ class Honsyu:
             minY_long = 140.667261
             maxY_long = 140.727823
             name = '_Kashima'
+            num = "08"
 
         class tokyo_bay:
             minY_lat = 35.200483
@@ -163,7 +165,8 @@ class Honsyu:
             maxY_lat = 34.607731
             minY_long = 135.401341
             maxY_long = 135.445586
-            name = '_Sakai'
+            name = '_Osaka_port1A'
+            num = "27"
 
         class osaka_bay2:
             minY_lat = 34.653702

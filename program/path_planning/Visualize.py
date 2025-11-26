@@ -1,4 +1,7 @@
-import glob
+"""
+国交省から引っ張ってきたデータを可視化するファイル。
+事前にGetCoastLineを動かしておくこと。
+"""
 import os
 
 import pandas as pd
@@ -12,7 +15,6 @@ port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/_Osaka_port45.csv"
 
 
 def visualize(csv_file, num, save_dir, ax_all=None):
-    # --- 個別 CSV の可視化 ---
     df = pd.read_csv(csv_file)
     if not {"curve_id", "lat", "lon"}.issubset(df.columns):
         raise ValueError("CSV に 'curve_id', 'lat', 'lon' の列が必要です")
@@ -24,7 +26,6 @@ def visualize(csv_file, num, save_dir, ax_all=None):
         x = g["lon"].values
         y = g["lat"].values
 
-        # 個別図
         ax.plot(
             x,
             y,
@@ -32,8 +33,6 @@ def visualize(csv_file, num, save_dir, ax_all=None):
             alpha=0.9,
             label=str(curve_id),
         )
-
-        # まとめ図にも追加（ax_all が渡されている場合）
         if ax_all is not None:
             ax_all.plot(
                 x,
@@ -41,8 +40,6 @@ def visualize(csv_file, num, save_dir, ax_all=None):
                 linewidth=0.3,
                 alpha=0.5,
             )
-
-    # 個別図の表示範囲を港周りに合わせる
     if os.path.exists(port_file):
         port_df = pd.read_csv(port_file)
         y0 = port_df["Latitude"].iloc[0]
@@ -60,13 +57,11 @@ def visualize(csv_file, num, save_dir, ax_all=None):
     plt.tight_layout()
 
     fig.savefig(f"{save_dir}/C23-06_{num}-g_curves.png", dpi=300)
-    plt.close(fig)  # 個別図は閉じる
+    plt.close(fig)
 
 
 if __name__ == "__main__":
     NUM = [f"{i:02d}" for i in range(1, 48)]
-
-    # ★ ここでまとめ用の Figure/Axes を 1 回だけ作る
     fig_all, ax_all = plt.subplots(figsize=(8, 8))
 
     for num in NUM:
@@ -96,5 +91,5 @@ if __name__ == "__main__":
     ax_all.set_aspect("equal", adjustable="box")
 
     plt.tight_layout()
-    fig_all.savefig(f"{RAW_DATAS}/国土交通省/all_curves.png", dpi=300)
+    fig_all.savefig(f"{RAW_DATAS}/国土交通省/All_Curves.png", dpi=300)
     plt.close(fig_all)
