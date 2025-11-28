@@ -13,18 +13,14 @@ from utils.PP.stay_ports import Hokkaido, Honsyu
 
 DIR = os.path.dirname(__file__)
 RAW_DATAS = f"{DIR}/../../raw_datas"
-PORT = Honsyu.Pasific.osaka_bay
-SAVE_DIR = f"{DIR}/../../outputs/data/_{PORT.name}"
+PORT = Honsyu.Pasific.ibaragi
+SAVE_DIR = f"{DIR}/../../outputs/data/{PORT.name}"
 coast_file = f"{RAW_DATAS}/国土交通省/C23-06_{PORT.num}_GML/C23-06_{PORT.num}-g.csv"
-port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/_{PORT.name}.csv"
+port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/{PORT.name}.csv"
 
 SAVE = True
-ADD = "DOWN"
 
 # ---- 原点と向き ----
-# LAT_ORIGIN = 41.81017
-# LON_ORIGIN = 140.70401
-# ANGLE_FROM_NORTH = 0.0
 df_coord = pd.read_csv(port_file)
 LAT_ORIGIN = df_coord["Latitude"].iloc[0]
 LON_ORIGIN = df_coord["Longitude"].iloc[0]
@@ -32,7 +28,7 @@ ANGLE_FROM_NORTH = df_coord["Psi[deg]"].iloc[0]
 
 def sort_points(arr: np.ndarray) -> np.ndarray:
     n_points = arr.shape[0]
-    start_idx = int(np.argmin(arr[:, 0]))
+    start_idx = int(np.argmax(arr[:, 0]))
     open_idx = list(range(n_points))
     open_idx.remove(start_idx)
     closed_idx = [start_idx]
@@ -51,7 +47,7 @@ def sort_points(arr: np.ndarray) -> np.ndarray:
 # ---- 海岸線 CSV 読み込み（curve_id, lat, lon を想定）----
 df_coast = pd.read_csv(coast_file)
 
-R_MAX = 6000
+R_MAX = 4000
 
 fig, ax = plt.subplots(figsize=(8, 8))
 
@@ -104,19 +100,13 @@ ax.set_xlim(-R_MAX, R_MAX)
 ax.set_ylim(-R_MAX, R_MAX)
 all_pts = np.vstack(pts_list)
 
-# plt.show()
+plt.show()
 
 if SAVE is True:
-    x_max = all_pts[:, 0].max(); x_min = all_pts[:, 0].min()
-    if ADD == "UP":
-        add = np.array([[x_max, R_MAX], [x_min, R_MAX]]) 
-    else:
-        add = np.array([[x_max, -R_MAX], [x_min, -R_MAX]])
-    all_pts = np.vstack([all_pts, add])
     sorted_pts = sort_points(all_pts)
     df = pd.DataFrame({
-        "x [m]": all_pts[:, 0],
-        "y [m]": all_pts[:, 1]
+        "x [m]": sorted_pts[:, 0],
+        "y [m]": sorted_pts[:, 1],
     })
     print(sorted_pts)
     df.to_csv(os.path.join(f"{DIR}/../../outputs/data/detail_map", f"{PORT.name}.csv"))

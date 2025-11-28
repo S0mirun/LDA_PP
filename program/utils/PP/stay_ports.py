@@ -71,6 +71,7 @@ class Honsyu:
             minY_long = 141.512348
             maxY_long = 141.571779
             name = 'Hachinohe'
+            num = "02"
 
         class aomori_bay:
             minY_lat = 40.831995
@@ -78,6 +79,7 @@ class Honsyu:
             minY_long = 140.713490
             maxY_long = 140.797928
             name = 'Aomori'
+            num = "02"
 
         class akita:
             minY_lat = 39.720417
@@ -85,6 +87,7 @@ class Honsyu:
             minY_long = 139.952722
             maxY_long = 140.077115
             name = 'Akita'
+            num = "05"
 
         class isinomaki_bay:
             minY_lat = 38.274610
@@ -92,6 +95,7 @@ class Honsyu:
             minY_long = 141.179720
             maxY_long = 141.441471
             name = 'Ishinomaki'
+            num = "04"
 
         class onahama:
             minY_lat = 36.909405
@@ -99,13 +103,15 @@ class Honsyu:
             minY_long = 140.868994
             maxY_long = 140.920306
             name = 'Onahama'
+            num = "07"
 
         class iwate:
             minY_lat = 39.235741
             maxY_lat = 39.276861
             minY_long = 141.880832
             maxY_long = 141.934787
-            name = 'Kamaishi'           
+            name = 'Kamaishi'
+            num = "03"
         
         ALL = [hachinohe, aomori_bay, akita, isinomaki_bay, onahama, iwate]
     
@@ -116,6 +122,7 @@ class Honsyu:
             minY_long = 138.240258
             maxY_long = 138.270778
             name = 'Nigata'
+            num = "15"
 
         class kanazawa:
             minY_lat = 36.606281
@@ -123,6 +130,7 @@ class Honsyu:
             minY_long = 136.591621
             maxY_long = 136.627522
             name = 'Kanazawa'
+            num = "17"
 
         class tottori:
             minY_lat = 35.508565
@@ -148,6 +156,7 @@ class Honsyu:
             minY_long = 139.595564
             maxY_long = 140.235517
             name = 'Tokyo'
+            num = "12"
 
         class suruga_bay:
             minY_lat = 34.981367
@@ -155,13 +164,15 @@ class Honsyu:
             minY_long = 138.487049
             maxY_long = 138.613881
             name = 'Shimizu'
+            num = "22"
 
         class ise_bay:
             minY_lat = 34.941052
             maxY_lat = 34.972875
             minY_long = 136.635710
             maxY_long = 136.671490
-            name = 'Yokkaichi'    
+            name = 'Yokkaichi' 
+            num = "24"   
 
         class osaka_bay:
             minY_lat = 34.571811
@@ -177,6 +188,7 @@ class Honsyu:
             minY_long = 135.176362
             maxY_long = 135.217267
             name = 'Kobe'
+            num = "28"
 
         class nanko:
             minY_lat = 34.384388
@@ -184,6 +196,7 @@ class Honsyu:
             minY_long = 135.195461
             maxY_long = 135.243042
             name = 'KIX'
+            num = "27"
 
         class setouchi:
             minY_lat = 34.342116

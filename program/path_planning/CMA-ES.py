@@ -68,8 +68,9 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 6
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
+         # 5: Else_2, 6: Kashima
         # ship
         self.L = 100
 
@@ -1227,6 +1228,16 @@ class PathPlanning:
                 "end": [0.0, 0.0],
                 "psi_start": -45,
                 "psi_end": -15,
+                "berth_type": 2,
+                "ver_range": [-1900, 300],
+                "hor_range": [-1000, 1200],
+            },
+            6: {
+                "name": "Hachinohe",
+                "start": [-1000.0, 650.0],
+                "end": [0.0, 0.0],
+                "psi_start": -45,
+                "psi_end": 0,
                 "berth_type": 2,
                 "ver_range": [-1900, 300],
                 "hor_range": [-1000, 1200],
