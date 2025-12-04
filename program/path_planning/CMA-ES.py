@@ -97,10 +97,10 @@ class Settings:
         self.angle_interval: float = 5
 
         # initial weight ratios (auto-scaled from initial solution)
-        self.length_ratio: float = 1.0
-        self.SD_ratio: float = 1.0
+        self.length_ratio: float = 0.1
+        self.SD_ratio: float = 0.5
         self.element_ratio: float = 1.0
-        self.distance_ratio: float = 1.0
+        self.distance_ratio: float = 0.2
         self.straight_ratio: float = 1.0
         self.near_buoy_ratio: float = 1.0
 
@@ -1234,10 +1234,10 @@ class PathPlanning:
             },
             6: {
                 "name": "Kashima",
-                "start": [1000.0, 0.0],
-                "end": [-1400.0, 400.0],
-                "psi_start": 180,
-                "psi_end": 135,
+                "start": [1600.0, 1800.0],
+                "end": [-200.0, -200.0],
+                "psi_start": -120,
+                "psi_end": 180,
                 "berth_type": 2,
                 "ver_range": [-3000, 1200],
                 "hor_range": [-1500, 1500],
@@ -1390,14 +1390,15 @@ class PathPlanning:
         df = pd.read_csv(f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv")
         angle = float(df['Psi[deg]'].iloc[0])
         img_rot = ndimage.rotate(img, -angle, reshape=True)
-        imagebox = OffsetImage(img_rot)
+        img_rot = np.clip(img_rot, 0.0, 1.0)
+        imagebox = OffsetImage(img_rot, zoom=10)
         ab = AnnotationBbox(
             imagebox,
             (1, 1), # upper left
             xycoords='axes fraction',
             box_alignment=(0, 1),
             frameon=False,
-            pad=0.0
+            pad=0.0,
         )
         ax.add_artist(ab)
 

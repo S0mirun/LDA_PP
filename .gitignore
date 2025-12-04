@@ -21,13 +21,18 @@
 
 
 #raw_data
+raw_datas/【秘密情報】航海記録/*
+
+raw_datas/raw_data/*
 !/raw_datas/raw_data/topography
-!/raw_datas/tmp/coordinates_of_port
+
+raw_datas/tmp/*
+!raw_datas/tmp/coordinates_of_port/
+!raw_datas/tmp/coordinates_of_port/**
+
+raw_datas/海岸線画像/*
+
+raw_datas/国土交通省/*
 !/raw_datas/国土交通省/*/C23-*.xml
 
-raw_datas/【秘密情報】航海記録/*
-raw_datas/raw_data/*
-raw_datas/tmp/*
-raw_datas/海岸線画像/*
-raw_datas/国土交通省/*
 raw_datas/内航船-要素/*
