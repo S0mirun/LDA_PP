@@ -1233,14 +1233,14 @@ class PathPlanning:
                 "hor_range": [-1000, 1200],
             },
             6: {
-                "name": "Hachinohe",
-                "start": [-1000.0, 650.0],
-                "end": [0.0, 0.0],
-                "psi_start": -45,
-                "psi_end": 0,
+                "name": "Kashima",
+                "start": [1000.0, 0.0],
+                "end": [-1400.0, 400.0],
+                "psi_start": 180,
+                "psi_end": 135,
                 "berth_type": 2,
-                "ver_range": [-1900, 300],
-                "hor_range": [-1000, 1200],
+                "ver_range": [-3000, 1200],
+                "hor_range": [-1500, 1500],
             },
         }
         return dictionary_of_port[num]

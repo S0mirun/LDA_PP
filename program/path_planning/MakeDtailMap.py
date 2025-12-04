@@ -16,9 +16,15 @@ RAW_DATAS = f"{DIR}/../../raw_datas"
 PORT = Honsyu.Pasific.ibaragi
 SAVE_DIR = f"{DIR}/../../outputs/data/{PORT.name}"
 coast_file = f"{RAW_DATAS}/国土交通省/C23-06_{PORT.num}_GML/C23-06_{PORT.num}-g.csv"
-port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/{PORT.name}.csv"
+port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/_{PORT.name}.csv"
 
 SAVE = True
+
+ADD = np.array([
+    [824.7239951, -2904.146048],
+    [-395, 187],
+    [-913, 1216]
+])
 
 # ---- 原点と向き ----
 df_coord = pd.read_csv(port_file)
@@ -100,14 +106,14 @@ ax.set_xlim(-R_MAX, R_MAX)
 ax.set_ylim(-R_MAX, R_MAX)
 all_pts = np.vstack(pts_list)
 
-plt.show()
+# plt.show()
 
 if SAVE is True:
+    all_pts = np.vstack([all_pts, ADD])
     sorted_pts = sort_points(all_pts)
     df = pd.DataFrame({
-        "x [m]": sorted_pts[:, 0],
-        "y [m]": sorted_pts[:, 1],
+        "x [m]": sorted_pts[:, 1],
+        "y [m]": sorted_pts[:, 0],
     })
-    print(sorted_pts)
     df.to_csv(os.path.join(f"{DIR}/../../outputs/data/detail_map", f"{PORT.name}.csv"))
     print("\nSAVED\n")

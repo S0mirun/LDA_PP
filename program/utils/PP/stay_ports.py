@@ -143,10 +143,10 @@ class Honsyu:
 
     class Pasific:
         class ibaragi:
-            minY_lat = 35.910456
-            maxY_lat = 35.958665
-            minY_long = 140.667261
-            maxY_long = 140.727823
+            minY_lat = 35.90643
+            maxY_lat = 35.92794
+            minY_long = 140.67275
+            maxY_long = 140.69263
             name = 'Kashima'
             num = "08"
 
