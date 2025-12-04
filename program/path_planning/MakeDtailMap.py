@@ -18,12 +18,10 @@ SAVE_DIR = f"{DIR}/../../outputs/data/{PORT.name}"
 coast_file = f"{RAW_DATAS}/国土交通省/C23-06_{PORT.num}_GML/C23-06_{PORT.num}-g.csv"
 port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/_{PORT.name}.csv"
 
-SAVE = False
-
+SAVE = True
+R_MAX = 2000
 ADD = np.array([
-    [824.7239951, -2904.146048],
-    [-395, 187],
-    [-913, 1216]
+    [-800, 500],
 ])
 
 # ---- 原点と向き ----
@@ -34,7 +32,7 @@ ANGLE_FROM_NORTH = df_coord["Psi[deg]"].iloc[0]
 
 def sort_points(arr: np.ndarray) -> np.ndarray:
     n_points = arr.shape[0]
-    start_idx = int(np.argmax(arr[:, 0]))
+    start_idx = int(np.argmax(arr[:, 1]))
     open_idx = list(range(n_points))
     open_idx.remove(start_idx)
     closed_idx = [start_idx]
@@ -52,8 +50,6 @@ def sort_points(arr: np.ndarray) -> np.ndarray:
 
 # ---- 海岸線 CSV 読み込み（curve_id, lat, lon を想定）----
 df_coast = pd.read_csv(coast_file)
-
-R_MAX = 4000
 
 fig, ax = plt.subplots(figsize=(8, 8))
 
@@ -109,7 +105,7 @@ all_pts = np.vstack(pts_list)
 plt.show()
 
 if SAVE is True:
-    # all_pts = np.vstack([all_pts, ADD])
+    all_pts = np.vstack([all_pts, ADD])
     sorted_pts = sort_points(all_pts)
     df = pd.DataFrame({
         "x [m]": sorted_pts[:, 1],

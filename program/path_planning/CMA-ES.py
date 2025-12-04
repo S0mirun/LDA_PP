@@ -1235,12 +1235,12 @@ class PathPlanning:
             6: {
                 "name": "Kashima",
                 "start": [1600.0, 1800.0],
-                "end": [-200.0, -200.0],
+                "end": [250.0, -120.0],
                 "psi_start": -120,
-                "psi_end": 180,
+                "psi_end": 200,
                 "berth_type": 2,
-                "ver_range": [-3000, 1200],
-                "hor_range": [-1500, 1500],
+                "ver_range": [-1000, 2000],
+                "hor_range": [-1500, 2000],
             },
         }
         return dictionary_of_port[num]
