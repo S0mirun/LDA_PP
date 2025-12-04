@@ -17,6 +17,7 @@
 /program/sandnox/*.so
 /program/sandnox/*.o
 /program/sandnox/*.mod
+/program/utils/PP/cython_func.c
 
 
 #raw_data
