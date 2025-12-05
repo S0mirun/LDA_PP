@@ -82,10 +82,10 @@ class Honsyu:
             num = "02"
 
         class akita:
-            minY_lat = 39.720417
-            maxY_lat = 39.814846
-            minY_long = 139.952722
-            maxY_long = 140.077115
+            minY_lat = 39.742440
+            maxY_lat = 39.755044
+            minY_long = 140.05052
+            maxY_long = 140.0709541
             name = 'Akita'
             num = "05"
 
