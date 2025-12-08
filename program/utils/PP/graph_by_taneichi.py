@@ -527,7 +527,7 @@ class Map():
             None
         """
         inner_node = self.fill_inner_concave_obstacle(array, self.grid_pitch)
-        for i in tqdm(range(len(array) - 1), desc='Add Node'):
+        for i in range(len(array) - 1):
             tmp_array = self.DetictCollision(array[i, :], array[i + 1, :])
             self.obstacle_node = np.concatenate([self.obstacle_node, tmp_array])
         self.obstacle_node = np.append(self.obstacle_node, inner_node, axis=0)

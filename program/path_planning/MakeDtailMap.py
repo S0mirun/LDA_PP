@@ -13,15 +13,15 @@ from utils.PP.stay_ports import Hokkaido, Honsyu
 
 DIR = os.path.dirname(__file__)
 RAW_DATAS = f"{DIR}/../../raw_datas"
-PORT = Honsyu.Tohoku.akita
+PORT = Honsyu.Pasific.ibaragi
 SAVE_DIR = f"{DIR}/../../outputs/data/{PORT.name}"
 coast_file = f"{RAW_DATAS}/国土交通省/C23-06_{PORT.num}_GML/C23-06_{PORT.num}-g.csv"
 port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/_{PORT.name}.csv"
 
 SAVE = False
-R_MAX = 3000
-ADD = np.array([
-])
+SORT = False
+SHOW = True
+R_MAX = 4000
 
 # ---- 原点と向き ----
 df_coord = pd.read_csv(port_file)
@@ -31,7 +31,7 @@ ANGLE_FROM_NORTH = df_coord["Psi[deg]"].iloc[0]
 
 def sort_points(arr: np.ndarray) -> np.ndarray:
     n_points = arr.shape[0]
-    start_idx = int(np.argmax(arr[:, 0]))
+    start_idx = int(np.argmax(arr[:, 1]))
     open_idx = list(range(n_points))
     open_idx.remove(start_idx)
     closed_idx = [start_idx]
@@ -94,21 +94,28 @@ for curve_id, g in df_coast.groupby("curve_id"):
         ax.add_patch(poly)
     else:
         # 岸壁などの開いた線は線だけ描く
-        ax.plot(xs, ys, color="0.3", linewidth=0.5)
+        ax.plot(xs, ys, linewidth=0.5)
 
 ax.set_aspect("equal", "box")
 ax.set_xlim(-R_MAX, R_MAX)
 ax.set_ylim(-R_MAX, R_MAX)
 all_pts = np.vstack(pts_list)
 
-if SAVE is True:
-    # all_pts = np.vstack([all_pts, ADD])
-    sorted_pts = sort_points(all_pts)
-    df = pd.DataFrame({
-        "x [m]": sorted_pts[:, 1],
-        "y [m]": sorted_pts[:, 0],
-    })
+if SAVE:
+    if SORT:
+        # all_pts = np.vstack([all_pts, ADD])
+        sorted_pts = sort_points(all_pts)
+        df = pd.DataFrame({
+            "x [m]": sorted_pts[:, 1],
+            "y [m]": sorted_pts[:, 0],
+        })
+    else:
+        df = pd.DataFrame({
+            "x [m]": all_pts[:, 1],
+            "y [m]": all_pts[:, 0],
+        })
     df.to_csv(os.path.join(f"{DIR}/../../outputs/data/detail_map", f"{PORT.name}.csv"))
     print("\nSAVED\n")
 
-plt.show()
+if SHOW:
+    plt.show()

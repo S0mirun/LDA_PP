@@ -68,9 +68,9 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 7
+        self.port_number: int = 2
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
-         # 5: Else_2, 6: Kashima, 7: Aomori
+         # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe
         # ship
         self.L = 100
 
@@ -102,7 +102,6 @@ class Settings:
         self.element_ratio: float = 1.0
         self.distance_ratio: float = 0.2
         self.straight_ratio: float = 1.0
-        self.near_buoy_ratio: float = 1.0
 
         # restart
         self.restarts: int = 3
@@ -793,17 +792,17 @@ class PathPlanning:
                 dist_cost += cal.distance_cost_between(pts[j], pts[j + 1])
 
             # straightness
-            straight_cost = 0.0
-            if len(pts) >= 1:
-                straight_cost += cal.carvature(sm.start_xy[0], origin, pts[0])
-            if len(pts) >= 2:
-                straight_cost += cal.carvature(origin, pts[0], pts[1])
-            if len(pts) >= 2:
-                straight_cost += cal.carvature(pts[-2], pts[-1], last)
-            if len(pts) >= 1:
-                straight_cost += cal.carvature(pts[-1], last, end)
-            for j in range(1, len(pts) - 1):
-                straight_cost += cal.carvature(pts[j - 1], pts[j], pts[j + 1])
+            # straight_cost = 0.0
+            # if len(pts) >= 1:
+            #     straight_cost += cal.carvature(sm.start_xy[0], origin, pts[0])
+            # if len(pts) >= 2:
+            #     straight_cost += cal.carvature(origin, pts[0], pts[1])
+            # if len(pts) >= 2:
+            #     straight_cost += cal.carvature(pts[-2], pts[-1], last)
+            # if len(pts) >= 1:
+            #     straight_cost += cal.carvature(pts[-1], last, end)
+            # for j in range(1, len(pts) - 1):
+            #     straight_cost += cal.carvature(pts[j - 1], pts[j], pts[j + 1])
 
             # nearest_buoy_distance
             # near_buoy_cost = 0.0
@@ -821,7 +820,7 @@ class PathPlanning:
                 + self.SD_coeff * SD_cost
                 + self.element_coeff * elem_cost
                 + self.distance_coeff * dist_cost
-                + self.straight_coeff * straight_cost
+                # + self.straight_coeff * straight_cost
             )
             costs[i] = total
 
@@ -1244,13 +1243,23 @@ class PathPlanning:
             },
             7: {
                 "name": "Aomori",
-                "start": [150, 3000.0],
+                "start": [350, 3400.0],
                 "end": [0, 100],
-                "psi_start": -100,
+                "psi_start": -110,
                 "psi_end": -90,
                 "berth_type": 2,
                 "ver_range": [-1500, 1500],
                 "hor_range": [-1000, 3500],
+            },
+            8: {
+                "name": "Hachinohe",
+                "start": [1350, 2500.0],
+                "end": [350, 350],
+                "psi_start": -110,
+                "psi_end": -170,
+                "berth_type": 2,
+                "ver_range": [-1000, 2500],
+                "hor_range": [-1000, 3000],
             },
         }
         return dictionary_of_port[num]
@@ -1396,21 +1405,21 @@ class PathPlanning:
         legend_fixed = plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="#FF4B00", markersize=pointsize, label="Fixed Point")
 
         # compas
-        img = mpimg.imread(f"{RAW_DATAS}/compass icon.png")
+        img = mpimg.imread(f"{RAW_DATAS}/compass icon2.png")
         df = pd.read_csv(f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv")
         angle = float(df['Psi[deg]'].iloc[0])
-        img_rot = ndimage.rotate(img, -angle, reshape=True)
+        img_rot = ndimage.rotate(img, angle, reshape=True)
         img_rot = np.clip(img_rot, 0.0, 1.0)
-        imagebox = OffsetImage(img_rot, zoom=10)
+        imagebox = OffsetImage(img_rot, zoom=0.5)
         ab = AnnotationBbox(
             imagebox,
-            (1, 1), # upper left
+            (0, 1), # ax1's upper left
             xycoords='axes fraction',
-            box_alignment=(0, 1),
+            box_alignment=(0, 1), # .png's upper left
             frameon=False,
             pad=0.0,
         )
-        ax.add_artist(ab)
+        ax1.add_artist(ab)
 
         # axes/ticks
         hor_lim = [port["hor_range"][0], port["hor_range"][1]]

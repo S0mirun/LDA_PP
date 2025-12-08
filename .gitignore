@@ -1,11 +1,12 @@
 #outputs
-/outputs/*
+outputs/*
 !/outputs/LDA/outputs/.gitkeep
 !/outputs/303
 !/outputs/data
-/program/LDA/outputs/*
-/program/path_planning/outputs/*
-/program/sandbox/outputs/*
+!/outputs/CMA-ES
+program/LDA/outputs/*
+program/path_planning/outputs/*
+program/sandbox/outputs/*
 
 #program
 *.pyc
