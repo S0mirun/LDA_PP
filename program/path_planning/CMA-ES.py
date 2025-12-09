@@ -68,9 +68,10 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 10
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
-         # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe
+         # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
+         # 10: Tomakomai, 11: KIX
         # ship
         self.L = 100
 
@@ -230,7 +231,7 @@ class CostCalculator:
         else:
             cos_theta = np.clip(np.dot(v1, v2) / (m1 * m2), -1.0, 1.0)
             angle_rad = float(np.arccos(cos_theta))
-            cross = np.cross(v1, v2)
+            cross = cross2d(v1, v2)
             direction = -1 if cross > 0 else (1 if cross < 0 else 0)  # CCW:-1, CW:+1
 
         psi = np.deg2rad(90.0) - np.arctan2(ver_c - ver_p, hor_c - hor_p)
@@ -356,9 +357,13 @@ def norm(x1, x2):
     x2_ver, x2_hor = x2
     return ((x2_ver - x1_ver)**2 + (x2_hor - x1_hor)**2)**0.5
 
-
 def round_by_pitch(value, pitch):
     return int(np.round(value / pitch) * pitch)
+
+def cross2d(a, b):
+    a = np.asarray(a)
+    b = np.asarray(b)
+    return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
 
 
 def undo_conversion(reference_hor_index, reference_ver_index, end_hor_coord, end_ver_coord, indices, grid_pitch):
@@ -1245,7 +1250,7 @@ class PathPlanning:
                 "name": "Aomori",
                 "start": [350, 3400.0],
                 "end": [0, 100],
-                "psi_start": -110,
+                "psi_start": -130,
                 "psi_end": -90,
                 "berth_type": 2,
                 "ver_range": [-1500, 1500],
@@ -1260,6 +1265,36 @@ class PathPlanning:
                 "berth_type": 2,
                 "ver_range": [-1000, 2500],
                 "hor_range": [-1000, 3000],
+            },
+            9: {
+                "name": "Shimizu",
+                "start": [1400, -2000],
+                "end": [150, 100],
+                "psi_start": 100,
+                "psi_end": 175,
+                "berth_type": 2,
+                "ver_range": [-1000, 2000],
+                "hor_range": [-3000, 1000],
+            },
+            10: {
+                "name": "Tomakomai",
+                "start": [-1400, 1200],
+                "end": [0, 0],
+                "psi_start": -75,
+                "psi_end": 0,
+                "berth_type": 2,
+                "ver_range": [-1000, 4500],
+                "hor_range": [-2500, 2000],
+            },
+            11: {
+                "name": "KIX",
+                "start": [-2000, 750],
+                "end": [0, 0],
+                "psi_start": -30,
+                "psi_end": 0,
+                "berth_type": 2,
+                "ver_range": [-2500, 1000],
+                "hor_range": [-2500, 2500],
             },
         }
         return dictionary_of_port[num]
