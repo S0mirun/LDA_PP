@@ -68,7 +68,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 10
+        self.port_number: int = 11
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -1288,13 +1288,13 @@ class PathPlanning:
             },
             11: {
                 "name": "KIX",
-                "start": [-2000, 750],
-                "end": [0, 0],
-                "psi_start": -30,
-                "psi_end": 0,
+                "start": [-2500, 800],
+                "end": [-300, 250],
+                "psi_start": -10,
+                "psi_end": -30,
                 "berth_type": 2,
                 "ver_range": [-2500, 1000],
-                "hor_range": [-2500, 2500],
+                "hor_range": [-2000, 2000],
             },
         }
         return dictionary_of_port[num]
