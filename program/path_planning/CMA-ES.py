@@ -68,7 +68,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 11
+        self.port_number: int = 7
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -101,8 +101,8 @@ class Settings:
         self.length_ratio: float = 0.1
         self.SD_ratio: float = 0.5
         self.element_ratio: float = 1.0
+        self.angle_diff_ratio: float = 1.0
         self.distance_ratio: float = 0.2
-        self.straight_ratio: float = 1.0
 
         # restart
         self.restarts: int = 3
@@ -311,6 +311,26 @@ class CostCalculator:
 
         occ = self.new_filtered_dict[speed_key][angle_key]
         return float(100.0 - occ)
+    
+    def angle_diff_cost(self, current_pt: np.ndarray, child_pt: np.ndarray) -> float:
+        sm = self.sample_map
+
+        ver_end, hor_end = np.asarray(sm.end_xy[0], dtype=float)
+        ver_last, hor_last = np.asarray(sm.last_xy[0], dtype=float)
+        ver_c, hor_c = current_pt
+        ver_ch, hor_ch = child_pt
+
+        v1 = np.array([hor_last - hor_end, ver_last - ver_end], dtype=float)
+        v2 = np.array([hor_ch - hor_c, ver_ch - ver_c], dtype=float)
+        m1 = np.linalg.norm(v1)
+        m2 = np.linalg.norm(v2)
+        if m1 == 0.0 or m2 == 0.0:
+            angle_deg = 0.0
+        else:
+            cos_theta = np.clip(np.dot(v1, v2) / (m1 * m2), -1.0, 1.0)
+            angle_deg = float(np.degrees(np.arccos(cos_theta)))
+        
+        return abs(angle_deg)
 
     def distance_cost_between(self, current_pt: np.ndarray, child_pt: np.ndarray) -> float:
         """
@@ -333,21 +353,6 @@ class CostCalculator:
             return 0.0
         return float(abs(ideal - real) / ideal * 100.0)
     
-    def carvature(self, parent_pt: np.ndarray, current_pt: np.ndarray, child_pt: np.ndarray) -> float:
-        def square(x1, x2, x3):
-            x1_ver, x1_hor = x1
-            x2_ver, x2_hor = x2
-            x3_ver, x3_hor = x3
-
-            a = x2_ver - x3_hor; b = x1_hor - x3_hor
-            c = x2_hor - x3_ver; d = x1_ver - x3_ver
-
-            return 0.5 * abs(a*b - c*d)
-
-        a = norm(parent_pt, current_pt); b = norm(current_pt, child_pt); c = norm(child_pt, parent_pt)
-        S = square(parent_pt, current_pt, child_pt)
-        return 4 * S / (a * b * c)
-
 
 def sigmoid(x, a, b, c):
     return a / (b + np.exp(c * x))
@@ -681,36 +686,12 @@ class PathPlanning:
         for j in range(len(pts) - 1):
             dist_cost += cal.distance_cost_between(pts[j], pts[j + 1])
 
-        # straightness
-        straight_cost = 0.0
-        if len(pts) >= 1:
-            straight_cost += cal.carvature(sm.start_xy[0], origin, pts[0])
-        if len(pts) >= 2:
-            straight_cost += cal.carvature(origin, pts[0], pts[1])
-        if len(pts) >= 2:
-            straight_cost += cal.carvature(pts[-2], pts[-1], last)
-        if len(pts) >= 1:
-            straight_cost += cal.carvature(pts[-1], last, end)
-        for j in range(1, len(pts) - 1):
-            straight_cost += cal.carvature(pts[j - 1], pts[j], pts[j + 1])
-        
-        # nearest_buoy_distance
-        # near_buoy_cost = 0.0
-        # poly = np.vstack([origin, pts, last])
-        # for pt in pts:
-        #     for buoy in sm.buoy_xy:
-        #         dist = norm(buoy, pt)
-        #         theta = 60
-        #         speed = sm.b_ave * dist ** (sm.a_ave) + sm.b_SD * dist ** (sm.a_SD)
-        #         near_buoy_cost += 1 / (dist / SD.distance(speed, theta))
-
         # coefficients
         self.element_coeff = 1.0 * self.ps.element_ratio
+        self.angle_diff_coeff = 1.0 * self.ps.angle_diff_ratio
         self.length_coeff = (elem_cost / length_cost) * self.ps.length_ratio if length_cost > 0 else 1.0
         self.SD_coeff = (elem_cost / SD_cost) * self.ps.SD_ratio if SD_cost > 0 else 10.0
         self.distance_coeff = (elem_cost / dist_cost) * self.ps.distance_ratio if dist_cost > 0 else 1.0
-        self.straight_coeff = (elem_cost / straight_cost) * self.ps.straight_ratio
-        # self.near_bay_coeff = (elem_cost / near_buoy_cost) * self.ps.near_buoy_ratio 
 
 
     def path_evaluate(self, X: np.ndarray) -> np.ndarray | float:
@@ -786,6 +767,16 @@ class PathPlanning:
             for j in range(1, len(pts) - 1):
                 elem_cost += cal.elem(pts[j - 1], pts[j], pts[j + 1])
 
+            # difference from current angle to end angle
+            angle_cost = 0.0
+            if len(pts) >= 1:
+                angle_cost += cal.angle_diff_cost(origin, pts[0])
+                angle_cost += cal.angle_diff_cost(pts[-1], last)
+            else:
+                angle_cost += cal.angle_diff_cost(origin, last)
+            for j in range(len(pts) - 1):
+                angle_cost += cal.angle_diff_cost(pts[j], pts[j + 1])
+
             # distance
             dist_cost = 0.0
             if len(pts) >= 1:
@@ -796,36 +787,13 @@ class PathPlanning:
             for j in range(len(pts) - 1):
                 dist_cost += cal.distance_cost_between(pts[j], pts[j + 1])
 
-            # straightness
-            # straight_cost = 0.0
-            # if len(pts) >= 1:
-            #     straight_cost += cal.carvature(sm.start_xy[0], origin, pts[0])
-            # if len(pts) >= 2:
-            #     straight_cost += cal.carvature(origin, pts[0], pts[1])
-            # if len(pts) >= 2:
-            #     straight_cost += cal.carvature(pts[-2], pts[-1], last)
-            # if len(pts) >= 1:
-            #     straight_cost += cal.carvature(pts[-1], last, end)
-            # for j in range(1, len(pts) - 1):
-            #     straight_cost += cal.carvature(pts[j - 1], pts[j], pts[j + 1])
-
-            # nearest_buoy_distance
-            # near_buoy_cost = 0.0
-            # poly = np.vstack([origin, pts, last])
-            # for pt in pts:
-            #     for buoy in sm.buoy_xy:
-            #         dist = norm(buoy, pt)
-            #         theta = 60
-            #         speed = sm.b_ave * dist ** (sm.a_ave) + sm.b_SD * dist ** (sm.a_SD)
-            #         near_buoy_cost += 1 / (dist / SD.distance(speed, theta))
-
 
             total = (
                 self.length_coeff * length_cost
                 + self.SD_coeff * SD_cost
                 + self.element_coeff * elem_cost
                 + self.distance_coeff * dist_cost
-                # + self.straight_coeff * straight_cost
+                + self.angle_diff_coeff * angle_cost
             )
             costs[i] = total
 
@@ -1125,7 +1093,7 @@ class PathPlanning:
             f"{'SD':<12}{self.ps.SD_ratio}\n"
             f"{'Element':<12}{self.ps.element_ratio}\n"
             f"{'Distance':<12}{self.ps.distance_ratio}\n"
-            f"{'Straight':<12}{self.ps.straight_ratio}\n"
+            f"{'Andle':<12}{self.ps.angle_diff_ratio}\n"
         )
 
         # --- start & end ---
@@ -1250,7 +1218,7 @@ class PathPlanning:
                 "name": "Aomori",
                 "start": [350, 3400.0],
                 "end": [0, 100],
-                "psi_start": -130,
+                "psi_start": -115,
                 "psi_end": -90,
                 "berth_type": 2,
                 "ver_range": [-1500, 1500],
@@ -1259,9 +1227,9 @@ class PathPlanning:
             8: {
                 "name": "Hachinohe",
                 "start": [1350, 2500.0],
-                "end": [350, 350],
+                "end": [100, 250],
                 "psi_start": -110,
-                "psi_end": -170,
+                "psi_end": -160,
                 "berth_type": 2,
                 "ver_range": [-1000, 2500],
                 "hor_range": [-1000, 3000],
@@ -1293,7 +1261,7 @@ class PathPlanning:
                 "psi_start": -10,
                 "psi_end": -30,
                 "berth_type": 2,
-                "ver_range": [-2500, 1000],
+                "ver_range": [-3000, 500],
                 "hor_range": [-2000, 2000],
             },
         }

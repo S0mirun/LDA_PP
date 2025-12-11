@@ -105,7 +105,7 @@ class Map():
         # initial points
         if initial_point_list is not None:
             initial_points = np.array(initial_point_list).reshape(-1, 2)
-            ax.scatter(initial_points[:, 1], initial_points[:, 0], color='blue', s=10, label='Initial Points', zorder=3)
+            ax.scatter(initial_points[:, 1], initial_points[:, 0], color='green', s=10, label='Initial Points', zorder=3)
 
         # path chain (start -> origin -> path -> last -> end)
         if 'path_xy' in dir(self):
@@ -231,7 +231,7 @@ class Map():
         # initial points
         if initial_point_list is not None:
             initial_points = np.array(initial_point_list).reshape(-1, 2)
-            ax.scatter(initial_points[:, 1], initial_points[:, 0], color='blue', s=10, label='Initial Points', zorder=3)
+            ax.scatter(initial_points[:, 1], initial_points[:, 0], color='green', s=10, label='Initial Points', zorder=3)
 
         # optimized points
         if optimized_point_list is not None:
@@ -239,7 +239,7 @@ class Map():
             ax.scatter(
                 optimized_points[:, 1],
                 optimized_points[:, 0],
-                color='green', s=15, label='Optimized Points', zorder=3
+                color='blue', s=15, label='Optimized Points', zorder=3
             )
 
         # path chain (start -> origin -> path -> last -> end)
