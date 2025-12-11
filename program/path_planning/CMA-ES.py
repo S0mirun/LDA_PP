@@ -68,7 +68,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 7
+        self.port_number: int = 6
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -315,22 +315,38 @@ class CostCalculator:
     def angle_diff_cost(self, current_pt: np.ndarray, child_pt: np.ndarray) -> float:
         sm = self.sample_map
 
-        ver_end, hor_end = np.asarray(sm.end_xy[0], dtype=float)
-        ver_last, hor_last = np.asarray(sm.last_xy[0], dtype=float)
+        ver_s, hor_s = np.asarray(sm.start_xy[0], dtype=float)
+        ver_o, hor_o = np.asarray(sm.origin_xy[0], dtype=float)
+        ver_l, hor_l = np.asarray(sm.last_xy[0], dtype=float)
+        ver_e, hor_e = np.asarray(sm.end_xy[0], dtype=float)
         ver_c, hor_c = current_pt
         ver_ch, hor_ch = child_pt
 
-        v1 = np.array([hor_last - hor_end, ver_last - ver_end], dtype=float)
-        v2 = np.array([hor_ch - hor_c, ver_ch - ver_c], dtype=float)
+        v1 = np.array([hor_o - hor_s, ver_o - ver_s], dtype=float)
+        v2 = np.array([hor_e - hor_l, ver_e - ver_l], dtype=float)
+        v3 = np.array([hor_ch - hor_c, ver_ch - ver_c], dtype=float)
         m1 = np.linalg.norm(v1)
         m2 = np.linalg.norm(v2)
-        if m1 == 0.0 or m2 == 0.0:
-            angle_deg = 0.0
+        m3 = np.linalg.norm(v3)
+
+        if m1 == 0.0 or m3 == 0.0:
+            angle_deg_s = 0.0
         else:
-            cos_theta = np.clip(np.dot(v1, v2) / (m1 * m2), -1.0, 1.0)
-            angle_deg = float(np.degrees(np.arccos(cos_theta)))
+            cos_theta_s = np.clip(np.dot(v1, v3) / (m1 * m3), -1.0, 1.0)
+            angle_deg_s = float(np.degrees(np.arccos(cos_theta_s)))
+        if m2 == 0.0 or m3 == 0.0:
+            angle_deg_e = 0.0
+        else:
+            cos_theta_e = np.clip(np.dot(v2, v3) / (m2 * m3), -1.0, 1.0)
+            angle_deg_e = float(np.degrees(np.arccos(cos_theta_e)))
         
-        return abs(angle_deg)
+        # wighted average
+        dist_o_to_c = np.linalg.norm([hor_c - hor_o, ver_c - ver_o])
+        dist_c_to_l = np.linalg.norm([hor_l - hor_c, ver_l - ver_c])
+        weights = np.array([1 / dist_o_to_c, 1 / dist_c_to_l])
+        weighted_angle = np.average([angle_deg_s, angle_deg_e], weights=weights)
+
+        return weighted_angle
 
     def distance_cost_between(self, current_pt: np.ndarray, child_pt: np.ndarray) -> float:
         """
@@ -356,11 +372,6 @@ class CostCalculator:
 
 def sigmoid(x, a, b, c):
     return a / (b + np.exp(c * x))
-
-def norm(x1, x2):
-    x1_ver, x1_hor = x1
-    x2_ver, x2_hor = x2
-    return ((x2_ver - x1_ver)**2 + (x2_hor - x1_hor)**2)**0.5
 
 def round_by_pitch(value, pitch):
     return int(np.round(value / pitch) * pitch)
@@ -1092,8 +1103,8 @@ class PathPlanning:
             f"{'Length':<12}{self.ps.length_ratio}\n"
             f"{'SD':<12}{self.ps.SD_ratio}\n"
             f"{'Element':<12}{self.ps.element_ratio}\n"
+            f"{'Angle':<12}{self.ps.angle_diff_ratio}\n"
             f"{'Distance':<12}{self.ps.distance_ratio}\n"
-            f"{'Andle':<12}{self.ps.angle_diff_ratio}\n"
         )
 
         # --- start & end ---
@@ -1209,7 +1220,7 @@ class PathPlanning:
                 "start": [1750.0, 1900.0],
                 "end": [250.0, -150.0],
                 "psi_start": -120,
-                "psi_end": 180,
+                "psi_end": -170,
                 "berth_type": 2,
                 "ver_range": [-1000, 2000],
                 "hor_range": [-1500, 2000],
