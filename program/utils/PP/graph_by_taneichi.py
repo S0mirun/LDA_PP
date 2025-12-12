@@ -34,6 +34,8 @@ class Map():
         self.obstacle_dict = {}
         self.obstacle_node = np.empty((0, 2))
 
+        self.isect_xy = None
+
     def GenerateMapFromCSV(file, grid_pitch):
         """
         障害物の折れ線データを格納したCSVから Map インスタンスを生成する
@@ -225,7 +227,7 @@ class Map():
         # buoy, intersection
         if getattr(self, 'buoy_xy', None) is not None : 
             ax.scatter(self.buoy_xy[1] + 0.5, self.buoy_xy[0] + 0.5, color='orange', s=15, zorder=3)
-        if 'isect_xy' in dir(self):
+        if getattr(self, "isect_xy", None) is not None:
             ax.scatter(self.isect_xy[1] + 0.5, self.isect_xy[0] + 0.5, color='orange', s=15, zorder=3, label='control point')
 
         # initial points

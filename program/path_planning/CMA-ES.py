@@ -68,7 +68,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 6
+        self.port_number: int = 7
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -101,7 +101,7 @@ class Settings:
         self.length_ratio: float = 0.1
         self.SD_ratio: float = 0.5
         self.element_ratio: float = 1.0
-        self.angle_diff_ratio: float = 1.0
+        self.angle_diff_ratio: float = 1.5
         self.distance_ratio: float = 0.2
 
         # restart
@@ -341,10 +341,14 @@ class CostCalculator:
             angle_deg_e = float(np.degrees(np.arccos(cos_theta_e)))
         
         # wighted average
+        dist_o_to_l = np.linalg.norm([hor_l - hor_o, ver_l - ver_o])
         dist_o_to_c = np.linalg.norm([hor_c - hor_o, ver_c - ver_o])
-        dist_c_to_l = np.linalg.norm([hor_l - hor_c, ver_l - ver_c])
-        weights = np.array([1 / dist_o_to_c, 1 / dist_c_to_l])
-        weighted_angle = np.average([angle_deg_s, angle_deg_e], weights=weights)
+
+        alpha = 0.3
+        w_origin = sigmoid(dist_o_to_c / dist_o_to_l - alpha, a=angle_deg_s, b=1.0, c=30.0)
+        w_last = sigmoid(dist_o_to_c / dist_o_to_l - (1 - alpha), a=angle_deg_e, b=1.0, c=30.0)
+
+        weighted_angle = -(w_origin + w_last)
 
         return weighted_angle
 
@@ -516,7 +520,7 @@ class PathPlanning:
         # --- CMA-ES expects 1D mean (N,) and sigma0 of same length ---
         ddcma = DdCma(xmean0=self.initial_vec, sigma0=self.initial_D, seed=self.ps.seed)
         checker = Checker(ddcma)
-        logger = Logger(ddcma)
+        logger = Logger(ddcma, prefix=f"{SAVE_DIR}/{self.port['name']}/log")
 
         NEVAL_STANDARD = ddcma.lam * 5000
         print("Start with first population size:", ddcma.lam)
@@ -583,9 +587,9 @@ class PathPlanning:
 
                 if ddcma.t % 10 == 0:
                     pbar.write(
-                        f"neval:{ddcma.neval}  "
-                        f"cost:{best_cost:.9g}  "
-                        f"best:{best_dict[restart]['best_cost_so_far']:.9g}"
+                        f"neval:{ddcma.neval :<6}  "
+                        f"cost:{best_cost:<10.9g}  "
+                        f"best:{best_dict[restart]['best_cost_so_far']:<10.9g}"
                     )
                     logger()
 
@@ -686,6 +690,16 @@ class PathPlanning:
             elem_cost += 3.0 * cal.elem(pts[-1], last, end)
         for j in range(1, len(pts) - 1):
             elem_cost += cal.elem(pts[j - 1], pts[j], pts[j + 1])
+        
+        # difference from current angle to end angle
+        angle_cost = 0.0
+        if len(pts) >= 1:
+            angle_cost += cal.angle_diff_cost(origin, pts[0])
+            angle_cost += cal.angle_diff_cost(pts[-1], last)
+        else:
+            angle_cost += cal.angle_diff_cost(origin, last)
+        for j in range(len(pts) - 1):
+            angle_cost += cal.angle_diff_cost(pts[j], pts[j + 1])
 
         # point-to-point distance
         dist_cost = 0.0
@@ -699,7 +713,7 @@ class PathPlanning:
 
         # coefficients
         self.element_coeff = 1.0 * self.ps.element_ratio
-        self.angle_diff_coeff = 1.0 * self.ps.angle_diff_ratio
+        self.angle_diff_coeff = (elem_cost / angle_cost) * self.ps.angle_diff_ratio
         self.length_coeff = (elem_cost / length_cost) * self.ps.length_ratio if length_cost > 0 else 1.0
         self.SD_coeff = (elem_cost / SD_cost) * self.ps.SD_ratio if SD_cost > 0 else 10.0
         self.distance_coeff = (elem_cost / dist_cost) * self.ps.distance_ratio if dist_cost > 0 else 1.0
@@ -1188,9 +1202,9 @@ class PathPlanning:
             3: {
                 "name": "Else_port1",
                 "start": [2500.0, 0.0],
-                "end": [450.0, 20.0],
+                "end": [0.0, 0.0], # [450.0, 20.0]
                 "psi_start": -150,
-                "psi_end": 135,
+                "psi_end": -105, # 135
                 "berth_type": 1,
                 "ver_range": [0, 3000],
                 "hor_range": [-1000, 2000],
@@ -1198,9 +1212,9 @@ class PathPlanning:
             4: {
                 "name": "Osaka_port1B",
                 "start": [-3000.0, -1080.0],
-                "end": [-480.0, -80.0],
-                "psi_start": -7,
-                "psi_end": 45,
+                "end": [0.0, -10.0], # [-480.0, -80.0]
+                "psi_start": -5,
+                "psi_end": -10, # 45
                 "berth_type": 2,
                 "ver_range": [-3200, 500],
                 "hor_range": [-1600, 500],
@@ -1415,7 +1429,8 @@ class PathPlanning:
         ax1.text(sm.end_xy[0, 1], sm.end_xy[0, 0] + (60 * self.ps.end_label_offset_sign), "end", va="center", ha="left", fontsize=20)
         ax1.scatter(sm.origin_xy[0, 1], sm.origin_xy[0, 0], color="#FF4B00", s=20, zorder=4)
         ax1.scatter(sm.last_xy[0, 1], sm.last_xy[0, 0], color="#FF4B00", s=20, zorder=4)
-        ax1.scatter(sm.isect_xy[1], sm.isect_xy[0], color="#FF4B00", s=20, zorder=4)
+        if sm.isect_xy is not None:
+            ax1.scatter(sm.isect_xy[1], sm.isect_xy[0], color="#FF4B00", s=20, zorder=4)
         legend_fixed = plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="#FF4B00", markersize=pointsize, label="Fixed Point")
 
         # compas
@@ -1497,7 +1512,7 @@ class PathPlanning:
         df = pd.concat([df, df_opt], axis=1)
 
         df.to_csv(csv_file_path, index=False)
-        print(f"CSV saved\n")
+        print(f"\nCSV saved : {self.port['name']}")
 
 if __name__ == "__main__":
     ps = Settings()
