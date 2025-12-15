@@ -4,6 +4,8 @@ outputs/*
 !/outputs/303
 !/outputs/data
 !/outputs/CMA-ES
+.DS_Store
+**/.DS_Store
 program/LDA/outputs/*
 program/path_planning/outputs/*
 program/sandbox/outputs/*
