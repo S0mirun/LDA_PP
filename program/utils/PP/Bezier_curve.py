@@ -18,8 +18,6 @@ from utils.PP.subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
 
 DIR = os.path.dirname(__file__)
 dirname = os.path.splitext(os.path.basename(__file__))[0]
-SAVE_DIR = f"{DIR}/../../../outputs/{dirname}"
-os.makedirs(SAVE_DIR, exist_ok=True)
 #
 TMP_DIR = f"{DIR}/../../../raw_datas/tmp"
 Buoy_DIR = f"{DIR}/../../../raw_datas/buoy"
@@ -178,12 +176,27 @@ def compute_control_points(sm, *, k=0.9, beta=0.5, phi_min=0.05, phi_max=0.7):
 
     return np.vstack([P1, P2], dtype=float)
 
+def calculate_angle(pt1, pt2, pt3):
+    hor_1, ver_1 = pt1
+    hor_2, ver_2 = pt2
+    hor_3, ver_3 = pt3
+
+    v1 = np.array([hor_1 - hor_3, ver_1 - ver_3], dtype=float)
+    v2 = np.array([hor_2 - hor_3, ver_2 - ver_3], dtype=float)
+    m1 = np.linalg.norm(v1)
+    m2 = np.linalg.norm(v2)
+    if m1 == 0.0 or m2 == 0.0:
+        angle_deg = 0.0
+    else:
+        cos_theta = np.clip(np.dot(v1, v2) / (m1 * m2), -1.0, 1.0)
+        angle_deg = float(np.degrees(np.arccos(cos_theta)))
+
+    return angle_deg
 
 def bezier(sm, buoy_xy: Optional[Sequence]=None, num: int = 400):
     """Allow buoy_xy=None; accept (ys, xs) or (N,2). Return stacked control polygon."""
     start_xy   = np.asarray(sm.origin_xy[0], dtype=float)
     isect_xy   = np.asarray(calcurate_intersection(sm), dtype=float)
-    #control_xy = np.asarray(compute_control_points(sm), dtype=float)
     end_xy     = np.asarray(sm.last_xy[0],   dtype=float)
 
     if buoy_xy is None:
@@ -196,7 +209,10 @@ def bezier(sm, buoy_xy: Optional[Sequence]=None, num: int = 400):
             by, bx = buoy_xy
             buoy_mat = np.column_stack([by, bx])
 
-    xy = np.vstack([start_xy, buoy_mat, isect_xy, end_xy])
+    if abs(calculate_angle(start_xy, isect_xy, end_xy)) < 90:
+        xy = np.vstack([start_xy, buoy_mat, isect_xy, end_xy])
+    else:
+        xy = np.vstack([start_xy, buoy_mat, end_xy])
     #
     d   = np.linalg.norm(xy - xy[-1], axis=1)
     D0  = np.linalg.norm(xy[0] - xy[-1])
@@ -220,6 +236,8 @@ def bezier(sm, buoy_xy: Optional[Sequence]=None, num: int = 400):
     return C, psi_deg, isect_xy
 
 if __name__ == '__main__':
+    SAVE_DIR = f"{DIR}/../../../outputs/{dirname}"
+    os.makedirs(SAVE_DIR, exist_ok=True)
     time_start_bezier = time.time()
     port = dictionary_of_port[2]
     df_buoy = glob.glob(f"{Buoy_DIR}/_{port['name']}.csv")

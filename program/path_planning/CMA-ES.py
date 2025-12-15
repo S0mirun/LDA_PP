@@ -15,12 +15,29 @@ import time
 from typing import Tuple
 
 import numpy as np
-import pandas as pd
+import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+import pandas as pd
+from scipy import ndimage
 from tqdm.auto import tqdm
 
 # --- external project modules ---
+PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(PROGRAM_DIR)
+
+PYSIM_DIR = os.path.join(
+    PROJECT_ROOT,
+    "utils",
+    "py-ship-simulator-main",
+    "py-ship-simulator-main",
+)
+if PYSIM_DIR not in sys.path:
+    sys.path.append(PYSIM_DIR)
+
+import pyshipsim
+
 import utils.PP.Astar_for_CMAES as Astar
 import utils.PP.Bezier_curve as Bezier
 import utils.PP.graph_by_taneichi as Glaph
@@ -28,20 +45,14 @@ from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.Filtered_Dict import new_filtered_dict
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
 from utils.PP.MultiPlot import RealTraj, Buoy
-from utils.PP.subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
-PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
-PYSIM_DIR = os.path.join(PROGRAM_DIR, "py-ship-simulator-main/py-ship-simulator-main")
-if PYSIM_DIR not in sys.path:
-    sys.path.append(PYSIM_DIR)
-import pyshipsim
 
 
 DIR = os.path.dirname(__file__)
 dirname = os.path.splitext(os.path.basename(__file__))[0]
 SAVE_DIR = f"{DIR}/../../outputs/{dirname}"
 os.makedirs(SAVE_DIR, exist_ok=True)
-TMP_DIR = f"{DIR}/../../raw_datas/tmp"
-Buoy_DIR = f"{DIR}/../../raw_datas/buoy"
+RAW_DATAS = f"{DIR}/../../raw_datas"
+DATA = f"{DIR}/../../outputs/data"
 
 
 class ParamMode(StrEnum):
@@ -57,8 +68,10 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 3
+        self.port_number: int = 7
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
+         # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
+         # 10: Tomakomai, 11: KIX
         # ship
         self.L = 100
 
@@ -88,6 +101,7 @@ class Settings:
         self.length_ratio: float = 0.1
         self.SD_ratio: float = 0.5
         self.element_ratio: float = 1.0
+        self.angle_diff_ratio: float = 1.5
         self.distance_ratio: float = 0.2
 
         # restart
@@ -217,7 +231,7 @@ class CostCalculator:
         else:
             cos_theta = np.clip(np.dot(v1, v2) / (m1 * m2), -1.0, 1.0)
             angle_rad = float(np.arccos(cos_theta))
-            cross = np.cross(v1, v2)
+            cross = cross2d(v1, v2)
             direction = -1 if cross > 0 else (1 if cross < 0 else 0)  # CCW:-1, CW:+1
 
         psi = np.deg2rad(90.0) - np.arctan2(ver_c - ver_p, hor_c - hor_p)
@@ -297,6 +311,46 @@ class CostCalculator:
 
         occ = self.new_filtered_dict[speed_key][angle_key]
         return float(100.0 - occ)
+    
+    def angle_diff_cost(self, current_pt: np.ndarray, child_pt: np.ndarray) -> float:
+        sm = self.sample_map
+
+        ver_s, hor_s = np.asarray(sm.start_xy[0], dtype=float)
+        ver_o, hor_o = np.asarray(sm.origin_xy[0], dtype=float)
+        ver_l, hor_l = np.asarray(sm.last_xy[0], dtype=float)
+        ver_e, hor_e = np.asarray(sm.end_xy[0], dtype=float)
+        ver_c, hor_c = current_pt
+        ver_ch, hor_ch = child_pt
+
+        v1 = np.array([hor_o - hor_s, ver_o - ver_s], dtype=float)
+        v2 = np.array([hor_e - hor_l, ver_e - ver_l], dtype=float)
+        v3 = np.array([hor_ch - hor_c, ver_ch - ver_c], dtype=float)
+        m1 = np.linalg.norm(v1)
+        m2 = np.linalg.norm(v2)
+        m3 = np.linalg.norm(v3)
+
+        if m1 == 0.0 or m3 == 0.0:
+            angle_deg_s = 0.0
+        else:
+            cos_theta_s = np.clip(np.dot(v1, v3) / (m1 * m3), -1.0, 1.0)
+            angle_deg_s = float(np.degrees(np.arccos(cos_theta_s)))
+        if m2 == 0.0 or m3 == 0.0:
+            angle_deg_e = 0.0
+        else:
+            cos_theta_e = np.clip(np.dot(v2, v3) / (m2 * m3), -1.0, 1.0)
+            angle_deg_e = float(np.degrees(np.arccos(cos_theta_e)))
+        
+        # wighted average
+        dist_o_to_l = np.linalg.norm([hor_l - hor_o, ver_l - ver_o])
+        dist_o_to_c = np.linalg.norm([hor_c - hor_o, ver_c - ver_o])
+
+        alpha = 0.3
+        w_origin = sigmoid(dist_o_to_c / dist_o_to_l - alpha, a=angle_deg_s, b=1.0, c=30.0)
+        w_last = sigmoid(dist_o_to_c / dist_o_to_l - (1 - alpha), a=angle_deg_e, b=1.0, c=30.0)
+
+        weighted_angle = -(w_origin + w_last)
+
+        return weighted_angle
 
     def distance_cost_between(self, current_pt: np.ndarray, child_pt: np.ndarray) -> float:
         """
@@ -318,14 +372,18 @@ class CostCalculator:
         if ideal <= 1e-9:
             return 0.0
         return float(abs(ideal - real) / ideal * 100.0)
-
+    
 
 def sigmoid(x, a, b, c):
     return a / (b + np.exp(c * x))
 
-
 def round_by_pitch(value, pitch):
     return int(np.round(value / pitch) * pitch)
+
+def cross2d(a, b):
+    a = np.asarray(a)
+    b = np.asarray(b)
+    return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
 
 
 def undo_conversion(reference_hor_index, reference_ver_index, end_hor_coord, end_ver_coord, indices, grid_pitch):
@@ -462,7 +520,7 @@ class PathPlanning:
         # --- CMA-ES expects 1D mean (N,) and sigma0 of same length ---
         ddcma = DdCma(xmean0=self.initial_vec, sigma0=self.initial_D, seed=self.ps.seed)
         checker = Checker(ddcma)
-        logger = Logger(ddcma)
+        logger = Logger(ddcma, prefix=f"{SAVE_DIR}/{self.port['name']}/log")
 
         NEVAL_STANDARD = ddcma.lam * 5000
         print("Start with first population size:", ddcma.lam)
@@ -529,9 +587,9 @@ class PathPlanning:
 
                 if ddcma.t % 10 == 0:
                     pbar.write(
-                        f"neval:{ddcma.neval}  "
-                        f"cost:{best_cost:.9g}  "
-                        f"best:{best_dict[restart]['best_cost_so_far']:.9g}"
+                        f"neval:{ddcma.neval :<6}  "
+                        f"cost:{best_cost:<10.9g}  "
+                        f"best:{best_dict[restart]['best_cost_so_far']:<10.9g}"
                     )
                     logger()
 
@@ -587,6 +645,7 @@ class PathPlanning:
         """
         sm = self.sample_map
         cal = self.cal
+        SD = self.SD
 
         pts = np.asarray(initial_pts, float).reshape(-1, 2)
         origin = np.asarray(self.origin_pt, float)
@@ -631,6 +690,16 @@ class PathPlanning:
             elem_cost += 3.0 * cal.elem(pts[-1], last, end)
         for j in range(1, len(pts) - 1):
             elem_cost += cal.elem(pts[j - 1], pts[j], pts[j + 1])
+        
+        # difference from current angle to end angle
+        angle_cost = 0.0
+        if len(pts) >= 1:
+            angle_cost += cal.angle_diff_cost(origin, pts[0])
+            angle_cost += cal.angle_diff_cost(pts[-1], last)
+        else:
+            angle_cost += cal.angle_diff_cost(origin, last)
+        for j in range(len(pts) - 1):
+            angle_cost += cal.angle_diff_cost(pts[j], pts[j + 1])
 
         # point-to-point distance
         dist_cost = 0.0
@@ -644,9 +713,11 @@ class PathPlanning:
 
         # coefficients
         self.element_coeff = 1.0 * self.ps.element_ratio
+        self.angle_diff_coeff = (elem_cost / angle_cost) * self.ps.angle_diff_ratio
         self.length_coeff = (elem_cost / length_cost) * self.ps.length_ratio if length_cost > 0 else 1.0
         self.SD_coeff = (elem_cost / SD_cost) * self.ps.SD_ratio if SD_cost > 0 else 10.0
         self.distance_coeff = (elem_cost / dist_cost) * self.ps.distance_ratio if dist_cost > 0 else 1.0
+
 
     def path_evaluate(self, X: np.ndarray) -> np.ndarray | float:
         """
@@ -671,6 +742,7 @@ class PathPlanning:
 
         sm = self.sample_map
         cal = self.cal
+        SD = self.SD
         origin = np.asarray(self.origin_pt, float)
         last = np.asarray(self.last_pt, float)
         end = sm.end_xy[0].astype(float)
@@ -720,6 +792,16 @@ class PathPlanning:
             for j in range(1, len(pts) - 1):
                 elem_cost += cal.elem(pts[j - 1], pts[j], pts[j + 1])
 
+            # difference from current angle to end angle
+            angle_cost = 0.0
+            if len(pts) >= 1:
+                angle_cost += cal.angle_diff_cost(origin, pts[0])
+                angle_cost += cal.angle_diff_cost(pts[-1], last)
+            else:
+                angle_cost += cal.angle_diff_cost(origin, last)
+            for j in range(len(pts) - 1):
+                angle_cost += cal.angle_diff_cost(pts[j], pts[j + 1])
+
             # distance
             dist_cost = 0.0
             if len(pts) >= 1:
@@ -730,11 +812,13 @@ class PathPlanning:
             for j in range(len(pts) - 1):
                 dist_cost += cal.distance_cost_between(pts[j], pts[j + 1])
 
+
             total = (
                 self.length_coeff * length_cost
                 + self.SD_coeff * SD_cost
                 + self.element_coeff * elem_cost
                 + self.distance_coeff * dist_cost
+                + self.angle_diff_coeff * angle_cost
             )
             costs[i] = total
 
@@ -783,9 +867,8 @@ class PathPlanning:
 
     def shipdomain(self):
         port = self.port
-        TARGET_DIR = f"{DIR}/../../outputs/port"
-        target_csv = f"{TARGET_DIR}/detail_port_csv_{port['name']}.csv"
-        target_csv_for_pyship = f"{TARGET_DIR}/detail_port_csv_{port['name']}_for_pyship.csv"
+        target_csv = f"{DATA}/rough_map/{port['name']}.csv"
+        target_csv_for_pyship = f"{DATA}/rough_map_for_pyship/{port['name']}.csv"
 
         df_world = pd.read_csv(target_csv_for_pyship)
         world_polys = [df_world[["x [m]", "y [m]"]].to_numpy()]
@@ -804,7 +887,7 @@ class PathPlanning:
         time_end_map_generation = time.time()
         print(f"Map generation is complete.\nCalculation time : {time_end_map_generation - time_start_map_generation}\n")
 
-        df = pd.read_csv(f"{DIR}/../../raw_datas/tmp/GuidelineFit_debug.csv")
+        df = pd.read_csv(f"{RAW_DATAS}/tmp/GuidelineFit_debug.csv")
         sample_map.a_ave = df["a_ave"].values[0]
         sample_map.b_ave = df["b_ave"].values[0]
         sample_map.a_SD = df["a_SD"].values[0]
@@ -940,11 +1023,9 @@ class PathPlanning:
 
         elif self.ps.init_path_algo == InitPathAlgo.BEZIER:
             port = self.port
-            # sm.isect_xy = self.calcurate_intersection(sm)
-            #
-            if (files := glob.glob(f"{Buoy_DIR}/_{port['name']}.csv")):
+            if (files := glob.glob(f"{DATA}/buoy/{port['name']}.csv")):
                 buoy = Buoy()
-                buoy.input_csv(files[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
+                buoy.input_csv(files[0], f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv")
                 sm.buoy_xy = [buoy.X, buoy.Y]
             else:
                 sm.buoy_xy = None
@@ -1021,7 +1102,7 @@ class PathPlanning:
 
         # ---- pretty print helper ----
         LABELS = (
-            "start_end", "psi", "steady_course_coeff",
+            "target", "start_end", "psi", "steady_course_coeff",
             "init_path_algo", "weight_SD", "save_init_path", "init_SD",
             "save_opt_path", "csv"
         )
@@ -1036,6 +1117,7 @@ class PathPlanning:
             f"{'Length':<12}{self.ps.length_ratio}\n"
             f"{'SD':<12}{self.ps.SD_ratio}\n"
             f"{'Element':<12}{self.ps.element_ratio}\n"
+            f"{'Angle':<12}{self.ps.angle_diff_ratio}\n"
             f"{'Distance':<12}{self.ps.distance_ratio}\n"
         )
 
@@ -1082,11 +1164,13 @@ class PathPlanning:
         p("save_opt_path", "on" if self.ps.save_opt_path else "off")
         p("csv", "on" if self.ps.save_csv else "off")
 
+        # --- target ---
+        p("target", f"{port['name']}")
+
     def dict_of_port(self, num):
         dictionary_of_port = {
             0: {
                 "name": "Osaka_port1A",
-                "bay": sakai_bay.port1A,
                 "start": [-1400.0, -800.0],
                 "end": [0.0, -10.0],
                 "psi_start": 40,
@@ -1097,7 +1181,6 @@ class PathPlanning:
             },
             1: {
                 "name": "Tokyo_port2C",
-                "bay": Tokyo_bay.port2C,
                 "start": [-2400.0, -1600.0],
                 "end": [0.0, 0.0],
                 "psi_start": 25,
@@ -1108,7 +1191,6 @@ class PathPlanning:
             },
             2: {
                 "name": "Yokkaichi_port2B",
-                "bay": yokkaichi_bay.port2B,
                 "start": [2000.0, 2000.0],
                 "end": [300.0, 80.0],
                 "psi_start": -125,
@@ -1119,36 +1201,93 @@ class PathPlanning:
             },
             3: {
                 "name": "Else_port1",
-                "bay": else_bay.port1,
                 "start": [2500.0, 0.0],
-                "end": [450.0, 20.0],
+                "end": [0.0, 0.0], # [450.0, 20.0]
                 "psi_start": -150,
-                "psi_end": 135,
+                "psi_end": -105, # 135
                 "berth_type": 1,
                 "ver_range": [0, 3000],
                 "hor_range": [-1000, 2000],
             },
             4: {
                 "name": "Osaka_port1B",
-                "bay": sakai_bay.port1B,
-                "start": [-1400.0, -800.0],
-                "end": [0.0, 15.0],
-                "psi_start": 40,
-                "psi_end": -10,
+                "start": [-3000.0, -1080.0],
+                "end": [0.0, -10.0], # [-480.0, -80.0]
+                "psi_start": -5,
+                "psi_end": -10, # 45
                 "berth_type": 2,
-                "ver_range": [-1500, 500],
-                "hor_range": [-1000, 500],
+                "ver_range": [-3200, 500],
+                "hor_range": [-1600, 500],
             },
             5: {
                 "name": "Else_port2",
-                "bay": else_bay.port2,
-                "start": [-2500.0, 800.0],
+                "start": [-1000.0, 650.0],
                 "end": [0.0, 0.0],
-                "psi_start": -50,
+                "psi_start": -45,
+                "psi_end": -15,
+                "berth_type": 2,
+                "ver_range": [-1900, 300],
+                "hor_range": [-1000, 1200],
+            },
+            6: {
+                "name": "Kashima",
+                "start": [1750.0, 1900.0],
+                "end": [250.0, -150.0],
+                "psi_start": -120,
+                "psi_end": -170,
+                "berth_type": 2,
+                "ver_range": [-1000, 2000],
+                "hor_range": [-1500, 2000],
+            },
+            7: {
+                "name": "Aomori",
+                "start": [350, 3400.0],
+                "end": [0, 100],
+                "psi_start": -115,
+                "psi_end": -90,
+                "berth_type": 2,
+                "ver_range": [-1500, 1500],
+                "hor_range": [-1000, 3500],
+            },
+            8: {
+                "name": "Hachinohe",
+                "start": [1350, 2500.0],
+                "end": [100, 250],
+                "psi_start": -110,
+                "psi_end": -160,
+                "berth_type": 2,
+                "ver_range": [-1000, 2500],
+                "hor_range": [-1000, 3000],
+            },
+            9: {
+                "name": "Shimizu",
+                "start": [1400, -2000],
+                "end": [150, 100],
+                "psi_start": 100,
+                "psi_end": 175,
+                "berth_type": 2,
+                "ver_range": [-1000, 2000],
+                "hor_range": [-3000, 1000],
+            },
+            10: {
+                "name": "Tomakomai",
+                "start": [-1400, 1200],
+                "end": [0, 0],
+                "psi_start": -75,
                 "psi_end": 0,
                 "berth_type": 2,
+                "ver_range": [-1000, 4500],
+                "hor_range": [-2500, 2000],
+            },
+            11: {
+                "name": "KIX",
+                "start": [-2500, 800],
+                "end": [-300, 250],
+                "psi_start": -10,
+                "psi_end": -30,
+                "berth_type": 2,
                 "ver_range": [-3000, 500],
-                "hor_range": [-1500, 1500],
+                "hor_range": [-2000, 2000],
             },
         }
         return dictionary_of_port[num]
@@ -1209,16 +1348,16 @@ class PathPlanning:
         ax1 = fig.add_subplot(gs[:, 0:2])
 
         # map
-        df_map = pd.read_csv(f"{DIR}/../../outputs/real_port_csv/for_thesis_{port['name']}.csv")
+        df_map = pd.read_csv(f"{DATA}/detail_map/{port['name']}.csv")
         map_X, map_Y = df_map["x [m]"].values, df_map["y [m]"].values
         ax1.fill_betweenx(map_X, map_Y, facecolor="gray", alpha=0.3)
         ax1.plot(map_Y, map_X, color="k", linestyle="--", lw=0.5, alpha=0.8)
 
         # captain's route
-        df_cap = glob.glob(f"{TMP_DIR}/_{port['name']}/*.csv")
+        df_cap = glob.glob(f"{RAW_DATAS}/tmp/_{port['name']}/*.csv")
         for df in df_cap:
             traj = RealTraj()
-            traj.input_csv(df, f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
+            traj.input_csv(df, f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv")
             ax1.plot(traj.Y, traj.X, 
                      color = 'gray', ls = '-', marker = 'D',
                      markersize = 2, alpha = 0.8, lw = 1.0, zorder = 1)
@@ -1228,10 +1367,10 @@ class PathPlanning:
             )
 
         # buoy
-        df_buoy = glob.glob(f"{Buoy_DIR}/_{port['name']}.csv")
+        df_buoy = glob.glob(f"{DATA}/buoy/{port['name']}.csv")
         if len(df_buoy) != 0:
             buoy = Buoy()
-            buoy.input_csv(df_buoy[0], f"{TMP_DIR}/coordinates_of_port/{port['bay'].name}.csv")
+            buoy.input_csv(df_buoy[0], f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv")
             ax1.scatter(buoy.Y, buoy.X,
                         color='orange', s=20, zorder=4)
         legend_buoy = plt.Line2D([0], [0], marker="o", color="w",
@@ -1290,8 +1429,26 @@ class PathPlanning:
         ax1.text(sm.end_xy[0, 1], sm.end_xy[0, 0] + (60 * self.ps.end_label_offset_sign), "end", va="center", ha="left", fontsize=20)
         ax1.scatter(sm.origin_xy[0, 1], sm.origin_xy[0, 0], color="#FF4B00", s=20, zorder=4)
         ax1.scatter(sm.last_xy[0, 1], sm.last_xy[0, 0], color="#FF4B00", s=20, zorder=4)
-        ax1.scatter(sm.isect_xy[1], sm.isect_xy[0], color="#FF4B00", s=20, zorder=4)
+        if sm.isect_xy is not None:
+            ax1.scatter(sm.isect_xy[1], sm.isect_xy[0], color="#FF4B00", s=20, zorder=4)
         legend_fixed = plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="#FF4B00", markersize=pointsize, label="Fixed Point")
+
+        # compas
+        img = mpimg.imread(f"{RAW_DATAS}/compass icon2.png")
+        df = pd.read_csv(f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv")
+        angle = float(df['Psi[deg]'].iloc[0])
+        img_rot = ndimage.rotate(img, angle, reshape=True)
+        img_rot = np.clip(img_rot, 0.0, 1.0)
+        imagebox = OffsetImage(img_rot, zoom=0.5)
+        ab = AnnotationBbox(
+            imagebox,
+            (0, 1), # ax1's upper left
+            xycoords='axes fraction',
+            box_alignment=(0, 1), # .png's upper left
+            frameon=False,
+            pad=0.0,
+        )
+        ax1.add_artist(ab)
 
         # axes/ticks
         hor_lim = [port["hor_range"][0], port["hor_range"][1]]
@@ -1355,8 +1512,7 @@ class PathPlanning:
         df = pd.concat([df, df_opt], axis=1)
 
         df.to_csv(csv_file_path, index=False)
-        print(f"CSV saved\n")
-
+        print(f"\nCSV saved : {self.port['name']}")
 
 if __name__ == "__main__":
     ps = Settings()

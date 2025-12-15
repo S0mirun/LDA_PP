@@ -1,3 +1,18 @@
+import os
+import matplotlib.pyplot as plt
 import pandas as pd
-df = pd.read_pickle("df_rest_all.pickle")  # 圧縮付きでもOK
-print(type(df), getattr(df, "shape", None))
+
+DIR = os.path.dirname(__file__)
+DATA = f"{DIR}/../../outputs/data"
+file = f"{DATA}/detail_map/Yokkaichi_port2B.csv"
+# file = f"{DATA}/rough_map/Shimizu.csv"
+SAVE_DIR = os.path.dirname(file)
+
+df = pd.read_csv(file)
+plt.plot(df["y [m]"], df["x [m]"])
+plt.grid()
+plt.axis("equal")
+plt.show()
+
+# plt.savefig(os.path.join(f"{SAVE_DIR}",
+#                          f"_{os.path.splitext(os.path.basename(file))[0]}.png"))

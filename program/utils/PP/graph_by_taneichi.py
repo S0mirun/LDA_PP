@@ -9,11 +9,6 @@ import pandas as pd
 from tqdm import tqdm
 
 from utils.PP.subroutine import mpl_config
-
-PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
-PYSIM_DIR = os.path.join(PROGRAM_DIR, "py-ship-simulator-main/py-ship-simulator-main")
-if PYSIM_DIR not in sys.path:
-    sys.path.append(PYSIM_DIR)
 import pyshipsim
 plt.rcParams.update(mpl_config)
 
@@ -23,10 +18,10 @@ length_of_theta_list = len(theta_list)  # 36
 
 
 class Map():
-    """Grid map with obstacles and utilities for collision checking and plotting."""
+    """障害物を含むグリッドマップと，接触判定およびプロットのためのユーティリティを提供するクラス"""
 
     def __init__(self, ver_range, hor_range, grid_pitch=None, start=None, end=None, Miss_Corner=False):
-        """Initialize map ranges and basic state."""
+        """マップの範囲やグリッドピッチなどの基本情報を初期化する"""
         # inputs
         self.start = start
         self.end = end
@@ -39,14 +34,16 @@ class Map():
         self.obstacle_dict = {}
         self.obstacle_node = np.empty((0, 2))
 
+        self.isect_xy = None
+
     def GenerateMapFromCSV(file, grid_pitch):
         """
-        Build a Map from a CSV of obstacle polyline.
-        Args:
-            file (str): CSV path with columns 'x [m]', 'y [m]'.
-            grid_pitch (float): Grid spacing.
-        Returns:
-            Map: Initialized map with obstacle line & nodes added.
+        障害物の折れ線データを格納したCSVから Map インスタンスを生成する
+        引数:
+            file (str): 'x [m]', 'y [m]' 列を持つCSVファイルのパス
+            grid_pitch (float): グリッドの間隔
+        戻り値:
+            Map: 障害物の線分とノードが追加された初期化済みマップ
         """
 
         with tqdm(total=13, desc="Build target map", unit="step") as pbar:
@@ -72,13 +69,13 @@ class Map():
 
     def ShowInitialMap(self, filename=None, SD=None, SD_sw=True, initial_point_list=None):
         """
-        Plot map for initial path (start/origin/path/last/end + optional SD).
-        Args:
-            filename (str|None): Output image path.
-            SD: Ship-domain model (has distance()).
-            SD_sw (bool): Show SD polygons if True.
-            initial_point_list (list|ndarray|None): Initial points (ver, hor).
-        Returns:
+        初期経路（start/origin/path/last/end と任意のSD）を描画する
+        引数:
+            filename (str|None): 出力画像ファイルのパス
+            SD: Ship-domain モデル（distance() を持つオブジェクト）
+            SD_sw (bool): True のときSDポリゴンを描画する
+            initial_point_list (list|ndarray|None): 初期点のリスト（ver, hor）
+        戻り値:
             None
         """
         # figure sizing by aspect
@@ -110,7 +107,7 @@ class Map():
         # initial points
         if initial_point_list is not None:
             initial_points = np.array(initial_point_list).reshape(-1, 2)
-            ax.scatter(initial_points[:, 1], initial_points[:, 0], color='blue', s=10, label='Initial Points', zorder=3)
+            ax.scatter(initial_points[:, 1], initial_points[:, 0], color='green', s=10, label='Initial Points', zorder=3)
 
         # path chain (start -> origin -> path -> last -> end)
         if 'path_xy' in dir(self):
@@ -191,14 +188,14 @@ class Map():
         SD_sw=True,
     ):
         """
-        Plot map with path and optional SD at checkpoints & midpoints.
-        Args:
-            filename (str|None): Output image path.
-            SD: Ship-domain model (has distance()).
-            initial_point_list (list|ndarray|None): Initial points (ver, hor).
-            optimized_point_list (list|ndarray|None): Optimized points (ver, hor).
-            SD_sw (bool): Show SD polygons if True.
-        Returns:
+        経路とCP・MP上のSD（任意）を重ねてマップを描画する
+        引数:
+            filename (str|None): 出力画像ファイルのパス
+            SD: Ship-domain モデル（distance() を持つオブジェクト）
+            initial_point_list (list|ndarray|None): 初期点のリスト（ver, hor）
+            optimized_point_list (list|ndarray|None): 最適化後の点のリスト（ver, hor）
+            SD_sw (bool): True のときSDポリゴンを描画する
+        戻り値:
             tuple: (cp_list, mp_list, psi_list_at_cp, psi_list_at_mp)
         """
         # figure sizing by aspect
@@ -229,14 +226,14 @@ class Map():
 
         # buoy, intersection
         if getattr(self, 'buoy_xy', None) is not None : 
-            ax.scatter(self.buoy_xy[1] + 0.5, self.buoy_xy[0] + 0.5, color='orange', s=15, zorder=3, label='control point')
-        if 'isect_xy' in dir(self):
-            ax.scatter(self.isect_xy[1] + 0.5, self.isect_xy[0] + 0.5, color='orange', s=15, zorder=3)
+            ax.scatter(self.buoy_xy[1] + 0.5, self.buoy_xy[0] + 0.5, color='orange', s=15, zorder=3)
+        if getattr(self, "isect_xy", None) is not None:
+            ax.scatter(self.isect_xy[1] + 0.5, self.isect_xy[0] + 0.5, color='orange', s=15, zorder=3, label='control point')
 
         # initial points
         if initial_point_list is not None:
             initial_points = np.array(initial_point_list).reshape(-1, 2)
-            ax.scatter(initial_points[:, 1], initial_points[:, 0], color='blue', s=10, label='Initial Points', zorder=3)
+            ax.scatter(initial_points[:, 1], initial_points[:, 0], color='green', s=10, label='Initial Points', zorder=3)
 
         # optimized points
         if optimized_point_list is not None:
@@ -244,7 +241,7 @@ class Map():
             ax.scatter(
                 optimized_points[:, 1],
                 optimized_points[:, 0],
-                color='green', s=15, label='Optimized Points', zorder=3
+                color='blue', s=15, label='Optimized Points', zorder=3
             )
 
         # path chain (start -> origin -> path -> last -> end)
@@ -263,11 +260,11 @@ class Map():
             # --- CP psi from three points ---
             def cal_psi_at_checkpoint(ver_parent, hor_parent, ver_current, hor_current, ver_child, hor_child):
                 """
-                Heading at checkpoint via bisected angle of two segments.
-                Args:
-                    *_parent/current/child (float): Coordinates (ver, hor).
-                Returns:
-                    float: psi [rad]
+                2本の線分が成す角を2等分して,チェックポイントでの船首方位を求める
+                引数:
+                    *_parent/current/child (float): 各点の座標（ver, hor）
+                戻り値:
+                    float: 船首方位 psi [rad]
                 """
                 v1 = np.array([hor_current - hor_parent, ver_current - ver_parent])
                 v2 = np.array([hor_child - hor_current, ver_child - ver_current])
@@ -298,11 +295,11 @@ class Map():
             # --- MP psi from two points ---
             def cal_psi_at_midpoint(ver_parent, hor_parent, ver_current, hor_current):
                 """
-                Heading at midpoint along a segment.
-                Args:
+                1本の線分の中点における船首方位を求める
+                引数:
                     ver_parent, hor_parent, ver_current, hor_current (float)
-                Returns:
-                    float: psi [rad]
+                戻り値:
+                    float: 船首方位 psi [rad]
                 """
                 psi = np.deg2rad(90) - np.arctan2(ver_current - ver_parent, hor_current - hor_parent)
                 if psi > np.deg2rad(180):
@@ -406,11 +403,11 @@ class Map():
 
     def DetictCollision(self, start, end):
         """
-        Find crossed grid cells by a line segment (start -> end).
-        Args:
-            start, end (ndarray): Points (ver, hor).
-        Returns:
-            ndarray: Unique passed nodes (ver, hor).
+        線分（start -> end）が通過するグリッドセルを列挙する
+        引数:
+            start, end (ndarray): 始点・終点の座標（ver, hor）
+        戻り値:
+            ndarray: 通過したグリッドノードの集合（ver, hor）
         """
         # line ax + by + c = 0 (x/y swapped: vertical is x)
         a = end[1] - start[1]
@@ -480,13 +477,13 @@ class Map():
 
     def RoundRange(self, num, pitch, TYPE):
         """
-        Round value to nearest grid boundary.
-        Args:
-            num (float): Value to round.
-            pitch (float): Grid spacing.
-            TYPE (str): 'min' => floor to <= num, 'max' => ceil to >= num.
-        Returns:
-            float: Rounded boundary value.
+        値を最も近いグリッド境界に丸める
+        引数:
+            num (float): 丸め対象の値
+            pitch (float): グリッド間隔
+            TYPE (str): 'min' の場合は num 以下となるように切り下げ，'max' の場合は num 以上となるように切り上げる。
+        戻り値:
+            float: 丸め後の境界値
         """
         num_int = 0
         if TYPE == 'max':
@@ -502,11 +499,11 @@ class Map():
 
     def AddObstacleLine(self, array, name='Noname'):
         """
-        Add obstacle polyline into dict with unique key.
-        Args:
-            array (ndarray): Vertex array (ver, hor).
-            name (str): Base key.
-        Returns:
+        障害物の折れ線データを辞書に追加する（キーは一意になるように付番する）
+        引数:
+            array (ndarray): 頂点座標の配列（ver, hor）
+            name (str): キーのベースとなる名前
+        戻り値:
             None
         """
         name = name
@@ -524,15 +521,15 @@ class Map():
 
     def AddObstacleNode(self, array, name='Noname'):
         """
-        Rasterize obstacle: collect all grid nodes along edges + filled interior.
-        Args:
-            array (ndarray): Obstacle vertices (ver, hor).
-            name (str): Unused label (kept for symmetry).
-        Returns:
+        障害物をラスタライズし，辺上および内部のグリッドノードをすべて収集する。
+        引数:
+            array (ndarray): 障害物ポリゴンの頂点（ver, hor）
+            name (str): ラベル（現状は対称性のために保持しているだけで未使用）
+        戻り値:
             None
         """
         inner_node = self.fill_inner_concave_obstacle(array, self.grid_pitch)
-        for i in tqdm(range(len(array) - 1), desc='Add Node'):
+        for i in range(len(array) - 1):
             tmp_array = self.DetictCollision(array[i, :], array[i + 1, :])
             self.obstacle_node = np.concatenate([self.obstacle_node, tmp_array])
         self.obstacle_node = np.append(self.obstacle_node, inner_node, axis=0)
@@ -541,11 +538,11 @@ class Map():
 
     def FindNodeOfThePoint(self, point):
         """
-        Anchor a point to lower-left grid node.
-        Args:
-            point (ndarray): (ver, hor).
-        Returns:
-            ndarray: Node (1,2) (ver, hor).
+        与えられた点を，左下のグリッドノードに対応付ける
+        引数:
+            point (ndarray): 座標（ver, hor）
+        戻り値:
+            ndarray: ノード座標 (1, 2)（ver, hor）
         """
         node = np.empty((1, 2))
         node[0, 0] = self.FloorByDesiredPitch(point[0], self.grid_pitch)
@@ -554,20 +551,20 @@ class Map():
 
     def FloorByDesiredPitch(self, num, grid):
         """
-        Floor by custom pitch.
-        Args:
-            num (float): Value.
-            grid (float): Pitch.
-        Returns:
-            float: Floored value.
+        指定したピッチで切り下げる
+        引数:
+            num (float): 対象となる値
+            grid (float): ピッチ
+        戻り値:
+            float: 切り下げ後の値
         """
         tmp = grid * math.floor(num / grid)
         return tmp
 
     def SetMaze(self):
         """
-        Build binary maze array (1=obstacle) for A* (transposed to (hor, ver)).
-        Returns:
+        A*探索用の二値迷路配列（1=障害物）を構築する（転置して (hor, ver) 形状にする）
+        戻り値:
             None
         """
         maze_np = np.zeros((len(self.ver_range), len(self.hor_range)), int)
@@ -582,14 +579,14 @@ class Map():
 
     def ship_domain_cost_astar(self, node, SD, weight, enclosing_checker):
         """
-        Cost = weight * (# of SD vertices inside obstacles) for A* node.
-        Args:
-            node: Node with .position and .psi.
-            SD: Ship-domain model (distance()).
-            weight (float): Weight factor.
-            enclosing_checker: pyshipsim.EnclosingPointCollisionChecker instance.
-        Returns:
-            float: Cost.
+        A* ノードに対するコスト = weight ×（障害物内部に入ったSD頂点数）とする
+        引数:
+            node: .position と .psi を持つノード
+            SD: Ship-domain モデル（distance() を持つオブジェクト）
+            weight (float): 重み係数
+            enclosing_checker: pyshipsim.EnclosingPointCollisionChecker インスタンス
+        戻り値:
+            float: コスト値
         """
         distance = ((self.ver_range[node.position[1]] - self.end_xy[0, 1]) ** 2 +
                     (self.hor_range[node.position[0]] - self.end_xy[0, 1]) ** 2) ** (1 / 2)
@@ -611,15 +608,15 @@ class Map():
 
     def ship_domain_cost(self, child_ver, child_hor, psi, SD, enclosing_checker):
         """
-        Cost = (# of SD vertices inside obstacles) for raw coordinates (CMA-ES use).
-        Args:
-            child_ver (float): ver (y).
-            child_hor (float): hor (x).
-            psi (float): heading [rad].
-            SD: Ship-domain model (distance()).
-            enclosing_checker: pyshipsim.EnclosingPointCollisionChecker instance.
-        Returns:
-            int: Number of contact vertices.
+        生の座標に対してコストを「障害物内部に入ったSD頂点数」として評価する（CMA-ES 用）
+        引数:
+            child_ver (float): ver（y座標）
+            child_hor (float): hor（x座標）
+            psi (float): 船首方位 [rad]
+            SD: Ship-domain モデル（distance() を持つオブジェクト）
+            enclosing_checker: pyshipsim.EnclosingPointCollisionChecker インスタンス
+        戻り値:
+            int: 接触した頂点数。
         """
         distance = ((child_ver - self.end_xy[0, 1]) ** 2 + (child_hor - self.end_xy[0, 1]) ** 2) ** 0.5
         speed = self.b_ave * distance ** (self.a_ave) + self.b_SD * distance ** (self.a_SD)
@@ -642,12 +639,12 @@ class Map():
 
     def fill_inner_concave_obstacle(self, array, pitch):
         """
-        Fill interior grid nodes inside a (possibly concave) polygon.
-        Args:
-            array (ndarray): Polygon vertices (ver, hor).
-            pitch (float): Grid spacing.
-        Returns:
-            ndarray: Interior nodes (ver, hor).
+        凹多角形を含むポリゴン内部のグリッドノードを塗りつぶして取得する
+        引数:
+            array (ndarray): ポリゴン頂点（ver, hor）
+            pitch (float): グリッド間隔
+        戻り値:
+            ndarray: 内部ノード（ver, hor）
         """
         inner_array = np.empty((0, 2))
         ver_min_round = self.RoundRange(np.amin(array[:, 0]), pitch, 'min')
@@ -664,12 +661,12 @@ class Map():
 
     def crossing_number(self, point, obstacle_array):
         """
-        Point-in-polygon test (Crossing Number algorithm).
-        Args:
-            point (ndarray): (ver, hor).
-            obstacle_array (ndarray): Polygon vertices (ver, hor).
-        Returns:
-            bool: True if inside.
+        Crossing Number 法による，点がポリゴン内部にあるかどうかの判定
+        引数:
+            point (ndarray): 判定する点の座標（ver, hor）
+            obstacle_array (ndarray): ポリゴン頂点（ver, hor）
+        戻り値:
+            bool: 内部にあれば True
         """
         cross_count = 0
         for i in range(len(obstacle_array) - 1):
@@ -702,20 +699,21 @@ class Map():
 # Seki says that there is no relationship between SD and ship speed when ship speed is greater than 6.8knots.
 # Therefore, when the ship speed is greater than 6.8knots, the SD should be the SD at 6.8knots.
 class ShipDomain_proposal():
-    """Ship-domain model with speed-dependent anisotropic ellipse parameters."""
+    """船速依存の異方性楕円パラメータを持つ Ship-domain モデル"""
 
     def __init__(self, **kwargs):
+        """kwargs から渡された任意の属性をインスタンス変数として保持する"""
         """Store arbitrary attributes from kwargs."""
         for key, value in kwargs.items():
             setattr(self, key, value)
 
     def initial_setting(self, filename, func):
         """
-        Load SD parameters from CSV and set evaluator.
-        Args:
-            filename (str): CSV path (expects rows: gf, gp, gs).
-            func (callable): G(speed, a, b, c)-like evaluator.
-        Returns:
+        CSV からSDパラメータを読み込み,評価関数を設定する。
+        引数:
+            filename (str): CSVファイルのパス（行名として gf, gp, gs を想定）
+            func (callable): G(speed, a, b, c) 形式の評価関数
+        戻り値:
             None
         """
         df = pd.read_csv(filename, index_col=0)
@@ -727,12 +725,12 @@ class ShipDomain_proposal():
 
     def distance(self, speed, theta):
         """
-        Return SD radius G at heading theta [rad] for given speed.
-        Args:
-            speed (float): Ship speed [kts].
-            theta (float): Body-fixed angle [rad], 0=fwd, CW positive.
-        Returns:
-            float: Radius G along theta.
+        与えられた船速と方位 theta [rad] に対する SD 半径 G を返す
+        引数:
+            speed (float): 船速 [kts]
+            theta (float): 船体座標系での角度 [rad]（前方0,時計回り正）
+        戻り値:
+            float: 方向 theta に沿った半径 G
         """
         gf = self.func(speed, self.gf_parameters[0], self.gf_parameters[1], self.gf_parameters[2])
         ga = self.func(speed, self.ga_parameters[0], self.ga_parameters[1], self.ga_parameters[2]) * 2

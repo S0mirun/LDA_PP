@@ -225,9 +225,7 @@ class Buoy(Traj):
                 sys.exit()
         #
         df = pd.read_csv(filename_buoy
-                         , header=None, skiprows=0
-                         , usecols=[5, 6]
-                         , names=['latitude', 'longitude']
+                         , usecols=[0, 1]
                          , encoding="utf-8-sig"
                          )
         # convert latlong to XY
