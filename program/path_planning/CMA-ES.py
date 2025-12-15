@@ -68,7 +68,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 7
+        self.port_number: int = 10
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -818,7 +818,7 @@ class PathPlanning:
                 + self.SD_coeff * SD_cost
                 + self.element_coeff * elem_cost
                 + self.distance_coeff * dist_cost
-                + self.angle_diff_coeff * angle_cost
+                # + self.angle_diff_coeff * angle_cost
             )
             costs[i] = total
 
@@ -1192,7 +1192,7 @@ class PathPlanning:
             2: {
                 "name": "Yokkaichi_port2B",
                 "start": [2000.0, 2000.0],
-                "end": [300.0, 80.0],
+                "end": [100.0, 80.0], # 300, 80
                 "psi_start": -125,
                 "psi_end": 175,
                 "berth_type": 1,
@@ -1271,13 +1271,13 @@ class PathPlanning:
             },
             10: {
                 "name": "Tomakomai",
-                "start": [-1400, 1200],
-                "end": [0, 0],
-                "psi_start": -75,
+                "start": [-1300, 1500],
+                "end": [-200.0, -80.0],
+                "psi_start": -70,
                 "psi_end": 0,
                 "berth_type": 2,
-                "ver_range": [-1000, 4500],
-                "hor_range": [-2500, 2000],
+                "ver_range": [-2000, 500],
+                "hor_range": [-1000, 2000],
             },
             11: {
                 "name": "KIX",
