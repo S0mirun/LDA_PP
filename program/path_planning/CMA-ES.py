@@ -68,7 +68,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 1
+        self.port_number: int = 2
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -184,14 +184,12 @@ class CostCalculator:
         - Normalized by Glaph.length_of_theta_list × 100.
         """
         sm = self.sample_map
-
         ver_p, hor_p = parent_pt
         ver_mid, hor_mid = (parent_pt + child_pt) / 2.0
         ver_c, hor_c = child_pt
 
-        psi = np.deg2rad(90.0) - np.arctan2(ver_c - ver_p, hor_c - hor_p)
-        if psi > np.deg2rad(180.0):
-            psi = (np.deg2rad(360.0) - psi) * (-1.0)
+        psi = np.pi/2 - np.arctan2(ver_c - ver_p, hor_c - hor_p)      # 0=North, CW:+
+        psi = (psi + np.pi) % (2*np.pi) - np.pi
 
         contact_mid = sm.ship_domain_cost(
             ver_mid, hor_mid, psi, self.SD, self.enclosing
@@ -219,37 +217,35 @@ class CostCalculator:
         - Normalized by Glaph.length_of_theta_list × 100.
         """
         sm = self.sample_map
-
-        ver_p, hor_p = parent_pt
         ver_c, hor_c = current_pt
-        ver_n, hor_n = child_pt
 
-        v1 = np.array([hor_c - hor_p, ver_c - ver_p], dtype=float)
-        v2 = np.array([hor_n - hor_c, ver_n - ver_c], dtype=float)
-        m1 = np.linalg.norm(v1)
-        m2 = np.linalg.norm(v2)
-
-        if m1 == 0.0 or m2 == 0.0:
-            angle_rad = 0.0
-            direction = 0
-        else:
-            cos_theta = np.clip(np.dot(v1, v2) / (m1 * m2), -1.0, 1.0)
-            angle_rad = float(np.arccos(cos_theta))
-            cross = cross2d(v1, v2)
-            direction = -1 if cross > 0 else (1 if cross < 0 else 0)  # CCW:-1, CW:+1
-
-        psi = np.deg2rad(90.0) - np.arctan2(ver_c - ver_p, hor_c - hor_p)
-        if psi > np.deg2rad(180.0):
-            psi = (np.deg2rad(360.0) - psi) * (-1.0)
-
-        psi = psi + 0.5 * angle_rad * direction
-        psi = (psi + np.pi) % (2.0 * np.pi) - np.pi  # normalize to [-pi, pi]
-
+        psi = cal_psi(parent_pt, current_pt, child_pt)
         contact_cp = sm.ship_domain_cost(
             ver_c, hor_c, psi, self.SD, self.enclosing
         )
         normalized = (contact_cp / Glaph.length_of_theta_list) * 100.0
         return float(normalized)
+    
+    def ShipDomain(self, parent_pt, current_pt, child_pt):
+        sm = self.sample_map
+        SD = self.SD
+        enclosing = self.enclosing
+        obstacles = enclosing.obstacle_polygons[0]
+
+        parent_pt  = np.asarray(parent_pt, dtype=float)
+        current_pt = np.asarray(current_pt, dtype=float)
+        child_pt   = np.asarray(child_pt, dtype=float)
+
+        psi = cal_psi(parent_pt, current_pt, child_pt)
+        speed = cal_speed(current_pt, sm)
+        for obstacle in obstacles:
+            v = obstacle - current_pt
+            dist = np.linalg.norm(v)
+            theta = np.pi/2 - np.arctan2(v[1], v[0])
+            theta = (theta + np.pi) % (2*np.pi) - np.pi # nomalize
+            rel = (theta - psi + np.pi) % (2*np.pi) - np.pi
+            D = SD.distance(speed, rel)
+
 
     def elem(self, parent_pt: np.ndarray, current_pt: np.ndarray, child_pt: np.ndarray) -> float:
         """
@@ -389,6 +385,34 @@ def cross2d(a, b):
     b = np.asarray(b)
     return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
 
+def cal_psi(parent_pt, current_pt, child_pt):
+    ver_p, hor_p = parent_pt
+    ver_c, hor_c = current_pt
+    ver_n, hor_n = child_pt
+
+    v1 = np.array([hor_c - hor_p, ver_c - ver_p], dtype=float)
+    v2 = np.array([hor_n - hor_c, ver_n - ver_c], dtype=float)
+    m1 = np.linalg.norm(v1)
+    m2 = np.linalg.norm(v2)
+
+    if m1 == 0.0 or m2 == 0.0:
+        theta = 0.0
+    else:
+        dot = float(np.dot(v1, v2))
+        cross = float(cross2d(v1, v2))
+        theta = float(np.arctan2(cross, dot))  # CCW:+, CW:-
+
+    psi_in = np.pi/2 - np.arctan2(v1[1], v1[0])  # 0=North, CW:+
+    psi = psi_in - 0.5 * theta
+    psi = (psi + np.pi) % (2.0 * np.pi) - np.pi
+    return psi
+
+def cal_speed(current_pt, sm):
+    distance = ((current_pt[0] - sm.end_xy[0, 1]) ** 2 + (current_pt[1] - sm.end_xy[0, 1]) ** 2) ** 0.5
+    speed = sm.b_ave * distance ** sm.a_ave + sm.b_SD * distance ** sm.a_SD
+    if speed > 6.8:
+        speed = 6.8
+    return speed
 
 def undo_conversion(reference_hor_index, reference_ver_index, end_hor_coord, end_ver_coord, indices, grid_pitch):
     """
@@ -953,10 +977,6 @@ class PathPlanning:
         self.end_ver_idx = np.where(sm.ver_range == sm.end_xy[0, 0])
         self.end_hor_idx = np.where(sm.hor_range == sm.end_xy[0, 1])
 
-        sx, sy = sm.start_xy[0, 0], sm.start_xy[0, 1]
-        ex, ey = sm.end_xy[0, 0], sm.end_xy[0, 1]
-        d_se = float(np.hypot(sx - ex, sy - ey))
-
         if self.ps.psi_mode == ParamMode.AUTO:
             self.psi_start = np.deg2rad(self.port["psi_start"])
             self.psi_end = np.deg2rad(self.port["psi_end"])
@@ -965,7 +985,7 @@ class PathPlanning:
             self.psi_start = np.deg2rad(self.manual_psi_start)
             self.psi_end = np.deg2rad(self.manual_psi_end)
 
-        start_speed = min(sm.b_ave * d_se ** sm.a_ave + sm.b_SD * d_se ** sm.a_SD, self.ps.MAX_SPEED_KTS)
+        start_speed = min(cal_speed(sm.start_xy[0], sm), self.ps.MAX_SPEED_KTS)
         print(f"start speed :{start_speed}[knots]")
 
         origin_navigation_distance = start_speed * 1852.0 / 60.0
