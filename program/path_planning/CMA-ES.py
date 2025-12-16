@@ -68,7 +68,7 @@ class InitPathAlgo(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 10
+        self.port_number: int = 1
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -1034,7 +1034,12 @@ class PathPlanning:
             else:
                 sm.buoy_xy = None
 
-            initial_coord_xy, sm.psi, sm.isect_xy = Bezier.bezier(sm=sm, buoy_xy=sm.buoy_xy, num=400)
+            pts, sm.isect_xy = Bezier.stack(sm)
+            pts = Bezier.sort(pts,
+                              start=np.asarray(sm.origin_xy[0], dtype=float),
+                              end=np.asarray(sm.last_xy[0], dtype=float)
+                            )
+            initial_coord_xy, sm.psi = Bezier.bezier(pts, num=400)
             caltime = time.time() - time_start_init_path
             print(f"Bezier algorithm took {caltime:.3f} [s]\n")
 
