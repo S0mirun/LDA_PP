@@ -183,6 +183,8 @@ class CostCalculator:
         - Heading psi is computed using the angle convention: vertical=0°, clockwise positive.
         - Normalized by Glaph.length_of_theta_list × 100.
         """
+        sm = self.sample_map
+
         ver_p, hor_p = parent_pt
         ver_mid, hor_mid = (parent_pt + child_pt) / 2.0
         ver_c, hor_c = child_pt
@@ -191,7 +193,7 @@ class CostCalculator:
         if psi > np.deg2rad(180.0):
             psi = (np.deg2rad(360.0) - psi) * (-1.0)
 
-        contact_mid = self.sample_map.ship_domain_cost(
+        contact_mid = sm.ship_domain_cost(
             ver_mid, hor_mid, psi, self.SD, self.enclosing
         )
         normalized = (contact_mid / Glaph.length_of_theta_list) * 100.0
@@ -216,6 +218,8 @@ class CostCalculator:
         - Angle convention: vertical=0°, clockwise positive.
         - Normalized by Glaph.length_of_theta_list × 100.
         """
+        sm = self.sample_map
+
         ver_p, hor_p = parent_pt
         ver_c, hor_c = current_pt
         ver_n, hor_n = child_pt
@@ -241,7 +245,7 @@ class CostCalculator:
         psi = psi + 0.5 * angle_rad * direction
         psi = (psi + np.pi) % (2.0 * np.pi) - np.pi  # normalize to [-pi, pi]
 
-        contact_cp = self.sample_map.ship_domain_cost(
+        contact_cp = sm.ship_domain_cost(
             ver_c, hor_c, psi, self.SD, self.enclosing
         )
         normalized = (contact_cp / Glaph.length_of_theta_list) * 100.0
