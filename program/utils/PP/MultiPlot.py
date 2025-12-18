@@ -215,15 +215,6 @@ class Buoy(Traj):
         super().__init__()
     #
     def input_csv(self, filename_buoy, filename_berth):
-        # check the existance of csv file
-        filelist = [filename_berth, filename_buoy]
-        for file in filelist:
-            if os.path.isfile(file) == True:
-                pass
-            else:
-                print(file + ' does not exist.')
-                sys.exit()
-        #
         df = pd.read_csv(filename_buoy
                          , usecols=[0, 1]
                          , encoding="utf-8-sig"
@@ -241,6 +232,24 @@ class Buoy(Traj):
         xy = xy[mask]
 
         self.X, self.Y = xy.T
+
+    def input_excel(self, filename_buoy, filename_berth):
+            dfs = []
+            for file in filename_buoy:
+                tmp = pd.read_excel(file, header=None).iloc[:, -2:]
+                tmp.columns = ['longitude', 'latitude']
+                tmp = tmp.dropna(how="any")
+                dfs.append(tmp)
+            df = pd.concat(dfs, ignore_index=True)
+            # convert latlong to XY
+            df_berth = pd.read_csv(filename_berth)
+            xy = convert_to_xy(
+                df,
+                df_berth['Latitude'].iloc[0],
+                df_berth['Longitude'].iloc[0],
+                df_berth['Psi[deg]'].iloc[0]
+            ).values
+            self.X, self.Y = xy.T
 
 class SimlationTraj(Traj):
     def __init__(self):
