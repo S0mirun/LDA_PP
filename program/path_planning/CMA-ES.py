@@ -21,6 +21,7 @@ from matplotlib import gridspec
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import pandas as pd
 from scipy import ndimage
+from scipy.spatial import ConvexHull
 from tqdm.auto import tqdm
 
 # --- external project modules ---
@@ -63,12 +64,13 @@ class ParamMode(StrEnum):
 class InitPathAlgo(StrEnum):
     ASTAR = "astar"
     BEZIER = "bezier"
+    STRAIGHT = "straight"
 
 
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 10
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -229,22 +231,28 @@ class CostCalculator:
     def ShipDomain(self, parent_pt, current_pt, child_pt):
         sm = self.sample_map
         SD = self.SD
-        enclosing = self.enclosing
-        obstacles = enclosing.obstacle_polygons[0]
 
         parent_pt  = np.asarray(parent_pt, dtype=float)
         current_pt = np.asarray(current_pt, dtype=float)
         child_pt   = np.asarray(child_pt, dtype=float)
 
+        theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(10))
         psi = cal_psi(parent_pt, current_pt, child_pt)
         speed = cal_speed(current_pt, sm)
-        for obstacle in obstacles:
-            v = obstacle - current_pt
-            dist = np.linalg.norm(v)
-            theta = np.pi/2 - np.arctan2(v[1], v[0])
-            theta = (theta + np.pi) % (2*np.pi) - np.pi # nomalize
-            rel = (theta - psi + np.pi) % (2*np.pi) - np.pi
-            D = SD.distance(speed, rel)
+        r_list = []
+        for theta_i in theta_list:
+            r_list.append(SD.distance(speed, theta_i))
+
+        r = np.asarray(r_list, dtype=float)
+        domain_xy = np.column_stack([
+            current_pt[0] + r * np.cos(theta_list + psi),
+            current_pt[1] + r * np.sin(theta_list + psi),
+        ])
+        domain_xy.tolist()
+        mask = in_hull_2d(points=sm.obstacle,hull_points=domain_xy)
+        inner_obstacle = sm.obstacle[mask]
+
+        return len(inner_obstacle)
 
 
     def elem(self, parent_pt: np.ndarray, current_pt: np.ndarray, child_pt: np.ndarray) -> float:
@@ -496,6 +504,30 @@ def calculate_turning_points(initial_coords: np.ndarray, sample_map, last_pt: np
             break
     return turning_points
 
+def in_hull_2d(points, hull_points, tol=1e-12, include_boundary=True):
+    """
+    points: (M,2) 判定したい点群
+    hull_points: (N,2) 凸包を作る点群
+    tol: 数値誤差許容
+    include_boundary: 境界上を内側扱いにするか
+    """
+    points = np.asarray(points, dtype=float)
+    hull_points = np.asarray(hull_points, dtype=float)
+
+    hull = ConvexHull(hull_points)
+
+    # equations: shape (F, 3) where [a, b, c] s.t. a*x + b*y + c <= 0 is inside
+    A = hull.equations[:, :2]   # (F,2)
+    b = hull.equations[:, 2]    # (F,)
+
+    vals = A @ points.T + b[:, None]   # (F,M)
+
+    if include_boundary:
+        return np.all(vals <= tol, axis=0)
+    else:
+        return np.all(vals < -tol, axis=0)
+
+
 
 
 class PathPlanning:
@@ -692,19 +724,27 @@ class PathPlanning:
 
         # SD (checkpoint + midpoint)
         SD_cost = 0.0
-        if len(pts) >= 2:
-            SD_cost += cal.SD_checkpoint(origin, pts[0], pts[1])
-            SD_cost += cal.SD_checkpoint(pts[-2], pts[-1], last)
-        elif len(pts) == 1:
-            SD_cost += cal.SD_checkpoint(origin, pts[0], last)
-        for j in range(1, len(pts) - 1):
-            SD_cost += cal.SD_checkpoint(pts[j - 1], pts[j], pts[j + 1])
+        # if len(pts) >= 2:
+        #     SD_cost += cal.SD_checkpoint(origin, pts[0], pts[1])
+        #     SD_cost += cal.SD_checkpoint(pts[-2], pts[-1], last)
+        # elif len(pts) == 1:
+        #     SD_cost += cal.SD_checkpoint(origin, pts[0], last)
+        # for j in range(1, len(pts) - 1):
+        #     SD_cost += cal.SD_checkpoint(pts[j - 1], pts[j], pts[j + 1])
 
-        SD_cost += cal.SD_midpoint(origin, pts[0]) if len(pts) >= 1 else cal.SD_midpoint(origin, last)
-        if len(pts) >= 1:
-            SD_cost += cal.SD_midpoint(pts[-1], last)
-        for j in range(len(pts) - 1):
-            SD_cost += cal.SD_midpoint(pts[j], pts[j + 1])
+        # SD_cost += cal.SD_midpoint(origin, pts[0]) if len(pts) >= 1 else cal.SD_midpoint(origin, last)
+        # if len(pts) >= 1:
+        #     SD_cost += cal.SD_midpoint(pts[-1], last)
+        # for j in range(len(pts) - 1):
+        #     SD_cost += cal.SD_midpoint(pts[j], pts[j + 1])
+
+        SD_cost += cal.ShipDomain(origin, pts[0], pts[1])
+        SD_cost += cal.ShipDomain(origin, (origin + pts[0]) / 2, pts[0])
+        for j in range(1, len(pts) - 1):
+            SD_cost += cal.ShipDomain(pts[j - 1], pts[j], pts[j + 1])
+            SD_cost += cal.ShipDomain(pts[j], (pts[j] + pts[j + 1]) / 2, pts[j + 1])
+        SD_cost += cal.ShipDomain(pts[-2], pts[-1], last)
+        SD_cost += cal.ShipDomain(pts[-1], (pts[-1] + last)/ 2, last)
 
         # element (legacy end-side weights)
         elem_cost = 0.0
@@ -791,21 +831,30 @@ class PathPlanning:
 
             # SD
             SD_cost = 0.0
-            if len(pts) >= 2:
-                SD_cost += cal.SD_checkpoint(origin, pts[0], pts[1])
-                SD_cost += cal.SD_checkpoint(pts[-2], pts[-1], last)
-            elif len(pts) == 1:
-                SD_cost += cal.SD_checkpoint(origin, pts[0], last)
-            for j in range(1, len(pts) - 1):
-                SD_cost += cal.SD_checkpoint(pts[j - 1], pts[j], pts[j + 1])
+            # if len(pts) >= 2:
+            #     SD_cost += cal.SD_checkpoint(origin, pts[0], pts[1])
+            #     SD_cost += cal.SD_checkpoint(pts[-2], pts[-1], last)
+            # elif len(pts) == 1:
+            #     SD_cost += cal.SD_checkpoint(origin, pts[0], last)
+            # for j in range(1, len(pts) - 1):
+            #     SD_cost += cal.SD_checkpoint(pts[j - 1], pts[j], pts[j + 1])
 
-            if len(pts) >= 1:
-                SD_cost += cal.SD_midpoint(origin, pts[0])
-                SD_cost += cal.SD_midpoint(pts[-1], last)
-            else:
-                SD_cost += cal.SD_midpoint(origin, last)
-            for j in range(len(pts) - 1):
-                SD_cost += cal.SD_midpoint(pts[j], pts[j + 1])
+            # if len(pts) >= 1:
+            #     SD_cost += cal.SD_midpoint(origin, pts[0])
+            #     SD_cost += cal.SD_midpoint(pts[-1], last)
+            # else:
+            #     SD_cost += cal.SD_midpoint(origin, last)
+            # for j in range(len(pts) - 1):
+            #     SD_cost += cal.SD_midpoint(pts[j], pts[j + 1])
+
+            
+            SD_cost += cal.ShipDomain(origin, pts[0], pts[1])
+            SD_cost += cal.ShipDomain(origin, (origin + pts[0]) / 2, pts[0])
+            for j in range(1, len(pts) - 1):
+                SD_cost += cal.ShipDomain(pts[j - 1], pts[j], pts[j + 1])
+                SD_cost += cal.ShipDomain(pts[j], (pts[j] + pts[j + 1]) / 2, pts[j + 1])
+            SD_cost += cal.ShipDomain(pts[-2], pts[-1], last)
+            SD_cost += cal.ShipDomain(pts[-1], (pts[-1] + last)/ 2, last)
 
             # element
             elem_cost = 0.0
@@ -903,6 +952,14 @@ class PathPlanning:
         enclosing = pyshipsim.EnclosingPointCollisionChecker()
         enclosing.reset(world_polys)
         self.enclosing = enclosing
+        #
+        start = np.asarray(port["start"], dtype=float)
+        end   = np.asarray(port["end"], dtype=float)
+        pts = df_world[["x [m]", "y [m]"]].to_numpy()
+        xmin, xmax = sorted([start[0], end[0]])
+        ymin, ymax = sorted([start[1], end[1]])
+        mask = (xmin <= pts[:, 0]) & (pts[:, 0] <= xmax) & (ymin <= pts[:, 1]) & (pts[:, 1] <= ymax)
+        obstacle_pts = pts[mask].copy() 
         print(f"Successfully imported data from csv\n")
 
         SD = ShipDomain_proposal()
@@ -920,6 +977,8 @@ class PathPlanning:
         sample_map.b_ave = df["b_ave"].values[0]
         sample_map.a_SD = df["a_SD"].values[0]
         sample_map.b_SD = df["b_SD"].values[0]
+
+        sample_map.obstacle = obstacle_pts
 
         self.sample_map = sample_map
 
@@ -1047,12 +1106,19 @@ class PathPlanning:
 
         elif self.ps.init_path_algo == InitPathAlgo.BEZIER:
             port = self.port
-            if (files := glob.glob(f"{DATA}/buoy/{port['name']}.csv")):
+            if (files := glob.glob(f"{RAW_DATAS}/buoy/{port['buoy']}/*.xlsx")):
+                buoy=Buoy()
+                buoy.input_excel(files, f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv")
+                sm.buoy_xy = [buoy.X, buoy.Y]
+                self.buoy_dir = True
+            elif (files := glob.glob(f"{DATA}/buoy/{port['name']}.csv")):
                 buoy = Buoy()
                 buoy.input_csv(files[0], f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv")
                 sm.buoy_xy = [buoy.X, buoy.Y]
+                self.buoy_dir = True
             else:
                 sm.buoy_xy = None
+                self.buoy_dir = False
 
             pts, sm.isect_xy = Bezier.stack(sm)
             pts = Bezier.sort(pts,
@@ -1062,7 +1128,9 @@ class PathPlanning:
             initial_coord_xy, sm.psi = Bezier.bezier(pts, num=400)
             caltime = time.time() - time_start_init_path
             print(f"Bezier algorithm took {caltime:.3f} [s]\n")
-
+        elif self.ps.init_path_algo == InitPathAlgo.STRAIGHT:
+            self.WP_xy = Bezier.calcurate_intersection(sm)
+            
         else:
             # manual configuration (not used here)
             pass
@@ -1200,6 +1268,7 @@ class PathPlanning:
         dictionary_of_port = {
             0: {
                 "name": "Osaka_port1A",
+                "buoy": "1-堺",
                 "start": [-1400.0, -800.0],
                 "end": [0.0, -10.0],
                 "psi_start": 40,
@@ -1210,6 +1279,7 @@ class PathPlanning:
             },
             1: {
                 "name": "Tokyo_port2C",
+                "buoy": "千葉",
                 "start": [-2400.0, -1600.0],
                 "end": [0.0, 0.0],
                 "psi_start": 25,
@@ -1220,6 +1290,7 @@ class PathPlanning:
             },
             2: {
                 "name": "Yokkaichi_port2B",
+                "buoy": "四日市",
                 "start": [2000.0, 2000.0],
                 "end": [100.0, 80.0], # 300, 80
                 "psi_start": -125,
@@ -1230,6 +1301,7 @@ class PathPlanning:
             },
             3: {
                 "name": "Else_port1",
+                "buoy": "2-坂出",
                 "start": [2500.0, 0.0],
                 "end": [0.0, 0.0], # [450.0, 20.0]
                 "psi_start": -150,
@@ -1240,26 +1312,29 @@ class PathPlanning:
             },
             4: {
                 "name": "Osaka_port1B",
+                "buoy": "1-堺",
                 "start": [-3000.0, -1080.0],
-                "end": [0.0, -10.0], # [-480.0, -80.0]
+                "end": [-480.0, -80.0], # [-480.0, -80.0]
                 "psi_start": -5,
-                "psi_end": -10, # 45
+                "psi_end": 45, # 45
                 "berth_type": 2,
                 "ver_range": [-3200, 500],
                 "hor_range": [-1600, 500],
             },
             5: {
                 "name": "Else_port2",
-                "start": [-1000.0, 650.0],
+                "buoy": "5-函館",
+                "start": [-1800.0, 0.0],
                 "end": [0.0, 0.0],
-                "psi_start": -45,
-                "psi_end": -15,
+                "psi_start": 45,
+                "psi_end": -45,
                 "berth_type": 2,
                 "ver_range": [-1900, 300],
                 "hor_range": [-1000, 1200],
             },
             6: {
                 "name": "Kashima",
+                "buoy": "4-鹿島",
                 "start": [1750.0, 1900.0],
                 "end": [250.0, -150.0],
                 "psi_start": -120,
@@ -1270,6 +1345,7 @@ class PathPlanning:
             },
             7: {
                 "name": "Aomori",
+                "buoy": "6-青森",
                 "start": [350, 3400.0],
                 "end": [0, 100],
                 "psi_start": -115,
@@ -1280,6 +1356,7 @@ class PathPlanning:
             },
             8: {
                 "name": "Hachinohe",
+                "buoy:": "3-八戸",
                 "start": [1350, 2500.0],
                 "end": [100, 250],
                 "psi_start": -110,
@@ -1290,6 +1367,7 @@ class PathPlanning:
             },
             9: {
                 "name": "Shimizu",
+                "buoy": "8-清水",
                 "start": [1400, -2000],
                 "end": [150, 100],
                 "psi_start": 100,
@@ -1300,6 +1378,7 @@ class PathPlanning:
             },
             10: {
                 "name": "Tomakomai",
+                "buoy": "11-苫小牧",
                 "start": [-1300, 1500],
                 "end": [-200.0, -80.0],
                 "psi_start": -70,
@@ -1310,6 +1389,7 @@ class PathPlanning:
             },
             11: {
                 "name": "KIX",
+                "buoy": "大阪港",
                 "start": [-2500, 800],
                 "end": [-300, 250],
                 "psi_start": -10,
@@ -1396,11 +1476,8 @@ class PathPlanning:
             )
 
         # buoy
-        df_buoy = glob.glob(f"{DATA}/buoy/{port['name']}.csv")
-        if len(df_buoy) != 0:
-            buoy = Buoy()
-            buoy.input_csv(df_buoy[0], f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv")
-            ax1.scatter(buoy.Y, buoy.X,
+        if self.buoy_dir:
+            ax1.scatter(sm.buoy_xy[1], sm.buoy_xy[0],
                         color='orange', s=20, zorder=4)
         legend_buoy = plt.Line2D([0], [0], marker="o", color="w",
                                     markerfacecolor="orange", markersize=pointsize, label="Buoy Point")
