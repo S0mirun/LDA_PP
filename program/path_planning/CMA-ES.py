@@ -66,11 +66,14 @@ class InitPathAlgo(StrEnum):
     BEZIER = "bezier"
     STRAIGHT = "straight"
 
+class SD_contact_judge(StrEnum):
+    OLD = "old"
+    NEW = "new"
 
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 10
+        self.port_number: int = 4
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -81,7 +84,8 @@ class Settings:
         self.start_end_mode: ParamMode = ParamMode.AUTO
         self.psi_mode: ParamMode = ParamMode.AUTO
         self.steady_course_coeff_mode: ParamMode = ParamMode.AUTO
-        self.init_path_algo: InitPathAlgo = InitPathAlgo.BEZIER
+        self.init_path_algo: InitPathAlgo = InitPathAlgo.STRAIGHT
+        self.SD_contact_judge: SD_contact_judge = SD_contact_judge.NEW
         self.enable_pre_berthing_straight_segment: bool = True
 
         self.save_init_path: bool = True
@@ -251,7 +255,6 @@ class CostCalculator:
         domain_xy.tolist()
         mask = in_hull_2d(points=sm.obstacle,hull_points=domain_xy)
         inner_obstacle = sm.obstacle[mask]
-
         return len(inner_obstacle)
 
 
@@ -392,6 +395,86 @@ def cross2d(a, b):
     a = np.asarray(a)
     b = np.asarray(b)
     return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
+
+def line_points(p0, p1, hor_range, ver_range, N=200, eps=1e-12):
+    p0 = np.asarray(p0, dtype=float).reshape(2,)
+    p1 = np.asarray(p1, dtype=float).reshape(2,)
+    d  = p1 - p0
+
+    xmin, xmax = sorted(map(float, ver_range))
+    ymin, ymax = sorted(map(float, hor_range))
+
+    t_min, t_max = 0.0, np.inf
+
+    # x 
+    if abs(d[0]) < eps:
+        if not (xmin <= p0[0] <= xmax):
+            return np.empty((0, 2))
+    else:
+        tx1 = (xmin - p0[0]) / d[0]
+        tx2 = (xmax - p0[0]) / d[0]
+        t_min = max(t_min, min(tx1, tx2))
+        t_max = min(t_max, max(tx1, tx2))
+    # y
+    if abs(d[1]) < eps:
+        if not (ymin <= p0[1] <= ymax):
+            return np.empty((0, 2))
+    else:
+        ty1 = (ymin - p0[1]) / d[1]
+        ty2 = (ymax - p0[1]) / d[1]
+        t_min = max(t_min, min(ty1, ty2))
+        t_max = min(t_max, max(ty1, ty2))
+
+    if t_min > t_max:
+        return np.empty((0, 2))
+
+    t = np.linspace(t_min, t_max, N)[:, None]
+    return p0 + t * d
+
+
+def line_intersection(p, p2, q, q2, eps=1e-12):
+    """無限直線 p->p2 と q->q2 の交点 (2,) を返す。平行は想定しない。"""
+    p  = np.asarray(p,  float).reshape(2,)
+    p2 = np.asarray(p2, float).reshape(2,)
+    q  = np.asarray(q,  float).reshape(2,)
+    q2 = np.asarray(q2, float).reshape(2,)
+
+    r = p2 - p
+    s = q2 - q
+    denom = cross2d(r, s)
+    if abs(denom) < eps:
+        raise ValueError("line_intersection: lines are parallel (no unique intersection).")
+
+    t = cross2d(q - p, s) / denom
+    return p + t * r
+
+def polyline(l1, l2, ip, anchor1, anchor2, N=200):
+    """l1 -> ip -> l2 を連結し、弧長等間隔で (N,2) にリサンプルして返す。"""
+    l1 = np.asarray(l1, float).reshape(-1, 2)
+    l2 = np.asarray(l2, float).reshape(-1, 2)
+    ip = np.asarray(ip, float).reshape(2,)
+    anchor1 = np.asarray(anchor1, float).reshape(2,)
+    anchor2 = np.asarray(anchor2, float).reshape(2,)
+
+    i1 = np.argmin(np.linalg.norm(l1 - ip, axis=1))
+    seg1 = l1[:i1+1].copy()
+    seg1[-1] = ip
+    i2 = np.argmin(np.linalg.norm(l2 - ip, axis=1))
+    seg2 = l2[i2:].copy()
+    seg2[0] = ip
+
+    pts = np.vstack([seg1, seg2[1:]])  # (M,2)
+
+    d = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+    s = np.concatenate([[0.0], np.cumsum(d)])
+    total = s[-1]
+    if total <= 1e-12:
+        return np.repeat(pts[:1], N, axis=0)
+
+    s_new = np.linspace(0.0, total, N)
+    x_new = np.interp(s_new, s, pts[:, 0])
+    y_new = np.interp(s_new, s, pts[:, 1])
+    return np.column_stack([x_new, y_new])  # (N,2)
 
 def cal_psi(parent_pt, current_pt, child_pt):
     ver_p, hor_p = parent_pt
@@ -724,27 +807,30 @@ class PathPlanning:
 
         # SD (checkpoint + midpoint)
         SD_cost = 0.0
-        # if len(pts) >= 2:
-        #     SD_cost += cal.SD_checkpoint(origin, pts[0], pts[1])
-        #     SD_cost += cal.SD_checkpoint(pts[-2], pts[-1], last)
-        # elif len(pts) == 1:
-        #     SD_cost += cal.SD_checkpoint(origin, pts[0], last)
-        # for j in range(1, len(pts) - 1):
-        #     SD_cost += cal.SD_checkpoint(pts[j - 1], pts[j], pts[j + 1])
+        if self.ps.SD_contact_judge == 'old':
+            if len(pts) >= 2:
+                SD_cost += cal.SD_checkpoint(origin, pts[0], pts[1])
+                SD_cost += cal.SD_checkpoint(pts[-2], pts[-1], last)
+            elif len(pts) == 1:
+                SD_cost += cal.SD_checkpoint(origin, pts[0], last)
+            for j in range(1, len(pts) - 1):
+                SD_cost += cal.SD_checkpoint(pts[j - 1], pts[j], pts[j + 1])
 
-        # SD_cost += cal.SD_midpoint(origin, pts[0]) if len(pts) >= 1 else cal.SD_midpoint(origin, last)
-        # if len(pts) >= 1:
-        #     SD_cost += cal.SD_midpoint(pts[-1], last)
-        # for j in range(len(pts) - 1):
-        #     SD_cost += cal.SD_midpoint(pts[j], pts[j + 1])
-
-        SD_cost += cal.ShipDomain(origin, pts[0], pts[1])
-        SD_cost += cal.ShipDomain(origin, (origin + pts[0]) / 2, pts[0])
-        for j in range(1, len(pts) - 1):
-            SD_cost += cal.ShipDomain(pts[j - 1], pts[j], pts[j + 1])
-            SD_cost += cal.ShipDomain(pts[j], (pts[j] + pts[j + 1]) / 2, pts[j + 1])
-        SD_cost += cal.ShipDomain(pts[-2], pts[-1], last)
-        SD_cost += cal.ShipDomain(pts[-1], (pts[-1] + last)/ 2, last)
+            SD_cost += cal.SD_midpoint(origin, pts[0]) if len(pts) >= 1 else cal.SD_midpoint(origin, last)
+            if len(pts) >= 1:
+                SD_cost += cal.SD_midpoint(pts[-1], last)
+            for j in range(len(pts) - 1):
+                SD_cost += cal.SD_midpoint(pts[j], pts[j + 1])
+        elif self.ps.SD_contact_judge == 'new':
+            SD_cost += cal.ShipDomain(origin, pts[0], pts[1])
+            SD_cost += cal.ShipDomain(origin, (origin + pts[0]) / 2, pts[0])
+            for j in range(1, len(pts) - 1):
+                SD_cost += cal.ShipDomain(pts[j - 1], pts[j], pts[j + 1])
+                SD_cost += cal.ShipDomain(pts[j], (pts[j] + pts[j + 1]) / 2, pts[j + 1])
+            SD_cost += cal.ShipDomain(pts[-2], pts[-1], last)
+            SD_cost += cal.ShipDomain(pts[-1], (pts[-1] + last)/ 2, last)
+        else:
+            pass
 
         # element (legacy end-side weights)
         elem_cost = 0.0
@@ -831,30 +917,32 @@ class PathPlanning:
 
             # SD
             SD_cost = 0.0
-            # if len(pts) >= 2:
-            #     SD_cost += cal.SD_checkpoint(origin, pts[0], pts[1])
-            #     SD_cost += cal.SD_checkpoint(pts[-2], pts[-1], last)
-            # elif len(pts) == 1:
-            #     SD_cost += cal.SD_checkpoint(origin, pts[0], last)
-            # for j in range(1, len(pts) - 1):
-            #     SD_cost += cal.SD_checkpoint(pts[j - 1], pts[j], pts[j + 1])
+            if self.ps.SD_contact_judge == 'old':
+                if len(pts) >= 2:
+                    SD_cost += cal.SD_checkpoint(origin, pts[0], pts[1])
+                    SD_cost += cal.SD_checkpoint(pts[-2], pts[-1], last)
+                elif len(pts) == 1:
+                    SD_cost += cal.SD_checkpoint(origin, pts[0], last)
+                for j in range(1, len(pts) - 1):
+                    SD_cost += cal.SD_checkpoint(pts[j - 1], pts[j], pts[j + 1])
 
-            # if len(pts) >= 1:
-            #     SD_cost += cal.SD_midpoint(origin, pts[0])
-            #     SD_cost += cal.SD_midpoint(pts[-1], last)
-            # else:
-            #     SD_cost += cal.SD_midpoint(origin, last)
-            # for j in range(len(pts) - 1):
-            #     SD_cost += cal.SD_midpoint(pts[j], pts[j + 1])
-
-            
-            SD_cost += cal.ShipDomain(origin, pts[0], pts[1])
-            SD_cost += cal.ShipDomain(origin, (origin + pts[0]) / 2, pts[0])
-            for j in range(1, len(pts) - 1):
-                SD_cost += cal.ShipDomain(pts[j - 1], pts[j], pts[j + 1])
-                SD_cost += cal.ShipDomain(pts[j], (pts[j] + pts[j + 1]) / 2, pts[j + 1])
-            SD_cost += cal.ShipDomain(pts[-2], pts[-1], last)
-            SD_cost += cal.ShipDomain(pts[-1], (pts[-1] + last)/ 2, last)
+                if len(pts) >= 1:
+                    SD_cost += cal.SD_midpoint(origin, pts[0])
+                    SD_cost += cal.SD_midpoint(pts[-1], last)
+                else:
+                    SD_cost += cal.SD_midpoint(origin, last)
+                for j in range(len(pts) - 1):
+                    SD_cost += cal.SD_midpoint(pts[j], pts[j + 1])
+            elif self.ps.SD_contact_judge == 'new':
+                SD_cost += cal.ShipDomain(origin, pts[0], pts[1])
+                SD_cost += cal.ShipDomain(origin, (origin + pts[0]) / 2, pts[0])
+                for j in range(1, len(pts) - 1):
+                    SD_cost += cal.ShipDomain(pts[j - 1], pts[j], pts[j + 1])
+                    SD_cost += cal.ShipDomain(pts[j], (pts[j] + pts[j + 1]) / 2, pts[j + 1])
+                SD_cost += cal.ShipDomain(pts[-2], pts[-1], last)
+                SD_cost += cal.ShipDomain(pts[-1], (pts[-1] + last)/ 2, last)
+            else:
+                pass
 
             # element
             elem_cost = 0.0
@@ -1072,10 +1160,25 @@ class PathPlanning:
         self.last_ver_idx = np.where(sm.ver_range == sm.last_xy[0, 0])
         self.last_hor_idx = np.where(sm.hor_range == sm.last_xy[0, 1])
 
+        if (files := glob.glob(f"{RAW_DATAS}/buoy/{port['buoy']}/*.xlsx")):
+            buoy=Buoy()
+            buoy.input_excel(files, f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv")
+            sm.buoy_xy = [buoy.X, buoy.Y]
+            self.buoy_dir = True
+        elif (files := glob.glob(f"{DATA}/buoy/{port['name']}.csv")):
+            buoy = Buoy()
+            buoy.input_csv(files[0], f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv")
+            sm.buoy_xy = [buoy.X, buoy.Y]
+            self.buoy_dir = True
+        else:
+            sm.buoy_xy = None
+            self.buoy_dir = False
+
     def gen_init_path(self):
         print("Initial Path generation starts")
         time_start_init_path = time.time()
         sm = self.sample_map
+        port = self.port
         sm.path_xy = np.empty((0, 2))
         #
         if self.ps.init_path_algo == InitPathAlgo.ASTAR:
@@ -1105,21 +1208,6 @@ class PathPlanning:
             print(f"Astar algorithm took {caltime:.3f} [s]\n")
 
         elif self.ps.init_path_algo == InitPathAlgo.BEZIER:
-            port = self.port
-            if (files := glob.glob(f"{RAW_DATAS}/buoy/{port['buoy']}/*.xlsx")):
-                buoy=Buoy()
-                buoy.input_excel(files, f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv")
-                sm.buoy_xy = [buoy.X, buoy.Y]
-                self.buoy_dir = True
-            elif (files := glob.glob(f"{DATA}/buoy/{port['name']}.csv")):
-                buoy = Buoy()
-                buoy.input_csv(files[0], f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv")
-                sm.buoy_xy = [buoy.X, buoy.Y]
-                self.buoy_dir = True
-            else:
-                sm.buoy_xy = None
-                self.buoy_dir = False
-
             pts, sm.isect_xy = Bezier.stack(sm)
             pts = Bezier.sort(pts,
                               start=np.asarray(sm.origin_xy[0], dtype=float),
@@ -1128,14 +1216,22 @@ class PathPlanning:
             initial_coord_xy, sm.psi = Bezier.bezier(pts, num=400)
             caltime = time.time() - time_start_init_path
             print(f"Bezier algorithm took {caltime:.3f} [s]\n")
+
         elif self.ps.init_path_algo == InitPathAlgo.STRAIGHT:
-            self.WP_xy = Bezier.calcurate_intersection(sm)
-            
+            l1 = line_points(p0=sm.start_xy[0],p1=sm.origin_xy[0],
+                             hor_range=port["hor_range"],ver_range=port["ver_range"])
+            l2 = line_points(p0=sm.last_xy[0],p1=sm.end_xy[0],
+                             hor_range=port["hor_range"],ver_range=port["ver_range"])
+            sm.isect_xy = line_intersection(l1[0], l1[-1], l2[0], l2[-1])
+            initial_coord_xy = polyline(l1, l2, sm.isect_xy, anchor1=sm.start_xy[0], anchor2=sm.end_xy[0], N=400)
+            caltime = time.time() - time_start_init_path
+            print(f"Straight algorithm took {caltime:.3f} [s]\n")
+
         else:
             # manual configuration (not used here)
             pass
 
-        initial_points = calculate_turning_points(initial_coord_xy, sm, self.last_pt, self.port)
+        initial_points = calculate_turning_points(initial_coord_xy, sm, self.last_pt, port)
         print("Initial Turning Points:\n",)
         for i, (x, y) in enumerate(initial_points, 1):
             print(f"  P{i:02d}: ({x:.1f}, {y:.1f})")
@@ -1246,7 +1342,9 @@ class PathPlanning:
             p("init_path_algo", "Astar")
             p("weight_SD", f"grid_pitch*{self.weight_of_SD}")
         elif self.ps.init_path_algo == InitPathAlgo.BEZIER:
-            p("init_path_algo", "Bezier")    
+            p("init_path_algo", "Bezier")
+        elif self.ps.init_path_algo == InitPathAlgo.STRAIGHT:
+            p("init_path_algo", "Straight")
         else:
             p("init_path_algo", "Manual")
 
@@ -1303,9 +1401,9 @@ class PathPlanning:
                 "name": "Else_port1",
                 "buoy": "2-坂出",
                 "start": [2500.0, 0.0],
-                "end": [0.0, 0.0], # [450.0, 20.0]
+                "end": [450.0, 20.0], # [450.0, 20.0]
                 "psi_start": -150,
-                "psi_end": -105, # 135
+                "psi_end": 135, # 135
                 "berth_type": 1,
                 "ver_range": [0, 3000],
                 "hor_range": [-1000, 2000],
@@ -1356,7 +1454,7 @@ class PathPlanning:
             },
             8: {
                 "name": "Hachinohe",
-                "buoy:": "3-八戸",
+                "buoy": "3-八戸",
                 "start": [1350, 2500.0],
                 "end": [100, 250],
                 "psi_start": -110,
