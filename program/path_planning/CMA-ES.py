@@ -73,7 +73,7 @@ class SD_contact_judge(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 4
+        self.port_number: int = 9
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -84,7 +84,7 @@ class Settings:
         self.start_end_mode: ParamMode = ParamMode.AUTO
         self.psi_mode: ParamMode = ParamMode.AUTO
         self.steady_course_coeff_mode: ParamMode = ParamMode.AUTO
-        self.init_path_algo: InitPathAlgo = InitPathAlgo.STRAIGHT
+        self.init_path_algo: InitPathAlgo = InitPathAlgo.BEZIER
         self.SD_contact_judge: SD_contact_judge = SD_contact_judge.NEW
         self.enable_pre_berthing_straight_segment: bool = True
 
@@ -396,6 +396,24 @@ def cross2d(a, b):
     b = np.asarray(b)
     return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
 
+def selective_laplacian_smoothing(poly, max_deg=60.0, n_iter=10, alpha=0.7):
+    poly = np.asarray(poly, float).copy()
+    for _ in range(n_iter):
+        v1 = poly[1:-1] - poly[:-2]
+        v2 = poly[2:]   - poly[1:-1]
+        a1 = np.arctan2(v1[:,1], v1[:,0])
+        a2 = np.arctan2(v2[:,1], v2[:,0])
+        deg  = (a2 - a1 + np.pi) % (2*np.pi) - np.pi
+        ang = np.degrees(np.abs(deg))
+
+        bad = np.where(ang > max_deg)[0] + 1  # 折れ点の index（1..M-2）
+        if bad.size == 0:
+            break
+        for i in bad:
+            mid = 0.5 * (poly[i-1] + poly[i+1])
+            poly[i] = (1 - alpha) * poly[i] + alpha * mid
+    return poly
+
 def line_points(p0, p1, hor_range, ver_range, N=200, eps=1e-12):
     p0 = np.asarray(p0, dtype=float).reshape(2,)
     p1 = np.asarray(p1, dtype=float).reshape(2,)
@@ -611,8 +629,6 @@ def in_hull_2d(points, hull_points, tol=1e-12, include_boundary=True):
         return np.all(vals < -tol, axis=0)
 
 
-
-
 class PathPlanning:
     def __init__(self, ps: Settings, cal: CostCalculator):
         self.ps = ps
@@ -711,7 +727,7 @@ class PathPlanning:
                 )
 
             while not is_satisfied:
-                ddcma.onestep(func=self.path_evaluate)
+                ddcma.onestep(func=self.path_evaluate, check=self.enforce_max_turn_angle)
 
                 best_cost = float(np.min(ddcma.arf))
                 best_mean = ddcma.arx[int(ddcma.idx[0])].copy()
@@ -872,6 +888,31 @@ class PathPlanning:
         self.SD_coeff = (elem_cost / SD_cost) * self.ps.SD_ratio if SD_cost > 0 else 10.0
         self.distance_coeff = (elem_cost / dist_cost) * self.ps.distance_ratio if dist_cost > 0 else 1.0
 
+    def enforce_max_turn_angle(self, X: np.ndarray) -> np.ndarray:
+        arr = np.asarray(X, float)
+        if arr.ndim == 1:
+            arr = arr[None, :]
+
+        out = arr.copy()
+
+        origin = np.asarray(self.origin_pt, float)
+        last   = np.asarray(self.last_pt, float)
+
+        for k in range(out.shape[0]):
+            pts = out[k].reshape(-1, 2)
+            poly = np.vstack([origin, pts, last])
+
+            poly2 = selective_laplacian_smoothing(
+                poly,
+                max_deg=self.ps.MAX_ANGLE_DEG,
+                n_iter=10,
+                alpha=0.7
+            )
+
+            pts[:] = poly2[1:-1]
+            out[k] = pts.reshape(-1)
+
+        return out if X.ndim == 2 else out[0]
 
     def path_evaluate(self, X: np.ndarray) -> np.ndarray | float:
         """
@@ -897,6 +938,7 @@ class PathPlanning:
         sm = self.sample_map
         cal = self.cal
         SD = self.SD
+        start = sm.start_xy[0].astype(float)
         origin = np.asarray(self.origin_pt, float)
         last = np.asarray(self.last_pt, float)
         end = sm.end_xy[0].astype(float)
@@ -947,7 +989,7 @@ class PathPlanning:
             # element
             elem_cost = 0.0
             if len(pts) >= 1:
-                elem_cost += cal.elem(sm.start_xy[0], origin, pts[0])
+                elem_cost += cal.elem(start, origin, pts[0])
             if len(pts) >= 2:
                 elem_cost += cal.elem(origin, pts[0], pts[1])
             if len(pts) >= 2:
@@ -1422,10 +1464,10 @@ class PathPlanning:
             5: {
                 "name": "Else_port2",
                 "buoy": "5-函館",
-                "start": [-1800.0, 0.0],
+                "start": [-1900.0, 0.0],
                 "end": [0.0, 0.0],
-                "psi_start": 45,
-                "psi_end": -45,
+                "psi_start": 50,
+                "psi_end": -30,
                 "berth_type": 2,
                 "ver_range": [-1900, 300],
                 "hor_range": [-1000, 1200],
@@ -1510,18 +1552,12 @@ class PathPlanning:
             )
             print(
                 f"\n[Restart {restart}]\n"
-                f"  best_cost_so_far: {best_cost_so_far:.6f}\n"
-                f"  計算時間: {calculation_time:.2f} s\n"
+                f"  best_cost_so_far: {best_cost_so_far:.6f}    計算時間: {calculation_time:.2f} s\n"
                 f"  best_mean_sofar:\n{pairs}"
             )
         print("\n" + "=" * 50 + "\n")
         smallest_evaluation_key = min(best_dict, key=lambda k: best_dict[k]["best_cost_so_far"])
         print(f"最も評価値が小さかった試行は {smallest_evaluation_key} 番目\n")
-        print(f"最小評価値: {best_dict[smallest_evaluation_key]['best_cost_so_far']}\n")
-        print(f"  対応する最適解 (ver, hor):")
-        best_solution = best_dict[smallest_evaluation_key]["best_mean_sofar"]
-        for i in range(0, len(best_solution), 2):
-            print(f"({best_solution[i]:.6f}, {best_solution[i+1]:.6f})")
 
         self.smallest_evaluation_key = smallest_evaluation_key
 

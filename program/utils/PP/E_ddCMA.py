@@ -219,21 +219,23 @@ class DdCma:
             self.invsqrtC = np.dot(self.B / self.S, self.B.T)
             self.Z[:, :] = 0.
 
-    def onestep(self, func):
-        """
-        Parameter
-        ---------
-        func : callable
-            parameter : 2d array-like with candidate solutions (x) as elements
-            return    : 1d array-like with f(x) as elements
-        """
+    def onestep(self, func, check=None):
         arx, ary, arz = self.sample()
+
+        if check is not None:
+            arx2 = np.asarray(check(arx), dtype=float)
+            if arx2.shape != arx.shape:
+                raise ValueError(f"check returned shape {arx2.shape}, expected {arx.shape}")
+            arx = arx2
+
+            scale = self.D * self.sigma
+            ary = (arx - self.xmean) / scale
+            arz = np.dot(ary, self.invsqrtC) if self.flg_covariance_update else ary
 
         arf = func(arx)
         self.neval += len(arf)
-        
+
         arf_idx = np.argsort(arf)
-        
         if not np.all(arf[arf_idx[1:]] - arf[arf_idx[:-1]] > 0.):
             warnings.warn("assumed no tie, but there exists", RuntimeWarning)
 
