@@ -407,10 +407,8 @@ def selective_laplacian_smoothing(poly, max_deg=60.0, n_iter=10, alpha=0.7):
         ang = np.degrees(np.abs(deg))
 
         bad = np.where(ang > max_deg)[0] + 1  # 折れ点の index（1..M-2）
-        if bad.size == 0:
-            break
         for i in bad:
-            mid = 0.5 * (poly[i-1] + poly[i+1])
+            mid = (poly[i-1] + poly[i+1]) / 2
             poly[i] = (1 - alpha) * poly[i] + alpha * mid
     return poly
 

@@ -24,17 +24,14 @@ alpha_new = 50
 
 mask = np.all(img == target_bgr, axis=2)
 
+# 色変更
 out = img.copy().astype(np.int16)
 out[mask, 1] = (out[mask, 1] * 0.75).astype(np.int16)
 out[mask, 2] = (out[mask, 2] * 0.55).astype(np.int16)
 out = np.clip(out, 0, 255).astype(np.uint8)
 
-output = cv2.cvtColor(out, cv2.COLOR_BGR2BGRA)
-output[..., 3] = 255
-output[~mask, 3] = alpha_new
-
 output_show = cv2.resize(
-    output,
+    out,
     (int(width * 0.5), int(height * 0.5)),
     interpolation=cv2.INTER_AREA  # 縮小向き
 )
