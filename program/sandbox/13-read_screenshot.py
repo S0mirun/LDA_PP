@@ -3,7 +3,6 @@ import os
 import cv2
 import glob
 import numpy as np
-from tqdm import tqdm
 
 DIR = os.path.dirname(__file__)
 dirname = os.path.splitext(os.path.basename(__file__))[0]
@@ -19,15 +18,20 @@ width = img.shape[1]
 
 output = np.zeros((height, width, 1), np.uint8)
 
-target_bgr = np.array([255, 250, 220], dtype=np.uint8)
-alpha_new = 50
+# targets = np.array([
+#     [255, 250, 220],
+#     # [187, 77, 198],
+# ], dtype=np.uint8) 
 
+# mask = (img[:, :, None, :] == targets[None, None, :, :]).all(axis=3).any(axis=2)
+target_bgr = np.array([255, 250, 220], dtype=np.uint8)
 mask = np.all(img == target_bgr, axis=2)
 
-# 色変更
+# 色変更　[255, 187, 121]
 out = img.copy().astype(np.int16)
-out[mask, 1] = (out[mask, 1] * 0.75).astype(np.int16)
-out[mask, 2] = (out[mask, 2] * 0.55).astype(np.int16)
+out[mask, 0] = 255
+out[mask, 1] = 187
+out[mask, 2] = 121
 out = np.clip(out, 0, 255).astype(np.uint8)
 
 output_show = cv2.resize(
@@ -38,7 +42,7 @@ output_show = cv2.resize(
 
 # 読み込んだ画像を表示する
 save_path_show = os.path.join(SAVE_DIR, "Yokkaichi.png")
-cv2.imwrite(save_path_show, output)
+cv2.imwrite(save_path_show, output_show)
 cv2.imshow('imshow_test', output_show)
 cv2.waitKey(0)
 cv2.destroyAllWindows()

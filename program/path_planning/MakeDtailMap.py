@@ -16,11 +16,11 @@ RAW_DATAS = f"{DIR}/../../raw_datas"
 PORT = Honsyu.Pasific.ise_bay
 coast_file = f"{RAW_DATAS}/国土交通省/C23-06_{PORT.num}_GML/C23-06_{PORT.num}-g.csv"
 port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/_{PORT.name}.csv"
-SAVE_DIR = f"{DIR}/../../outputs/data/rough_map"
+SAVE_DIR = f"{DIR}/../../outputs/data/detail_map"
 
 SORT = False
-SAVE = True
-SHOW = False
+SAVE = False
+SHOW = True
 R_MAX = 3000
 
 # ---- 原点と向き ----
