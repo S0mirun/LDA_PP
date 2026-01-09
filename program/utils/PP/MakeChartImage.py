@@ -88,7 +88,7 @@ def dist2_lab_img_to_lab_ref(lab_img_int32: np.ndarray, lab_ref_int32: np.ndarra
     return np.sum(d * d, axis=2).astype(np.int32)
 
 # =========================================================
-# (C) 陸/浅瀬/マゼンタ線マスク抽出（2本目ロジック）
+# (C) 陸/浅瀬/マゼンタ線マスク抽出（2本目のロジック）
 # =========================================================
 def extract_land_shallow_magenta_masks(
     img_bgr: np.ndarray,
@@ -112,10 +112,10 @@ def extract_land_shallow_magenta_masks(
 
     # ---- land ----
     mask_land = cv2.inRange(hsv, np.array(land_lower, np.uint8), np.array(land_upper, np.uint8))
+
     mask_brown_excl = cv2.inRange(hsv, np.array(brown_excl_lower, np.uint8), np.array(brown_excl_upper, np.uint8))
     mask_land[mask_brown_excl > 0] = 0
 
-    # 小さい四角っぽい成分除外（保険）
     num, labels, stats, _ = cv2.connectedComponentsWithStats((mask_land > 0).astype(np.uint8), connectivity=8)
     MAX_SIDE, MIN_SIDE = 60, 3
     MAX_AREA, MIN_AREA = 5000, 20
@@ -170,80 +170,15 @@ def extract_land_shallow_magenta_masks(
     return mask_land, mask_shallow_u8, mask_magenta
 
 # =========================================================
-# (D) タイル分割（タイトル無し）＋ CSVに緯度経度メタ保存
-#   - lat0/lon0 は度分で手入力
-#   - sign は固定（lat=-1, lon=+1）
-#   - 間隔は1分固定
-#   - CSVは10進数で保存
+# (D) 分割（ラベル焼き込み無し：単純タイル保存）
 # =========================================================
-def split_by_lines_no_title_with_geo(
-    img_bgr, ys, xs, out_dir,
-    lat0_deg, lat0_min, lat_anchor_idx,
-    lon0_deg, lon0_min, lon_anchor_idx,
-    border=2,
-):
+def split_by_lines_no_title(img_bgr, ys, xs, out_dir, border=2):
     os.makedirs(out_dir, exist_ok=True)
     H, W = img_bgr.shape[:2]
     ys = sorted(map(int, ys))
     xs = sorted(map(int, xs))
 
-    # ---- fixed assumptions (your request) ----
-    lat_sign = -1
-    lon_sign = +1
-    dlat_min_per_line = 1.0
-    dlon_min_per_line = 1.0
-
-    # ---- convert to decimal degrees for saving/compute ----
-    lat0 = float(lat0_deg) + float(lat0_min) / 60.0
-    lon0 = float(lon0_deg) + float(lon0_min) / 60.0
-    dlat = float(dlat_min_per_line) / 60.0
-    dlon = float(dlon_min_per_line) / 60.0
-
-    lat_anchor_idx = int(lat_anchor_idx)
-    lon_anchor_idx = int(lon_anchor_idx)
-
-    if len(ys) == 0 or len(xs) == 0:
-        raise ValueError("ys/xs is empty (grid lines not detected).")
-
-    if not (0 <= lat_anchor_idx < len(ys)):
-        raise ValueError(f"lat_anchor_idx out of range: {lat_anchor_idx} (len(ys)={len(ys)})")
-    if not (0 <= lon_anchor_idx < len(xs)):
-        raise ValueError(f"lon_anchor_idx out of range: {lon_anchor_idx} (len(xs)={len(xs)})")
-
-    # line values (decimal degrees)
-    lat_lines = [lat0 + (i - lat_anchor_idx) * dlat * lat_sign for i in range(len(ys))]
-    lon_lines = [lon0 + (j - lon_anchor_idx) * dlon * lon_sign for j in range(len(xs))]
-
-    # boundaries include outer image edge
-    ys_b = [0] + ys + [H - 1]
-    xs_b = [0] + xs + [W - 1]
-
-    # outer bands: extrapolate 1 step outward (practical)
-    def band_lat_bounds(i_band):
-        if i_band == 0:
-            top = lat_lines[0] + dlat * lat_sign
-            bot = lat_lines[0]
-        elif 1 <= i_band <= len(ys) - 1:
-            top = lat_lines[i_band - 1]
-            bot = lat_lines[i_band]
-        else:
-            top = lat_lines[-1]
-            bot = lat_lines[-1] - dlat * lat_sign
-        return (min(top, bot), max(top, bot))
-
-    def band_lon_bounds(j_band):
-        if j_band == 0:
-            left  = lon_lines[0] - dlon * lon_sign
-            right = lon_lines[0]
-        elif 1 <= j_band <= len(xs) - 1:
-            left  = lon_lines[j_band - 1]
-            right = lon_lines[j_band]
-        else:
-            left  = lon_lines[-1]
-            right = lon_lines[-1] + dlon * lon_sign
-        return (min(left, right), max(left, right))
-
-    # debug image for index checking (optional but helpful)
+    # デバッグ用：検出線を描いた画像（任意）
     vis = img_bgr.copy()
     for i, y in enumerate(ys):
         cv2.line(vis, (0, y), (W - 1, y), (0, 0, 255), 2)
@@ -255,6 +190,9 @@ def split_by_lines_no_title_with_geo(
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2, cv2.LINE_AA)
     cv2.imwrite(os.path.join(out_dir, "_grid_detected_indexed.png"), vis)
 
+    ys_b = [0] + ys + [H - 1]
+    xs_b = [0] + xs + [W - 1]
+
     rows = []
     for i in range(len(ys_b) - 1):
         y0, y1 = ys_b[i], ys_b[i + 1]
@@ -263,16 +201,12 @@ def split_by_lines_no_title_with_geo(
         if yy1 - yy0 < 20:
             continue
 
-        lat_min, lat_max = band_lat_bounds(i)
-
         for j in range(len(xs_b) - 1):
             x0, x1 = xs_b[j], xs_b[j + 1]
             xx0 = max(0, x0 + border)
             xx1 = min(W, x1 - border)
             if xx1 - xx0 < 20:
                 continue
-
-            lon_min, lon_max = band_lon_bounds(j)
 
             tile = img_bgr[yy0:yy1, xx0:xx1].copy()
             fname = f"tile_r{i:02d}_c{j:02d}.png"
@@ -281,21 +215,6 @@ def split_by_lines_no_title_with_geo(
             rows.append({
                 "tile": fname,
                 "x0": xx0, "x1": xx1, "y0": yy0, "y1": yy1,
-
-                # per-tile bounds (decimal degrees)
-                "lat_min": lat_min, "lat_max": lat_max,
-                "lon_min": lon_min, "lon_max": lon_max,
-
-                # global meta (decimal degrees, for compute)
-                "lat0": lat0, "lon0": lon0,
-                "dlat": dlat, "dlon": dlon,
-                "lat_sign": lat_sign, "lon_sign": lon_sign,
-                "lat_anchor_idx": lat_anchor_idx,
-                "lon_anchor_idx": lon_anchor_idx,
-
-                # optional: original input (deg/min) for human check
-                "lat0_deg": float(lat0_deg), "lat0_min": float(lat0_min),
-                "lon0_deg": float(lon0_deg), "lon0_min": float(lon0_min),
             })
 
     df = pd.DataFrame(rows)
@@ -310,10 +229,6 @@ def process_all(
     img_path: str,
     grid_roi=(90, 80, None, None),
     border=2,
-
-    # ---- manual inputs (deg/min) + anchor indices ----
-    lat0_deg=34, lat0_min=57.0, lat_anchor_idx=1,
-    lon0_deg=136, lon0_min=40.0, lon_anchor_idx=3,
 ):
     save_dir = make_save_dir(img_path)
 
@@ -333,7 +248,7 @@ def process_all(
     print("Detected ys:", ys)
     print("Detected xs:", xs)
 
-    # 2) land / shallow / magenta line masks
+    # 2) land / shallow / magenta line
     mask_land, mask_shallow, mask_magenta = extract_land_shallow_magenta_masks(img)
 
     cv2.imwrite(os.path.join(save_dir, "mask_land.png"), mask_land)
@@ -354,15 +269,10 @@ def process_all(
     cv2.imwrite(os.path.join(save_dir, "impassable_map.png"), final_map)
     print(f"[OK] Saved: {os.path.join(save_dir, 'impassable_map.png')}")
 
-    # 4) 分割（tiles_manifest.csv に緯度経度情報も保存）
+    # 4) 分割（タイルにタイトル無し）
     split_dir = os.path.join(save_dir, "tiles")
     if len(ys) >= 2 and len(xs) >= 2:
-        split_by_lines_no_title_with_geo(
-            final_map, ys, xs, split_dir,
-            lat0_deg=lat0_deg, lat0_min=lat0_min, lat_anchor_idx=lat_anchor_idx,
-            lon0_deg=lon0_deg, lon0_min=lon0_min, lon_anchor_idx=lon_anchor_idx,
-            border=border,
-        )
+        split_by_lines_no_title(final_map, ys, xs, split_dir, border=border)
     else:
         print("[WARN] grid lines not detected sufficiently; skip tiling.")
 
@@ -372,14 +282,10 @@ def process_all(
 # 実行例
 # =========================================================
 if __name__ == "__main__":
-    IMG_PATH = "/Users/tokudashintaro/Desktop/LDA_PP/raw_datas/海岸線データ/Yokkaichi.PNG"
+    IMG_PATH = "/Users/tokudashintaro/Desktop/LDA_PP/raw_datas/海岸線データ/清水.PNG"
 
     process_all(
         IMG_PATH,
         grid_roi=(90, 80, None, None),
         border=2,
-
-        # ここだけ手入力（度分 + アンカーインデックス）
-        lat0_deg=34, lat0_min=57.0, lat_anchor_idx=0,
-        lon0_deg=136, lon0_min=38.0, lon_anchor_idx=0,
     )

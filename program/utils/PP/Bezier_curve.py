@@ -2,22 +2,12 @@
 CMA-ESのためのBezier Curve初期経路計画アルゴリズム
 
 """
-
-import glob
 import os
 
 import math
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-import time
-from typing import Optional, Sequence
 
-from utils.PP.MultiPlot import Buoy
-from utils.PP.subroutine import sakai_bay, yokkaichi_bay, Tokyo_bay, else_bay
-
-DIR = os.path.dirname(__file__)
-dirname = os.path.splitext(os.path.basename(__file__))[0]
 
 class Calcurate():
     def __init__(self):
