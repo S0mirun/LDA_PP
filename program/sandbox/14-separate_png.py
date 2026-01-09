@@ -7,7 +7,7 @@ import numpy as np
 # =========================================================
 DIR = os.path.dirname(__file__)
 dirname = os.path.splitext(os.path.basename(__file__))[0]
-IMG_PATH = "/Users/tokudashintaro/Desktop/LDA_PP/raw_datas/海岸線データ/堺.PNG"
+IMG_PATH = "/Users/tokudashintaro/Desktop/LDA_PP/raw_datas/海岸線データ/八戸.PNG"
 SAVE_DIR = f"{DIR}/../../outputs/{dirname}/{os.path.splitext(os.path.basename(IMG_PATH))[0]}"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
@@ -123,77 +123,7 @@ k3 = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
 mask_magenta = cv2.morphologyEx(mask_magenta, cv2.MORPH_OPEN, k3, iterations=1)
 
 # =========================================================
-# 4) マゼンタで囲われた領域（四角以外も）を全部塗りつぶす
-#    - マゼンタ線を close+dilate で「壁」にする（破線を繋ぐ）
-#    - 壁以外を connectedComponents
-#    - 画像外周に接している成分 = 外側
-#    - それ以外 = 内側（全部）→ fill
-# =========================================================
-def fill_regions_closed_by_magenta_and_border(
-    mask_magenta_u8: np.ndarray,
-    close_ksize=17, close_iter=2,
-    dilate_ksize=9, dilate_iter=1,
-    min_area=2000,
-    save_debug_dir=None
-) -> np.ndarray:
-    H, W = mask_magenta_u8.shape
-
-    wall = mask_magenta_u8.copy()
-
-    # 破線を繋ぐ（ここが重要）
-    wall = cv2.morphologyEx(
-        wall, cv2.MORPH_CLOSE,
-        cv2.getStructuringElement(cv2.MORPH_RECT, (close_ksize, close_ksize)),
-        iterations=close_iter
-    )
-    wall = cv2.dilate(
-        wall,
-        cv2.getStructuringElement(cv2.MORPH_RECT, (dilate_ksize, dilate_ksize)),
-        iterations=dilate_iter
-    )
-
-    free = (wall == 0).astype(np.uint8)  # 0/1
-
-    # 連結成分
-    n, lab, st, _ = cv2.connectedComponentsWithStats(free, connectivity=8)
-
-    # 外周に接している成分 = outside
-    outside_labels = set()
-
-    # 上下端
-    outside_labels.update(np.unique(lab[0, :]).tolist())
-    outside_labels.update(np.unique(lab[H-1, :]).tolist())
-    # 左右端
-    outside_labels.update(np.unique(lab[:, 0]).tolist())
-    outside_labels.update(np.unique(lab[:, W-1]).tolist())
-
-    fill = np.zeros((H, W), np.uint8)
-
-    for k in range(1, n):
-        if k in outside_labels:
-            continue
-        area = st[k, cv2.CC_STAT_AREA]
-        if area < min_area:
-            continue
-        fill[lab == k] = 255
-
-    if save_debug_dir is not None:
-        os.makedirs(save_debug_dir, exist_ok=True)
-        cv2.imwrite(os.path.join(save_debug_dir, "_wall_after_close_dilate.png"), wall)
-        cv2.imwrite(os.path.join(save_debug_dir, "mask_magenta_fill.png"), fill)
-
-    return fill
-
-mask_fill = fill_regions_closed_by_magenta_and_border(
-    mask_magenta,
-    close_ksize=17, close_iter=2,
-    dilate_ksize=9, dilate_iter=1,
-    min_area=2000,
-    save_debug_dir=SAVE_DIR
-)
-
-# =========================================================
-# 5) 最終可視化画像（指定配色）＋マゼンタ線＋薄いマゼンタ塗り
+# 4) 最終可視化画像（指定配色）＋マゼンタ線＋薄いマゼンタ塗り
 #   背景: 白
 #   陸  : 薄いグレー
 #   浅瀬: RGB=[167,224,233]
@@ -213,7 +143,6 @@ LIGHT_MAGENTA_BGR = (LIGHT_MAGENTA_RGB[2], LIGHT_MAGENTA_RGB[1], LIGHT_MAGENTA_R
 # 塗り順（線は最前面）
 final_map[mask_land > 0] = LAND_GRAY
 final_map[mask_shallow_u8 > 0] = SHALLOW_BGR
-final_map[mask_fill > 0] = LIGHT_MAGENTA_BGR
 final_map[mask_magenta > 0] = MAGENTA_BGR
 
 # =========================================================
@@ -222,7 +151,6 @@ final_map[mask_magenta > 0] = MAGENTA_BGR
 cv2.imwrite(os.path.join(SAVE_DIR, "mask_land.png"), mask_land)
 cv2.imwrite(os.path.join(SAVE_DIR, "mask_shallow.png"), mask_shallow_u8)
 cv2.imwrite(os.path.join(SAVE_DIR, "mask_magenta.png"), mask_magenta)
-cv2.imwrite(os.path.join(SAVE_DIR, "mask_magenta_fill.png"), mask_fill)
 
 cv2.imwrite(os.path.join(SAVE_DIR, "impassable_map.png"), final_map)
 
@@ -231,5 +159,4 @@ print(f"[OK] SAVE_DIR: {SAVE_DIR}")
 print(f"land pixels   : {int((mask_land > 0).sum())}")
 print(f"shallow pixels: {int((mask_shallow_u8 > 0).sum())}")
 print(f"magenta pixels: {int((mask_magenta > 0).sum())}")
-print(f"fill pixels   : {int((mask_fill > 0).sum())}")
 print("Saved: impassable_map.png")
