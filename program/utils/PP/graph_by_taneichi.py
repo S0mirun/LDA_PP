@@ -9,6 +9,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from utils.PP.subroutine import mpl_config
+from utils.LDA.ship_geometry import *
 import pyshipsim
 plt.rcParams.update(mpl_config)
 
@@ -36,7 +37,7 @@ class Map():
 
         self.isect_xy = None
 
-    def GenerateMapFromCSV(file, grid_pitch):
+    def GenerateMapFromCSV(file, grid_pitch, port_file):
         """
         障害物の折れ線データを格納したCSVから Map インスタンスを生成する
         引数:
@@ -45,24 +46,50 @@ class Map():
         戻り値:
             Map: 障害物の線分とノードが追加された初期化済みマップ
         """
+        df = pd.read_csv(file)
+        try:
+            ver = np.array(df['x [m]'])
+            hor = np.array(df['y [m]'])
+        except:
+            xs = []; ys = []
+            df_coord = pd.read_csv(port_file)
+            LAT_ORIGIN = df_coord["Latitude"].iloc[0]
+            LON_ORIGIN = df_coord["Longitude"].iloc[0]
+            ANGLE_FROM_NORTH = df_coord["Psi[deg]"].iloc[0]
 
-        with tqdm(total=13, desc="Build target map", unit="step") as pbar:
-            df = pd.read_csv(file); pbar.update()
-            ver = np.array(df['x [m]']); pbar.update()
-            hor = np.array(df['y [m]']); pbar.update()
-            obstacles = np.stack([ver, hor], 1); pbar.update()
+            for lat, lon in zip(df["lat"].to_numpy(), df["lon"].to_numpy()):
+                if pd.isna(lat) or pd.isna(lon):
+                    continue
+                y, x = convert_to_xy(
+                    lat,
+                    lon,
+                    LAT_ORIGIN,
+                    LON_ORIGIN,
+                    ANGLE_FROM_NORTH,
+                )
+                xs.append(x); ys.append(y)
 
-            ver_min_round = Map.RoundRange(None, np.amin(ver), grid_pitch, 'min'); pbar.update()
-            ver_max_round = Map.RoundRange(None, np.amax(ver), grid_pitch, 'max'); pbar.update()
-            hor_min_round = Map.RoundRange(None, np.amin(hor), grid_pitch, 'min'); pbar.update()
-            hor_max_round = Map.RoundRange(None, np.amax(hor), grid_pitch, 'max'); pbar.update()
+            pts = np.column_stack([xs, ys])
+            df = pd.DataFrame({
+                "x [m]": pts[:, 1],
+                "y [m]": pts[:, 0],
+            })
+            ver = np.array(df['x [m]'])
+            hor = np.array(df['y [m]'])
 
-            ver_range = np.arange(ver_min_round, ver_max_round + grid_pitch / 10, grid_pitch); pbar.update()
-            hor_range = np.arange(hor_min_round, hor_max_round + grid_pitch / 10, grid_pitch); pbar.update()
+        obstacles = np.stack([ver, hor], 1)
 
-            target_map = Map(ver_range, hor_range, grid_pitch, Miss_Corner=True); pbar.update()
-            Map.AddObstacleLine(target_map, obstacles, 'berth'); pbar.update()
-            Map.AddObstacleNode(target_map, obstacles, 'berth'); pbar.update()
+        ver_min_round = Map.RoundRange(None, np.amin(ver), grid_pitch, 'min')
+        ver_max_round = Map.RoundRange(None, np.amax(ver), grid_pitch, 'max')
+        hor_min_round = Map.RoundRange(None, np.amin(hor), grid_pitch, 'min')
+        hor_max_round = Map.RoundRange(None, np.amax(hor), grid_pitch, 'max')
+
+        ver_range = np.arange(ver_min_round, ver_max_round + grid_pitch / 10, grid_pitch)
+        hor_range = np.arange(hor_min_round, hor_max_round + grid_pitch / 10, grid_pitch)
+
+        target_map = Map(ver_range, hor_range, grid_pitch, Miss_Corner=True)
+        Map.AddObstacleLine(target_map, obstacles, 'berth')
+        Map.AddObstacleNode(target_map, obstacles, 'berth')
 
         return target_map
 

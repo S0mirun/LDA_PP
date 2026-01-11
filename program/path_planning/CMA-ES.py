@@ -73,7 +73,7 @@ class SD_contact_judge(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 9
+        self.port_number: int = 2
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -1072,7 +1072,7 @@ class PathPlanning:
 
     def shipdomain(self):
         port = self.port
-        target_csv = f"{DATA}/rough_map/{port['name']}.csv"
+        target_csv = "outputs/15-draw_coast_to_png/Yokkaichi/impassable_outline_vertices_latlon.csv"
         target_csv_for_pyship = f"{DATA}/rough_map_for_pyship/{port['name']}.csv"
 
         df_world = pd.read_csv(target_csv_for_pyship)
@@ -1096,7 +1096,9 @@ class PathPlanning:
         print(f"Generating map from data\n")
 
         time_start_map_generation = time.time()
-        sample_map = Glaph.Map.GenerateMapFromCSV(target_csv, self.ps.gridpitch_for_Astar)
+        sample_map = Glaph.Map.GenerateMapFromCSV(target_csv,
+                                                  self.ps.gridpitch_for_Astar,
+                                                  f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv")
         time_end_map_generation = time.time()
         print(f"Map generation is complete.\nCalculation time : {time_end_map_generation - time_start_map_generation}\n")
 
@@ -1286,7 +1288,7 @@ class PathPlanning:
         filename = (
             f"{SAVE_DIR}/{self.port['name']}/Initial_Path_by_{self.ps.init_path_algo.name}_with_SD.png"
             if self.ps.show_SD_on_init_path
-            else f"{SAVE_DIR}/{self.port['name']}/Initial_Path_by_{self.ps.init_path_algo.name}_without_SD.png"
+            else f"{SAVE_DIR}/{self.port['name']}/Initial_Path_by_{self.ps.init_path_algo.name}.png"
         )
         sm.ShowMap(
             filename=filename,

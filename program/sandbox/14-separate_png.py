@@ -372,7 +372,7 @@ def process_all(
 # 実行例
 # =========================================================
 if __name__ == "__main__":
-    IMG_PATH = "/Users/tokudashintaro/Desktop/LDA_PP/raw_datas/海岸線データ/Yokkaichi.PNG"
+    IMG_PATH = "raw_datas/海岸線データ/Sakai.PNG"
 
     process_all(
         IMG_PATH,
