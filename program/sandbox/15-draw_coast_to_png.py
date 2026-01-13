@@ -329,7 +329,7 @@ def save_outputs(
 
 
 if __name__ == "__main__":
-    in_path = "outputs/14-separate_png/Yokkaichi/tiles/_grid_detected_indexed.png"
+    in_path = "outputs/14-separate_png/Sakai/tiles/_grid_detected_indexed.png"
     grid_image_path = in_path
     grid_info_csv = f"{os.path.dirname(in_path)}/tiles_manifest.csv"
 

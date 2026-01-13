@@ -3,9 +3,6 @@ import cv2
 import numpy as np
 import pandas as pd
 
-# =========================================================
-# 保存先ルール
-# =========================================================
 def make_save_dir(img_path: str):
     try:
         DIR = os.path.dirname(__file__)
@@ -88,7 +85,7 @@ def dist2_lab_img_to_lab_ref(lab_img_int32: np.ndarray, lab_ref_int32: np.ndarra
     return np.sum(d * d, axis=2).astype(np.int32)
 
 # =========================================================
-# (C) 陸/浅瀬/マゼンタ線マスク抽出（2本目ロジック）
+# (C) 陸/浅瀬/マゼンタ線マスク抽出
 # =========================================================
 def extract_land_shallow_magenta_masks(
     img_bgr: np.ndarray,
@@ -247,12 +244,8 @@ def split_by_lines_no_title_with_geo(
     vis = img_bgr.copy()
     for i, y in enumerate(ys):
         cv2.line(vis, (0, y), (W - 1, y), (0, 0, 255), 2)
-        cv2.putText(vis, f"lat#{i}", (10, max(20, y - 6)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2, cv2.LINE_AA)
     for j, x in enumerate(xs):
         cv2.line(vis, (x, 0), (x, H - 1), (0, 0, 255), 2)
-        cv2.putText(vis, f"lon#{j}", (max(5, x + 6), 26),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2, cv2.LINE_AA)
     cv2.imwrite(os.path.join(out_dir, "_grid_detected_indexed.png"), vis)
 
     rows = []
@@ -380,6 +373,6 @@ if __name__ == "__main__":
         border=2,
 
         # ここだけ手入力（度分 + アンカーインデックス）
-        lat0_deg=34, lat0_min=57.0, lat_anchor_idx=0,
-        lon0_deg=136, lon0_min=38.0, lon_anchor_idx=0,
+        lat0_deg=34, lat0_min=36.0, lat_anchor_idx=0,
+        lon0_deg=135, lon0_min=23.0, lon_anchor_idx=0,
     )
