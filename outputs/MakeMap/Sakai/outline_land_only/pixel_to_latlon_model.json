@@ -1,0 +1,41 @@
+{
+  "kind": "grid_based_pixel_to_latlon",
+  "lat_model": "mercator",
+  "lon_xs_px": [
+    518.0,
+    975.0,
+    1432.0
+  ],
+  "lat_ys_px": [
+    181.0,
+    736.0
+  ],
+  "lon_values_deg": [
+    135.4,
+    135.41666666666669,
+    135.43333333333334
+  ],
+  "lat_values_deg": [
+    34.6,
+    34.583333333333336
+  ],
+  "grid_params": {
+    "lat0": 34.6,
+    "lon0": 135.4,
+    "dlat": 0.0166666666666666,
+    "dlon": 0.0166666666666666,
+    "lat_sign": -1,
+    "lon_sign": 1,
+    "lat_anchor_idx": 0,
+    "lon_anchor_idx": 0
+  },
+  "img_path": "raw_datas/海岸線データ/Sakai.PNG",
+  "impassable_map_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Sakai/impassable_map.png",
+  "grid_image_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Sakai/tiles/_grid_detected_indexed.png",
+  "grid_info_csv": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Sakai/tiles/tiles_manifest.csv",
+  "mask_land_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Sakai/mask_land.png",
+  "mask_shallow_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Sakai/mask_shallow.png",
+  "mask_magenta_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Sakai/mask_magenta.png",
+  "note": "lon_xs_px/lat_ys_px are from GREEN grid detection.",
+  "outline_kind": "land_only(from mask_land.png)"
+}

@@ -1,11 +1,15 @@
 import os
 import json
-from typing import Optional, Callable, Tuple, Dict, List
+from typing import Callable, Tuple, Dict, List
 
 import cv2
 import numpy as np
 import pandas as pd
 
+
+# =========================================================
+# Save dir helper
+# =========================================================
 def make_save_dir(img_path: str):
     DIR = os.path.dirname(__file__)
     dirname = os.path.splitext(os.path.basename(__file__))[0]
@@ -22,9 +26,10 @@ def _cluster_centers(idxs, gap=3):
     if idxs.size == 0:
         return []
     clusters = []
-    s = idxs[0]
-    p = idxs[0]
+    s = int(idxs[0])
+    p = int(idxs[0])
     for a in idxs[1:]:
+        a = int(a)
         if a - p > gap:
             clusters.append((s, p))
             s = a
@@ -34,8 +39,8 @@ def _cluster_centers(idxs, gap=3):
 
 
 def detect_latlon_grid_lines(
-    img_bgr,
-    out_dir=None,
+    img_bgr: np.ndarray,
+    out_dir: str | None = None,
     roi=(90, 80, None, None),
     hsv_h_range=(45, 95),
     s_min=80,
@@ -44,6 +49,10 @@ def detect_latlon_grid_lines(
     peak_ratio=0.50,
     merge_gap=3,
 ):
+    """
+    緑点線の格子（緯線・経線）を検出して、
+    緯線(y px)・経線(x px)の配列を返す。
+    """
     H, W = img_bgr.shape[:2]
     x0, y0, x1, y1 = roi
     if x1 is None:
@@ -106,6 +115,13 @@ def extract_land_shallow_magenta_masks(
     rgb_magenta=(198, 71, 186),
     T_MAG=22,
 ):
+    """
+    元画像から
+      - mask_land    : 陸地（2値）
+      - mask_shallow : 浅瀬（2値）
+      - mask_magenta : マゼンタ線（2値）
+    を返す
+    """
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
     lab_img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB).astype(np.int32)
 
@@ -173,10 +189,6 @@ def extract_land_shallow_magenta_masks(
 
 # =========================================================
 # (D) Tiling + save geo meta into tiles_manifest.csv
-#   - lat0/lon0 are manual in deg/min
-#   - sign fixed (lat=-1, lon=+1)
-#   - delta fixed 1 minute
-#   - saved in decimal degrees
 # =========================================================
 def split_by_lines_no_title_with_geo(
     img_bgr,
@@ -311,9 +323,37 @@ def split_by_lines_no_title_with_geo(
 
 
 # =========================================================
-# (F) Polygon extraction from impassable map
-#   - expects: land gray + shallow cyan-ish (or similar), and excludes magenta
+# (F) Polygon extraction utils
 # =========================================================
+def _extract_polygons_from_mask(
+    mask_u8: np.ndarray,
+    min_area: float = 2000.0,
+    eps_factor: float = 0.004,
+    close_ksize: int = 9,
+    close_iter: int = 2,
+    open_ksize: int = 5,
+    open_iter: int = 1,
+) -> List[np.ndarray]:
+    mask = mask_u8.copy()
+
+    k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (int(close_ksize), int(close_ksize)))
+    k_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (int(open_ksize), int(open_ksize)))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k_close, iterations=int(close_iter))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k_open, iterations=int(open_iter))
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+    polys: List[np.ndarray] = []
+    for c in contours:
+        if cv2.contourArea(c) < float(min_area):
+            continue
+        peri = cv2.arcLength(c, True)
+        eps = float(eps_factor) * peri
+        approx = cv2.approxPolyDP(c, eps, True)
+        polys.append(approx.reshape(-1, 2).astype(int))
+    return polys
+
+
 def extract_impassable_polygons(
     image_path: str,
     min_area: float = 2000.0,
@@ -323,6 +363,11 @@ def extract_impassable_polygons(
     open_ksize: int = 5,
     open_iter: int = 1,
 ):
+    """
+    impassable_map.png から
+      - 灰 + シアン（浅瀬）を侵入不可として抽出
+      - マゼンタは除外
+    """
     img_bgr = cv2.imread(image_path, cv2.IMREAD_COLOR)
     if img_bgr is None:
         raise FileNotFoundError(f"Cannot read: {image_path}")
@@ -344,24 +389,86 @@ def extract_impassable_polygons(
     mask_mag = cv2.inRange(hsv, mag_lo, mag_hi)
     mask = cv2.bitwise_and(mask, cv2.bitwise_not(mask_mag))
 
-    k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (close_ksize, close_ksize))
-    k_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (open_ksize, open_ksize))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k_close, iterations=close_iter)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k_open, iterations=open_iter)
-
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-
-    polys = []
-    for c in contours:
-        if cv2.contourArea(c) < min_area:
-            continue
-        peri = cv2.arcLength(c, True)
-        eps = eps_factor * peri
-        approx = cv2.approxPolyDP(c, eps, True)
-        polys.append(approx.reshape(-1, 2).astype(int))
-
+    polys = _extract_polygons_from_mask(
+        mask_u8=mask,
+        min_area=min_area,
+        eps_factor=eps_factor,
+        close_ksize=close_ksize,
+        close_iter=close_iter,
+        open_ksize=open_ksize,
+        open_iter=open_iter,
+    )
     return img_bgr, polys
 
+
+def extract_land_polygons_from_mask_png(
+    mask_land_png_path: str,
+    min_area: float = 2000.0,
+    eps_factor: float = 0.004,
+    close_ksize: int = 9,
+    close_iter: int = 2,
+    open_ksize: int = 5,
+    open_iter: int = 1,
+):
+    """
+    陸地だけは mask_land.png（2値）から直接ポリゴン抽出する。
+    """
+    mask = cv2.imread(mask_land_png_path, cv2.IMREAD_GRAYSCALE)
+    if mask is None:
+        raise FileNotFoundError(f"Cannot read: {mask_land_png_path}")
+
+    # 念のため2値化
+    _, mask_bin = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
+
+    polys = _extract_polygons_from_mask(
+        mask_u8=mask_bin,
+        min_area=min_area,
+        eps_factor=eps_factor,
+        close_ksize=close_ksize,
+        close_iter=close_iter,
+        open_ksize=open_ksize,
+        open_iter=open_iter,
+    )
+    return polys
+
+
+def extract_polygons_from_mask_png(
+    mask_png_path: str,
+    min_area: float = 200.0,
+    eps_factor: float = 0.004,
+    close_ksize: int = 9,
+    close_iter: int = 2,
+    open_ksize: int = 3,
+    open_iter: int = 1,
+    # for thin lines (magenta)
+    dilate_ksize: int = 7,
+    dilate_iter: int = 1,
+) -> List[np.ndarray]:
+    """
+    任意の2値マスクpng(0/255)からポリゴン抽出
+    - マゼンタ線など細いものは dilate で太らせてから輪郭抽出すると安定する
+    """
+    mask = cv2.imread(mask_png_path, cv2.IMREAD_GRAYSCALE)
+    if mask is None:
+        raise FileNotFoundError(f"Cannot read: {mask_png_path}")
+
+    _, mask_bin = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
+
+    # 線が細い場合の保険（太らせる）
+    if dilate_ksize and dilate_ksize > 1 and dilate_iter > 0:
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilate_ksize, dilate_ksize))
+        mask_bin = cv2.dilate(mask_bin, k, iterations=int(dilate_iter))
+
+    polys = _extract_polygons_from_mask(
+        mask_u8=mask_bin,
+        min_area=min_area,
+        eps_factor=eps_factor,
+        close_ksize=close_ksize,
+        close_iter=close_iter,
+        open_ksize=open_ksize,
+        open_iter=open_iter,
+    )
+    return polys
 
 # =========================================================
 # (G) Pixel -> LatLon mapping (grid-based, with extrapolation)
@@ -497,19 +604,21 @@ def save_outputs(
     pixel_to_latlon_func,
     model_dict,
     out_dir: str,
-    overlay_name: str = "impassable_outline.png",
-    geojson_name: str = "impassable_outline_px.geojson",
-    vertices_csv_name: str = "impassable_outline_vertices_latlon.csv",
+    overlay_name: str,
+    geojson_name: str,
+    vertices_csv_name: str,
     model_json_name: str = "pixel_to_latlon_model.json",
 ):
     os.makedirs(out_dir, exist_ok=True)
 
+    # overlay
     overlay = base_image_bgr.copy()
     for poly in polys:
         cv2.polylines(overlay, [poly], isClosed=True, color=(0, 0, 255), thickness=3)
     overlay_path = os.path.join(out_dir, overlay_name)
     cv2.imwrite(overlay_path, overlay)
 
+    # geojson (px)
     geojson_path = os.path.join(out_dir, geojson_name)
     features = []
     for pid, poly in enumerate(polys):
@@ -519,13 +628,14 @@ def save_outputs(
         features.append(
             {
                 "type": "Feature",
-                "properties": {"polygon_id": pid, "kind": "impassable_outline_px"},
+                "properties": {"polygon_id": pid, "kind": os.path.splitext(geojson_name)[0]},
                 "geometry": {"type": "Polygon", "coordinates": [coords]},
             }
         )
     with open(geojson_path, "w", encoding="utf-8") as f:
         json.dump({"type": "FeatureCollection", "features": features}, f, ensure_ascii=False, indent=2)
 
+    # vertices latlon csv
     rows = []
     for pid, poly in enumerate(polys):
         for vid, (x, y) in enumerate(poly):
@@ -536,6 +646,7 @@ def save_outputs(
     vertices_csv_path = os.path.join(out_dir, vertices_csv_name)
     vdf.to_csv(vertices_csv_path, index=False, encoding="utf-8-sig")
 
+    # model json
     model_json_path = os.path.join(out_dir, model_json_name)
     with open(model_json_path, "w", encoding="utf-8") as f:
         json.dump(model_dict, f, ensure_ascii=False, indent=2)
@@ -547,7 +658,7 @@ def save_outputs(
 # (E+All) Unified pipeline:
 #   raw image -> detect green grid -> build impassable_map
 #   -> save tiles_manifest (geo meta)
-#   -> extract impassable polygons -> pixel->latlon -> export
+#   -> extract polygons (impassable + land-only) -> pixel->latlon -> export
 # =========================================================
 def process_all_and_export_outline(
     img_path: str,
@@ -590,16 +701,18 @@ def process_all_and_export_outline(
 
     # 2) land/shallow/magenta masks
     mask_land, mask_shallow, mask_magenta = extract_land_shallow_magenta_masks(img)
-    cv2.imwrite(os.path.join(save_dir, "mask_land.png"), mask_land)
-    cv2.imwrite(os.path.join(save_dir, "mask_shallow.png"), mask_shallow)
-    cv2.imwrite(os.path.join(save_dir, "mask_magenta.png"), mask_magenta)
+    mask_land_path = os.path.join(save_dir, "mask_land.png")
+    mask_shallow_path = os.path.join(save_dir, "mask_shallow.png")
+    mask_magenta_path = os.path.join(save_dir, "mask_magenta.png")
+    cv2.imwrite(mask_land_path, mask_land)
+    cv2.imwrite(mask_shallow_path, mask_shallow)
+    cv2.imwrite(mask_magenta_path, mask_magenta)
 
-    # 3) build impassable_map (no fill beyond mask colors)
+    # 3) build impassable_map (for visualization / impassable polygon threshold)
     final_map = np.full_like(img, 255)  # white background
-
-    LAND_GRAY = (220, 220, 220)  # BGR
-    SHALLOW_BGR = (233, 224, 167)  # RGB(167,224,233) -> BGR
-    MAGENTA_BGR = (186, 71, 198)  # RGB(198,71,186)  -> BGR
+    LAND_GRAY = (220, 220, 220)         # BGR
+    SHALLOW_BGR = (233, 224, 167)       # RGB(167,224,233) -> BGR
+    MAGENTA_BGR = (186, 71, 198)        # RGB(198,71,186)  -> BGR
 
     final_map[mask_land > 0] = LAND_GRAY
     final_map[mask_shallow > 0] = SHALLOW_BGR
@@ -641,15 +754,37 @@ def process_all_and_export_outline(
     else:
         raise ValueError("[ERROR] grid lines not detected sufficiently (need >=2 each).")
 
-    # 6) extract polygons from impassable_map (NOT from grid_vis)
-    base_img_bgr, polys = extract_impassable_polygons(
+    # 6-A) impassable polygons from impassable_map.png
+    base_img_bgr, polys_impassable = extract_impassable_polygons(
         image_path=impassable_map_path,
         eps_factor=poly_eps_factor,
         min_area=float(poly_min_area),
     )
-    print(f"[OK] polygons: {len(polys)}")
+    print(f"[OK] impassable polygons: {len(polys_impassable)}")
 
-    # 7) pixel->latlon mapping (directly use xs/ys from green detection)
+    # 6-B) land-only polygons directly from mask_land.png  ★ここが変更点
+    polys_land_only = extract_land_polygons_from_mask_png(
+        mask_land_png_path=mask_land_path,
+        eps_factor=poly_eps_factor,
+        min_area=float(poly_min_area),
+    )
+    print(f"[OK] land-only polygons (from mask_land.png): {len(polys_land_only)}")
+
+    # 6-C) magenta polygons directly from mask_magenta.png
+    polys_magenta = extract_polygons_from_mask_png(
+        mask_png_path=mask_magenta_path,
+        min_area=200.0,          # 線なので小さめ
+        eps_factor=poly_eps_factor,
+        close_ksize=7,
+        close_iter=1,
+        open_ksize=3,
+        open_iter=1,
+        dilate_ksize=7,          # 線を少し太らせる
+        dilate_iter=1,
+    )
+    print(f"[OK] magenta polygons (from mask_magenta.png): {len(polys_magenta)}")
+
+    # 7) pixel->latlon mapping (xs/ys from GREEN grid detection)
     grid_params = read_grid_params_from_csv(grid_info_csv)
     pixel_to_latlon_func, model_dict = build_pixel_to_latlon_from_grid(
         lon_xs_px=np.array(xs, dtype=float),
@@ -658,30 +793,67 @@ def process_all_and_export_outline(
         lat_model=str(lat_model),
     )
 
-    # 8) export outline products
-    outline_dir = os.path.join(save_dir, "outline")
-    overlay_path, geojson_path, vertices_csv_path, model_json_path = save_outputs(
+    base_model_dict = {
+        **model_dict,
+        "img_path": img_path,
+        "impassable_map_path": impassable_map_path,
+        "grid_image_path": grid_image_path,
+        "grid_info_csv": grid_info_csv,
+        "mask_land_path": mask_land_path,
+        "mask_shallow_path": mask_shallow_path,
+        "mask_magenta_path": mask_magenta_path,
+        "note": "lon_xs_px/lat_ys_px are from GREEN grid detection.",
+    }
+
+    # 8-A) export: impassable outline (gray + shallow)
+    out_imp = os.path.join(save_dir, "outline_impassable")
+    imp_overlay, imp_geojson, imp_vertices, imp_model = save_outputs(
         base_image_bgr=base_img_bgr,
-        polys=polys,
+        polys=polys_impassable,
         pixel_to_latlon_func=pixel_to_latlon_func,
-        model_dict={
-            **model_dict,
-            "img_path": img_path,
-            "impassable_map_path": impassable_map_path,
-            "grid_image_path": grid_image_path,
-            "grid_info_csv": grid_info_csv,
-            "note": "lon_xs_px/lat_ys_px are from GREEN grid detection (not red re-detection).",
-        },
-        out_dir=outline_dir,
+        model_dict={**base_model_dict, "outline_kind": "impassable(gray+shallow)"},
+        out_dir=out_imp,
+        overlay_name="impassable_outline.png",
+        geojson_name="impassable_outline_px.geojson",
+        vertices_csv_name="impassable_outline_vertices_latlon.csv",
+        model_json_name="pixel_to_latlon_model.json",
+    )
+
+    # 8-B) export: land-only outline (from mask_land.png)
+    out_land = os.path.join(save_dir, "outline_land_only")
+    land_overlay, land_geojson, land_vertices, land_model = save_outputs(
+        base_image_bgr=base_img_bgr,
+        polys=polys_land_only,
+        pixel_to_latlon_func=pixel_to_latlon_func,
+        model_dict={**base_model_dict, "outline_kind": "land_only(from mask_land.png)"},
+        out_dir=out_land,
+        overlay_name="land_only_outline.png",
+        geojson_name="land_only_outline_px.geojson",
+        vertices_csv_name="land_only_outline_vertices_latlon.csv",
+        model_json_name="pixel_to_latlon_model.json",
+    )
+
+    # 8-C) export: magenta outline (from mask_magenta.png)
+    out_mag = os.path.join(save_dir, "outline_magenta")
+    mag_overlay, mag_geojson, mag_vertices, mag_model = save_outputs(
+        base_image_bgr=base_img_bgr,
+        polys=polys_magenta,
+        pixel_to_latlon_func=pixel_to_latlon_func,
+        model_dict={**base_model_dict, "outline_kind": "magenta(from mask_magenta.png)"},
+        out_dir=out_mag,
+        overlay_name="magenta_outline.png",
+        geojson_name="magenta_outline_px.geojson",
+        vertices_csv_name="magenta_outline_vertices_latlon.csv",
+        model_json_name="pixel_to_latlon_model.json",
     )
 
     print("---- saved ----")
-    print("grid image  :", grid_image_path)
-    print("manifest    :", grid_info_csv)
-    print("overlay     :", overlay_path)
-    print("geojson     :", geojson_path)
-    print("vertices    :", vertices_csv_path)
-    print("model json  :", model_json_path)
+    print("grid image        :", grid_image_path)
+    print("manifest          :", grid_info_csv)
+    print("mask_land         :", mask_land_path)
+    print("[impassable] dir   :", out_imp)
+    print("[land-only] dir    :", out_land)
+    print("[magenta] dir     :", out_mag)
 
     return save_dir
 
@@ -690,18 +862,18 @@ def process_all_and_export_outline(
 # Run example
 # =========================================================
 if __name__ == "__main__":
-    IMG_PATH = "raw_datas/海岸線データ/Sakai.PNG"
+    IMG_PATH = "raw_datas/海岸線データ/Shimizu.PNG"
 
     process_all_and_export_outline(
         IMG_PATH,
         grid_roi=(90, 80, None, None),
         border=2,
         # manual input (deg/min + anchor indices)
-        lat0_deg=34,
-        lat0_min=36.0,
+        lat0_deg=35,
+        lat0_min=02.0,
         lat_anchor_idx=0,
-        lon0_deg=135,
-        lon0_min=24.0,
+        lon0_deg=138,
+        lon0_min=29.0,
         lon_anchor_idx=0,
         # mapping model
         lat_model="mercator",  # or "linear"

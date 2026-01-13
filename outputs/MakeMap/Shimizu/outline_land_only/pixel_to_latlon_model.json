@@ -1,0 +1,43 @@
+{
+  "kind": "grid_based_pixel_to_latlon",
+  "lat_model": "mercator",
+  "lon_xs_px": [
+    212.0,
+    667.0,
+    1121.0,
+    1576.0
+  ],
+  "lat_ys_px": [
+    491.0,
+    1046.0
+  ],
+  "lon_values_deg": [
+    138.48333333333332,
+    138.5,
+    138.51666666666665,
+    138.53333333333333
+  ],
+  "lat_values_deg": [
+    35.03333333333333,
+    35.016666666666666
+  ],
+  "grid_params": {
+    "lat0": 35.03333333333333,
+    "lon0": 138.48333333333332,
+    "dlat": 0.0166666666666666,
+    "dlon": 0.0166666666666666,
+    "lat_sign": -1,
+    "lon_sign": 1,
+    "lat_anchor_idx": 0,
+    "lon_anchor_idx": 0
+  },
+  "img_path": "raw_datas/海岸線データ/Shimizu.PNG",
+  "impassable_map_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Shimizu/impassable_map.png",
+  "grid_image_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Shimizu/tiles/_grid_detected_indexed.png",
+  "grid_info_csv": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Shimizu/tiles/tiles_manifest.csv",
+  "mask_land_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Shimizu/mask_land.png",
+  "mask_shallow_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Shimizu/mask_shallow.png",
+  "mask_magenta_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Shimizu/mask_magenta.png",
+  "note": "lon_xs_px/lat_ys_px are from GREEN grid detection.",
+  "outline_kind": "land_only(from mask_land.png)"
+}
