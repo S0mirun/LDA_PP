@@ -6,6 +6,9 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from dataclasses import dataclass
+from typing import Callable, List, Tuple, Optional
+from matplotlib.path import Path
 from tqdm import tqdm
 
 from utils.PP.subroutine import mpl_config
@@ -16,82 +19,155 @@ plt.rcParams.update(mpl_config)
 theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(10))
 length_of_theta_list = len(theta_list)  # 36
 
+def convert(df, port_file):
+    df_coord = pd.read_csv(port_file)
+    LAT_ORIGIN = df_coord["Latitude"].iloc[0]
+    LON_ORIGIN = df_coord["Longitude"].iloc[0]
+    ANGLE_FROM_NORTH = df_coord["Psi[deg]"].iloc[0]
 
-class Map():
-    """障害物を含むグリッドマップと，接触判定およびプロットのためのユーティリティを提供するクラス"""
+    xs = []; ys = []
+    for lat, lon in zip(df["lat"].to_numpy(), df["lon"].to_numpy()):
+        if pd.isna(lat) or pd.isna(lon):
+            continue
+        y, x = convert_to_xy(
+            lat,
+            lon,
+            LAT_ORIGIN,
+            LON_ORIGIN,
+            ANGLE_FROM_NORTH,
+        )
+        xs.append(x); ys.append(y)    
+    return xs, ys
 
-    def __init__(self, ver_range, hor_range, grid_pitch=None, start=None, end=None, Miss_Corner=False):
-        """マップの範囲やグリッドピッチなどの基本情報を初期化する"""
-        # inputs
-        self.start = start
-        self.end = end
-        self.grid_pitch = grid_pitch
-        self.ver_range = ver_range
-        self.hor_range = hor_range
-        self.Miss_Corner = Miss_Corner
 
-        # obstacle containers
-        self.obstacle_dict = {}
-        self.obstacle_node = np.empty((0, 2))
+@dataclass
+class Map:
+    grid_pitch: float
+    xs: np.ndarray
+    ys: np.ndarray
+    X: np.ndarray
+    Y: np.ndarray
+    nodes: np.ndarray          # (H,W,2)  [x,y]
+    flat: np.ndarray           # (H*W,2)
 
-        self.isect_xy = None
+    land_polys: List[np.ndarray]
+    nogo_polys: List[np.ndarray]
 
-    def GenerateMapFromCSV(file, grid_pitch, port_file):
-        """
-        障害物の折れ線データを格納したCSVから Map インスタンスを生成する
-        引数:
-            file (str): 'x [m]', 'y [m]' 列を持つCSVファイルのパス
-            grid_pitch (float): グリッドの間隔
-        戻り値:
-            Map: 障害物の線分とノードが追加された初期化済みマップ
-        """
-        df = pd.read_csv(file)
-        try:
-            ver = np.array(df['x [m]'])
-            hor = np.array(df['y [m]'])
-        except:
-            xs = []; ys = []
-            df_coord = pd.read_csv(port_file)
-            LAT_ORIGIN = df_coord["Latitude"].iloc[0]
-            LON_ORIGIN = df_coord["Longitude"].iloc[0]
-            ANGLE_FROM_NORTH = df_coord["Psi[deg]"].iloc[0]
+    mask_land: np.ndarray      # (H,W) bool
+    mask_nogo: np.ndarray      # (H,W) bool
+    label: np.ndarray          # (H,W) uint8: 0 free, 1 land, 2 nogo, 3 both
 
-            for lat, lon in zip(df["lat"].to_numpy(), df["lon"].to_numpy()):
-                if pd.isna(lat) or pd.isna(lon):
-                    continue
-                y, x = convert_to_xy(
-                    lat,
-                    lon,
-                    LAT_ORIGIN,
-                    LON_ORIGIN,
-                    ANGLE_FROM_NORTH,
-                )
-                xs.append(x); ys.append(y)
+    @staticmethod
+    def _load_polys(csv_path: str,
+                    port_file: str,
+                    ) -> List[np.ndarray]:
+        df = pd.read_csv(csv_path)
 
-            pts = np.column_stack([xs, ys])
-            df = pd.DataFrame({
-                "x [m]": pts[:, 1],
-                "y [m]": pts[:, 0],
-            })
-            ver = np.array(df['x [m]'])
-            hor = np.array(df['y [m]'])
+        if ("x [m]" not in df.columns) or ("y [m]" not in df.columns):
+            xs, ys = convert(df, port_file)
+            df["x [m]"] = xs; df["y [m]"] = ys
 
-        obstacles = np.stack([ver, hor], 1)
+        polys = []
+        for _, g in df.groupby("polygon_id", sort=False):
+            xy = g[["x [m]", "y [m]"]].to_numpy()
+            polys.append(xy)
 
-        ver_min_round = Map.RoundRange(None, np.amin(ver), grid_pitch, 'min')
-        ver_max_round = Map.RoundRange(None, np.amax(ver), grid_pitch, 'max')
-        hor_min_round = Map.RoundRange(None, np.amin(hor), grid_pitch, 'min')
-        hor_max_round = Map.RoundRange(None, np.amax(hor), grid_pitch, 'max')
+        return polys
 
-        ver_range = np.arange(ver_min_round, ver_max_round + grid_pitch / 10, grid_pitch)
-        hor_range = np.arange(hor_min_round, hor_max_round + grid_pitch / 10, grid_pitch)
+    @staticmethod
+    def _build_grid_from_layers(layers: List[List[np.ndarray]],
+                                grid_pitch: float,
+                                margin_cells: int = 1) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        all_polys = [p for layer in layers for p in layer]
+        if len(all_polys) == 0:
+            raise ValueError("No polygons found.")
 
-        target_map = Map(ver_range, hor_range, grid_pitch, Miss_Corner=True)
-        Map.AddObstacleLine(target_map, obstacles, 'berth')
-        Map.AddObstacleNode(target_map, obstacles, 'berth')
+        allxy = np.vstack(all_polys)
+        xmin, xmax = float(allxy[:, 0].min()), float(allxy[:, 0].max())
+        ymin, ymax = float(allxy[:, 1].min()), float(allxy[:, 1].max())
 
-        return target_map
+        margin = float(grid_pitch) * float(margin_cells)
+        xmin -= margin; xmax += margin
+        ymin -= margin; ymax += margin
 
+        xs = np.arange(xmin, xmax + grid_pitch, grid_pitch, dtype=float)
+        ys = np.arange(ymin, ymax + grid_pitch, grid_pitch, dtype=float)
+        X, Y = np.meshgrid(xs, ys)
+        nodes = np.stack([X, Y], axis=-1) # これを使って座標を呼び出す
+        flat = nodes.reshape(-1, 2)
+        return xs, ys, X, Y, nodes, flat
+
+    @staticmethod
+    def _mask_from_polys(polys: List[np.ndarray],
+                         flat: np.ndarray,
+                         shape_hw: Tuple[int, int],
+                         include_boundary: bool = True) -> np.ndarray:
+        N = len(flat)
+        inside = np.zeros(N, dtype=bool)
+        if len(polys) == 0:
+            return inside.reshape(shape_hw)
+
+        # 境界を inside 寄りに（必要なら）
+        radius = 1e-9 if include_boundary else 0.0
+
+        fx = flat[:, 0]
+        fy = flat[:, 1]
+
+        for p in polys:
+            if len(p) < 3:
+                continue
+
+            # bbox で候補を絞る（高速化）
+            xmin, xmax = float(p[:, 0].min()), float(p[:, 0].max())
+            ymin, ymax = float(p[:, 1].min()), float(p[:, 1].max())
+
+            cand = (xmin <= fx) & (fx <= xmax) & (ymin <= fy) & (fy <= ymax)
+            if not np.any(cand):
+                continue
+
+            idx = np.where(cand)[0]
+            path = Path(p, closed=True)
+            inside[idx] |= path.contains_points(flat[idx], radius=radius)
+
+        return inside.reshape(shape_hw)
+
+    @classmethod
+    def GenerateMapFromCSV(cls,
+                           land_file: str,
+                           no_go_file: str,
+                           grid_pitch: float,
+                           port_file: str,
+                           *,
+                           margin_cells: int = 1,
+                           include_boundary: bool = True) -> "Map":
+        land_polys = cls._load_polys(land_file, port_file)
+        nogo_polys = cls._load_polys(no_go_file, port_file)
+
+        xs, ys, X, Y, nodes, flat = cls._build_grid_from_layers(
+            [land_polys, nogo_polys],
+            grid_pitch=grid_pitch,
+            margin_cells=margin_cells
+        )
+        H, W = Y.shape
+
+        mask_land = cls._mask_from_polys(land_polys, flat, (H, W), include_boundary=include_boundary)
+        mask_nogo = cls._mask_from_polys(nogo_polys, flat, (H, W), include_boundary=include_boundary)
+
+        label = np.zeros((H, W), dtype=np.uint8)
+        label[mask_land] |= 1
+        label[mask_nogo] |= 2
+
+        return cls(
+            grid_pitch=grid_pitch,
+            xs=xs, ys=ys, X=X, Y=Y, nodes=nodes, flat=flat,
+            land_polys=land_polys, nogo_polys=nogo_polys,
+            mask_land=mask_land, mask_nogo=mask_nogo, label=label
+        )
+
+    # A* 用の障害物を切替（landだけ / land+nogo）
+    def blocked_for_astar(self, use_nogo_as_obstacle: bool = False) -> np.ndarray:
+        return (self.mask_land | self.mask_nogo) if use_nogo_as_obstacle else self.mask_land
+        
 
     def ShowInitialMap(self, filename=None, SD=None, SD_sw=True, initial_point_list=None):
         """
