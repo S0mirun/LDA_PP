@@ -862,18 +862,18 @@ def process_all_and_export_outline(
 # Run example
 # =========================================================
 if __name__ == "__main__":
-    IMG_PATH = "raw_datas/海岸線データ/Shimizu.PNG"
+    IMG_PATH = "raw_datas/海岸線データ/Sakai.PNG"
 
     process_all_and_export_outline(
         IMG_PATH,
         grid_roi=(90, 80, None, None),
         border=2,
         # manual input (deg/min + anchor indices)
-        lat0_deg=35,
-        lat0_min=02.0,
+        lat0_deg=34,
+        lat0_min=36.0,
         lat_anchor_idx=0,
-        lon0_deg=138,
-        lon0_min=29.0,
+        lon0_deg=135,
+        lon0_min=24.0,
         lon_anchor_idx=0,
         # mapping model
         lat_model="mercator",  # or "linear"

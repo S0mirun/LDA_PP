@@ -1072,8 +1072,7 @@ class PathPlanning:
 
     def shipdomain(self):
         port = self.port
-        target_csv = "outputs/MakeMap/Shimizu/outline/impassable_outline_vertices_latlon.csv"
-        # target_csv = f"{DATA}/rough_map/{port['name']}.csv"
+        target_csv = f"{DATA}/rough_map/{port['name']}.csv"
         target_csv_for_pyship = f"{DATA}/rough_map_for_pyship/{port['name']}.csv"
 
         df_world = pd.read_csv(target_csv_for_pyship)
