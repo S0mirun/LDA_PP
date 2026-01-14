@@ -174,5 +174,14 @@ def astar(
     # not found
     raise RuntimeError("A* failed to find a path")
 
-def drow_basemap(ax):
+def astar2(
+    map,  # expects: map.maze (2D), map.ship_domain_cost_astar(node, SD, weight, enclosing_checker)
+    start: Tuple[int, int],
+    end: Tuple[int, int],
+    psi_start: float,
+    psi_end: float,
+    SD,
+    weight: float,
+    enclosing_checker,
+):
     pass
