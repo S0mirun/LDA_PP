@@ -2,6 +2,7 @@
 import os
 import sys
 
+import cv2
 import math
 import matplotlib.pyplot as plt
 import numpy as np
@@ -93,7 +94,7 @@ class Map:
         xs = np.arange(xmin, xmax + grid_pitch, grid_pitch, dtype=float)
         ys = np.arange(ymin, ymax + grid_pitch, grid_pitch, dtype=float)
         X, Y = np.meshgrid(xs, ys)
-        nodes = np.stack([X, Y], axis=-1) # これを使って座標を呼び出す
+        nodes = np.stack([X, Y], axis=-1) # これを使って座標を呼び出す。(y, x, 0or1)
         flat = nodes.reshape(-1, 2)
         return xs, ys, X, Y, nodes, flat
 
@@ -599,45 +600,6 @@ class Map:
                 num_int = num_int + num_sign * pitch
         return num_int
 
-    def AddObstacleLine(self, array, name='Noname'):
-        """
-        障害物の折れ線データを辞書に追加する（キーは一意になるように付番する）
-        引数:
-            array (ndarray): 頂点座標の配列（ver, hor）
-            name (str): キーのベースとなる名前
-        戻り値:
-            None
-        """
-        name = name
-        num = 0
-        with tqdm(total=None, desc=f"AddObstacleLine[{name}]", unit='probe', leave=False) as pbar:
-            while True:
-                key = name + '-' + str(num)
-                if key in self.obstacle_dict:
-                    num += 1
-                    pbar.update(1)
-                else:
-                    self.obstacle_dict[key] = array
-                    pbar.update(1)
-                    break
-
-    def AddObstacleNode(self, array, name='Noname'):
-        """
-        障害物をラスタライズし，辺上および内部のグリッドノードをすべて収集する。
-        引数:
-            array (ndarray): 障害物ポリゴンの頂点（ver, hor）
-            name (str): ラベル（現状は対称性のために保持しているだけで未使用）
-        戻り値:
-            None
-        """
-        inner_node = self.fill_inner_concave_obstacle(array, self.grid_pitch)
-        for i in range(len(array) - 1):
-            tmp_array = self.DetictCollision(array[i, :], array[i + 1, :])
-            self.obstacle_node = np.concatenate([self.obstacle_node, tmp_array])
-        self.obstacle_node = np.append(self.obstacle_node, inner_node, axis=0)
-        self.obstacle_node = np.unique(self.obstacle_node, axis=0)
-        self.obstacle_map = set([tuple(x) for x in self.obstacle_node])
-
     def FindNodeOfThePoint(self, point):
         """
         与えられた点を，左下のグリッドノードに対応付ける
@@ -663,49 +625,68 @@ class Map:
         tmp = grid * math.floor(num / grid)
         return tmp
 
-    def SetMaze(self):
-        """
-        A*探索用の二値迷路配列（1=障害物）を構築する（転置して (hor, ver) 形状にする）
-        戻り値:
-            None
-        """
-        maze_np = np.zeros((len(self.ver_range), len(self.hor_range)), int)
-        # set obstacle cells
-        for i in range(len(self.obstacle_node)):
-            ver_i = np.where(self.ver_range == self.obstacle_node[i, 0])
-            hor_i = np.where(self.hor_range == self.obstacle_node[i, 1])
-            maze_np[ver_i, hor_i] = 1
-        # transpose for A* (hor, ver)
-        maze_np = maze_np.T
-        self.maze = maze_np.tolist()
+    def ship_domain_cost_astar(self, node, SD, weight, maze):
+        v = node.position[0] * self.grid_pitch
+        h = node.position[1] * self.grid_pitch
 
-    def ship_domain_cost_astar(self, node, SD, weight, enclosing_checker):
-        """
-        A* ノードに対するコスト = weight ×（障害物内部に入ったSD頂点数）とする
-        引数:
-            node: .position と .psi を持つノード
-            SD: Ship-domain モデル（distance() を持つオブジェクト）
-            weight (float): 重み係数
-            enclosing_checker: pyshipsim.EnclosingPointCollisionChecker インスタンス
-        戻り値:
-            float: コスト値
-        """
-        distance = ((self.ver_range[node.position[1]] - self.end_xy[0, 1]) ** 2 +
-                    (self.hor_range[node.position[0]] - self.end_xy[0, 1]) ** 2) ** (1 / 2)
+        distance = ((v - self.end_vh[0, 1]) ** 2 +(h - self.end_vh[0, 1]) ** 2) ** (1 / 2)
         speed = self.b_ave * distance ** (self.a_ave) + self.b_SD * distance ** (self.a_SD)
 
         # SD polygon around node center
-        r_list = []
-        for theta_i in theta_list:
-            r_list.append(SD.distance(speed, theta_i))
-        domain_xy = np.array([self.ver_range[node.position[1]] + r_list[:] * np.cos(theta_list[:] + node.psi),
-                              self.hor_range[node.position[0]] + r_list[:] * np.sin(theta_list[:] + node.psi)])
-        domain_xy = domain_xy.T
-        domain_xy.tolist()
+        r_list = np.array([SD.distance(speed, th) for th in theta_list], dtype=float)
+        domain_xy = np.stack([
+            v + r_list * np.cos(theta_list + node.psi),
+            h + r_list * np.sin(theta_list + node.psi),
+        ], axis=1)
 
-        contact_node = np.empty((0, 2))
-        contact_node_array = enclosing_checker.check(domain_xy, contact_node)
-        cost = weight * len(contact_node_array)
+        # maze を uint8(0/1)へ
+        maze_u8 = (maze != 0).astype(np.uint8)
+        Ny, Nx = maze_u8.shape
+
+        # world -> grid index へ変換（ver_range/hor_range は等間隔前提）
+        #   x = ver_range[col], y = hor_range[row]
+        ver0 = float(self.ver_range[0])
+        hor0 = float(self.hor_range[0])
+        dx = float(self.ver_range[1] - self.ver_range[0])
+        dy = float(self.hor_range[1] - self.hor_range[0])
+
+        # col(i) と row(j) の float index
+        i_f = (domain_xy[:, 0] - ver0) / dx
+        j_f = (domain_xy[:, 1] - hor0) / dy
+
+        # ROI (bbox) を作る
+        margin = 2
+        imin = int(np.floor(i_f.min())) - margin
+        imax = int(np.ceil(i_f.max())) + margin
+        jmin = int(np.floor(j_f.min())) - margin
+        jmax = int(np.ceil(j_f.max())) + margin
+
+        # 画面内にクリップ
+        imin = max(0, imin); jmin = max(0, jmin)
+        imax = min(Nx - 1, imax); jmax = min(Ny - 1, jmax)
+
+        if imin > imax or jmin > jmax:
+            return 0.0
+
+        roi_w = imax - imin + 1
+        roi_h = jmax - jmin + 1
+
+        # ROI 座標へ（OpenCV は (x=col, y=row) の int32）
+        pts = np.stack([i_f - imin, j_f - jmin], axis=1)
+        pts = np.round(pts).astype(np.int32)
+        pts[:, 0] = np.clip(pts[:, 0], 0, roi_w - 1)
+        pts[:, 1] = np.clip(pts[:, 1], 0, roi_h - 1)
+
+        # ShipDomain の塗りつぶしマスク（ROIのみ）
+        sd_mask = np.zeros((roi_h, roi_w), dtype=np.uint8)
+        cv2.fillPoly(sd_mask, [pts], 1)
+
+        # maze ROI と重なりセル数
+        maze_roi = maze_u8[jmin:jmax+1, imin:imax+1]
+        overlap = (sd_mask & maze_roi)
+        contact_count = int(overlap.sum())
+
+        cost = weight * contact_count
         return cost
 
     def ship_domain_cost(self, child_ver, child_hor, psi, SD, enclosing_checker):

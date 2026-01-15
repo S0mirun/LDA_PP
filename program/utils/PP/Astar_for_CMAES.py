@@ -175,13 +175,91 @@ def astar(
     raise RuntimeError("A* failed to find a path")
 
 def astar2(
-    map,  # expects: map.maze (2D), map.ship_domain_cost_astar(node, SD, weight, enclosing_checker)
+    map,
     start: Tuple[int, int],
     end: Tuple[int, int],
     psi_start: float,
     psi_end: float,
     SD,
     weight: float,
-    enclosing_checker,
 ):
-    pass
+    # setup
+    psi_start_astar = angle_adaptor(psi_start)
+    psi_end_astar = angle_adaptor(psi_end)
+    maze = map.maze
+    rows, cols = maze.shape
+
+    start_node = Node(None, start, psi=psi_start_astar, g=0.0, h=0.0, f=0.0)
+    end_node = Node(None, end, psi=psi_end_astar, g=0.0, h=0.0, f=0.0)
+
+    # containers
+    open_heap: List[Tuple[float, int, Node]] = []
+    heap_counter = 0
+    g_best: Dict[Tuple[int, int], float] = {start_node.position: 0.0}
+    closed: Set[Tuple[int, int]] = set()
+
+    heapq.heappush(open_heap, (start_node.f, heap_counter, start_node))
+    heap_counter += 1
+
+    itr = 0
+
+    with tqdm(total=rows * cols, desc="A*", unit="node") as pbar:
+        while open_heap:
+            # pick best
+            _, _, current = heapq.heappop(open_heap)
+            if current.position in closed:
+                continue
+
+            closed.add(current.position)
+            itr += 1
+
+            # goal?
+            if current.position == end_node.position:
+                path_list, psi_list = reconstruct_path(current)
+                pbar.n = len(closed)
+                pbar.set_postfix(open=len(open_heap), closed=len(closed))
+                pbar.refresh()
+                return path_list, psi_list, itr
+
+            # expand neighbors
+            for i, (dr, dc) in enumerate(OFFSETS):
+                nr, nc = current.position[0] + dr, current.position[1] + dc
+
+                # bounds
+                if nr < 0 or nr >= rows or nc < 0 or nc >= cols:
+                    continue
+
+                # obstacle
+                if maze[nr][nc] != 0:
+                    continue
+
+                if (nr, nc) in closed:
+                    continue
+
+                # step cost (squared step) + SD penalty
+                step_cost = (dr * dr + dc * dc)
+                candidate = Node(parent=current, position=(nr, nc), psi=HEADINGS[i])
+
+                sd_penalty = map.ship_domain_cost_astar(candidate,SD,weight, maze)
+                tentative_g = current.g + step_cost + sd_penalty
+
+                # not better than known?
+                if tentative_g >= g_best.get((nr, nc), float("inf")):
+                    continue
+
+                # update best
+                g_best[(nr, nc)] = tentative_g
+                candidate.g = tentative_g
+                candidate.h = manhattan(candidate.position, end_node.position)
+                candidate.f = candidate.g + candidate.h
+
+                heapq.heappush(open_heap, (candidate.f, heap_counter, candidate))
+                heap_counter += 1
+
+            # progress (rough)
+            pbar.n = len(closed)
+            pbar.set_postfix(open=len(open_heap), closed=len(closed))
+            pbar.refresh()
+
+    # not found
+    raise RuntimeError("A* failed to find a path")

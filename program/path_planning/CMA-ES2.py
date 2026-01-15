@@ -84,7 +84,7 @@ class Settings:
         self.start_end_mode: ParamMode = ParamMode.AUTO
         self.psi_mode: ParamMode = ParamMode.AUTO
         self.steady_course_coeff_mode: ParamMode = ParamMode.AUTO
-        self.init_path_algo: InitPathAlgo = InitPathAlgo.BEZIER
+        self.init_path_algo: InitPathAlgo = InitPathAlgo.ASTAR
         self.SD_contact_judge: SD_contact_judge = SD_contact_judge.NEW
         self.enable_pre_berthing_straight_segment: bool = True
 
@@ -92,7 +92,6 @@ class Settings:
         self.show_SD_on_init_path: bool = False
         self.gridpitch: float = 5.0  # [m]
         self.gridpitch_for_Astar: float = 5.0  # [m]
-        self.range_type: float = 1
 
         # CMA-ES
         self.seed: int = 42
@@ -515,7 +514,7 @@ def cal_psi(parent_pt, current_pt, child_pt):
     return psi
 
 def cal_speed(current_pt, sm):
-    distance = ((current_pt[0] - sm.end_xy[0, 1]) ** 2 + (current_pt[1] - sm.end_xy[0, 1]) ** 2) ** 0.5
+    distance = ((current_pt[0] - sm.end_vh[0, 1]) ** 2 + (current_pt[1] - sm.end_vh[0, 1]) ** 2) ** 0.5
     speed = sm.b_ave * distance ** sm.a_ave + sm.b_SD * distance ** sm.a_SD
     if speed > 6.8:
         speed = 6.8
@@ -1134,19 +1133,13 @@ class PathPlanning:
         sm.start_vh = sm.FindNodeOfThePoint(sm.start_raw[0, :])
         sm.end_vh = sm.FindNodeOfThePoint(sm.end_raw[0, :])
 
-        if self.ps.range_type == 1:
-            ver_margin = 200
-            hor_margin = 200
+        ver_margin = 200
+        hor_margin = 200
 
-            ver_min = min((np.amin(sm.ver_range), sm.start_raw[0, 0], sm.end_raw[0, 0])) - ver_margin
-            ver_max = max((np.amax(sm.ver_range), sm.start_raw[0, 0], sm.end_raw[0, 0])) + ver_margin
-            hor_min = min((np.amin(sm.hor_range), sm.start_raw[0, 1], sm.end_raw[0, 1])) - hor_margin
-            hor_max = max((np.amax(sm.hor_range), sm.start_raw[0, 1], sm.end_raw[0, 1])) + hor_margin
-        else:
-            ver_min = -15
-            ver_max = +10
-            hor_min = -20
-            hor_max = +20
+        ver_min = np.min(sm.nodes[..., 0]) - ver_margin
+        ver_max = np.max(sm.nodes[..., 0]) + ver_margin
+        hor_min = np.min(sm.nodes[..., 1]) - hor_margin
+        hor_max = np.max(sm.nodes[..., 1]) + hor_margin
 
         ver_min_round = Glaph.Map.RoundRange(None, ver_min, sm.grid_pitch, "min")
         ver_max_round = Glaph.Map.RoundRange(None, ver_max, sm.grid_pitch, "max")
@@ -1171,9 +1164,13 @@ class PathPlanning:
         origin_pt = sm.start_vh[0] + origin_navigation_distance * u_start
         sm.origin_vh = sm.FindNodeOfThePoint(origin_pt)
 
+        v, h = sm.origin_vh[0]
+        j = np.where(sm.ver_range == v)
+        i = np.where(sm.hor_range == h)
+        origin_node = [int(i[0]), int(j[0])]
+
         self.origin_pt = origin_pt
-        self.origin_ver_idx = np.where(sm.ver_range == sm.origin_vh[0, 0])
-        self.origin_hor_idx = np.where(sm.hor_range == sm.origin_vh[0, 1])
+        sm.origin_node = origin_node
 
         if self.ps.steady_course_coeff_mode == ParamMode.AUTO:
             self.steady_course_coeff = 1.2
@@ -1187,9 +1184,13 @@ class PathPlanning:
         last_pt = sm.end_vh[0] - straight_dist * u_end
         sm.last_vh = sm.FindNodeOfThePoint(last_pt)
 
+        v, h = sm.last_vh[0]
+        j = np.where(sm.ver_range == v)
+        i = np.where(sm.hor_range == h)
+        last_node = [int(i[0]), int(j[0])]
+
         self.last_pt = last_pt
-        self.last_ver_idx = np.where(sm.ver_range == sm.last_vh[0, 0])
-        self.last_hor_idx = np.where(sm.hor_range == sm.last_vh[0, 1])
+        sm.last_node = last_node
 
         if (files := glob.glob(f"{RAW_DATAS}/buoy/{port['buoy']}/*.xlsx")):
             buoy=Buoy()
@@ -1213,18 +1214,26 @@ class PathPlanning:
         sm.path_vh = np.empty((0, 2))
         #
         if self.ps.init_path_algo == InitPathAlgo.ASTAR:
-            Glaph.Map.SetMaze(sm)
+            sm.maze = np.where(sm.mask_land, 1, 0).astype(int)
             weight = sm.grid_pitch * 20  # default
+            print(f"H, W  =  {sm.maze.shape}")
+            mask = sm.mask_land
+            ys, xs = np.where(mask > 0)
+            fig, ax = plt.subplots(figsize=(8,8))
+            ax.scatter(xs, ys, s=1, alpha=0.3)
+            ax.plot([sm.origin_node[1]], [sm.origin_node[0]],"o", ms=12, mfc="red", mec="white", mew=1.5)
+            ax.plot([sm.last_node[1]], [sm.last_node[0]],"o", ms=12, mfc="red", mec="white", mew=1.5)
+            ax.set_aspect("equal")
+            plt.show()
             #
-            sm.path_node, sm.psi, _ = Astar.astar(
-                sm,
-                (self.origin_hor_idx[0][0], self.origin_ver_idx[0][0]),
-                (self.last_hor_idx[0][0], self.last_ver_idx[0][0]),
+            sm.path_node, sm.psi, _ = Astar.astar2(
+                map=sm,
+                start=sm.origin_node,
+                end=sm.last_node,
                 psi_start=self.psi_start,
                 psi_end=self.psi_end,
                 SD=self.SD,
                 weight=weight,
-                enclosing_checker=self.enclosing,
             ) # return : index=[i, j]
             # [i, j] -> [ver, hor]
             initial_coord_xy = undo_conversion(
