@@ -1,7 +1,4 @@
 # 新しい接触判定を作るためのファイル
-import os
-import sys
-
 import cv2
 import math
 import matplotlib.pyplot as plt
@@ -10,7 +7,7 @@ import pandas as pd
 from dataclasses import dataclass
 from typing import Callable, List, Tuple, Optional
 from matplotlib.path import Path
-from tqdm import tqdm
+from matplotlib.patches import Polygon as MplPolygon
 
 from utils.PP.subroutine import mpl_config
 from utils.LDA.ship_geometry import *
@@ -168,120 +165,6 @@ class Map:
     # A* 用の障害物を切替（landだけ / land+nogo）
     def blocked_for_astar(self, use_nogo_as_obstacle: bool = False) -> np.ndarray:
         return (self.mask_land | self.mask_nogo) if use_nogo_as_obstacle else self.mask_land
-        
-
-    def ShowInitialMap(self, filename=None, SD=None, SD_sw=True, initial_point_list=None):
-        """
-        初期経路（start/origin/path/last/end と任意のSD）を描画する
-        引数:
-            filename (str|None): 出力画像ファイルのパス
-            SD: Ship-domain モデル（distance() を持つオブジェクト）
-            SD_sw (bool): True のときSDポリゴンを描画する
-            initial_point_list (list|ndarray|None): 初期点のリスト（ver, hor）
-        戻り値:
-            None
-        """
-        # figure sizing by aspect
-        x_range = self.hor_range[-1] - self.hor_range[0]
-        y_range = self.ver_range[-1] - self.ver_range[0]
-        aspect_ratio = x_range / y_range if y_range != 0 else 1
-        base_size = 6
-        figsize_x = base_size * aspect_ratio
-        figsize_y = base_size
-        fig = plt.figure(figsize=(figsize_x, figsize_y), dpi=300, linewidth=0, edgecolor='w')
-        ax = fig.add_subplot(111)
-
-        # obstacle lines
-        for key in self.obstacle_dict:
-            ax.plot(self.obstacle_dict[key][:, 1], self.obstacle_dict[key][:, 0], color='k', ls='-', lw=0.8)
-
-        # start/end
-        if 'start_xy' in dir(self):
-            ax.scatter(self.start_xy[0, 1] + 0.5, self.start_xy[0, 0] + 0.5, color='k', s=15, edgecolors='k', zorder=3)
-            ax.text(self.start_xy[0, 1] + 0.5, self.start_xy[0, 0] + 0.6, 'start', va='bottom', ha='center', color='k', fontsize=10)
-        if 'end_xy' in dir(self):
-            ax.scatter(self.end_xy[0, 1] + 0.5, self.end_xy[0, 0] + 0.5, color='k', s=15, edgecolors='k', zorder=3)
-            ax.text(self.end_xy[0, 1] + 0.5, self.end_xy[0, 0] + 0.6, 'end', va='bottom', ha='center', color='k', fontsize=10)
-
-        # origin/last
-        ax.scatter(self.origin_xy[0, 1] + 0.5, self.origin_xy[0, 0] + 0.5, color='purple', s=15, zorder=3, label='Fixed Points')
-        ax.scatter(self.last_xy[0, 1] + 0.5, self.last_xy[0, 0] + 0.5, color='purple', s=15, zorder=3)
-
-        # initial points
-        if initial_point_list is not None:
-            initial_points = np.array(initial_point_list).reshape(-1, 2)
-            ax.scatter(initial_points[:, 1], initial_points[:, 0], color='green', s=10, label='Initial Points', zorder=3)
-
-        # path chain (start -> origin -> path -> last -> end)
-        if 'path_xy' in dir(self):
-            all_points = []
-            all_points.append([self.start_xy[0, 1] + 0.5, self.start_xy[0, 0] + 0.5])
-            all_points.append([self.origin_xy[0, 1] + 0.5, self.origin_xy[0, 0] + 0.5])
-            all_points.extend(self.path_xy[:, [1, 0]] + 0.5)
-            all_points.append([self.last_xy[0, 1] + 0.5, self.last_xy[0, 0] + 0.5])
-            all_points.append([self.end_xy[0, 1] + 0.5, self.end_xy[0, 0] + 0.5])
-            all_points = np.array(all_points)
-            ax.plot(all_points[:, 0], all_points[:, 1], lw=1.0, color='r', ls='-')
-
-        # ship-domain polygons along path
-        if 'psi' in dir(self) and not SD == None and SD_sw == True:
-            for j in range(len(self.path_xy)):
-                if j % 30 == 0:  # draw at interval
-                    distance = ((self.path_xy[j, 1] + 0.5 - self.end_xy[0, 1] + 0.5) ** 2 +
-                                (self.path_xy[j, 0] + 0.5 - self.end_xy[0, 0] + 0.5) ** 2) ** (1 / 2)
-                    speed = self.b_ave * distance ** (self.a_ave) + self.b_SD * distance ** (self.a_SD)
-                    r_list = []
-                    for theta_i in theta_list:
-                        r_list.append(SD.distance(speed, theta_i))
-
-                    # close polygon
-                    r_list.append(r_list[0])
-                    theta_list_closed = np.append(theta_list, theta_list[0])
-
-                    ax.plot(self.path_xy[j, 1] + 0.5 + np.array(r_list) * np.sin(theta_list_closed + self.psi[j]),
-                            self.path_xy[j, 0] + 0.5 + np.array(r_list) * np.cos(theta_list_closed + self.psi[j]),
-                            lw=0.5, color='g', ls='--')
-
-        # axes limits
-        ax.set_xlim(self.hor_range[0], self.hor_range[-1] + self.grid_pitch)
-        ax.set_ylim(self.ver_range[0], self.ver_range[-1] + self.grid_pitch)
-
-        # major ticks (200 m)
-        x_start = np.floor(self.hor_range[0] / 200) * 200
-        x_end = np.ceil(self.hor_range[-1] / 200) * 200
-        ax.set_xticks(np.arange(x_start, x_end + 200, 200))
-
-        y_start = np.floor(self.ver_range[0] / 200) * 200
-        y_end = np.ceil(self.ver_range[-1] / 200) * 200
-        ax.set_yticks(np.arange(y_start, y_end + 200, 200))
-
-        # tick labels
-        ax.set_xticklabels(np.arange(x_start, x_end + 200, 200), rotation=90)
-        ax.set_yticklabels(np.arange(y_start, y_end + 200, 200), rotation=0)
-
-        ax.set_xlabel(r'$Y\,\rm{[m]}$')
-        ax.set_ylabel(r'$X\,\rm{[m]}$')
-
-        plt.grid(which='major', color='k', linestyle='--', linewidth=0.4, alpha=0.5)
-        plt.gca().set_aspect('equal', adjustable='box')
-
-        # legend
-        handles, labels = ax.get_legend_handles_labels()
-        legend = ax.legend(
-            handles,
-            labels,
-            loc='lower right',
-            fontsize=9,
-            scatterpoints=1,
-            handletextpad=0.3,
-            labelspacing=0.6,
-            borderpad=0.6,
-            frameon=True,
-            markerscale=1.2
-        )
-        plt.tight_layout()
-        fig.savefig(filename, bbox_inches='tight', pad_inches=0.05)
-        plt.close()
 
     def ShowMap(self,
         filename=None,
@@ -312,20 +195,25 @@ class Map:
         ax = fig.add_subplot(111)
 
         # obstacle lines
-        for key in self.obstacle_dict:
-            ax.plot(self.obstacle_dict[key][:, 1], self.obstacle_dict[key][:, 0], color='k', ls='-', lw=0.8)
+        for xy in self.nogo_polys:
+            xy = np.asarray(xy)
+            ax.add_patch(MplPolygon(xy, 
+                                    closed=True, 
+                                    facecolor="lightgray", 
+                                    edgecolor="black", 
+                                    linewidth=1.0
+                                    )
+                         )
 
         # start/end
-        if 'start_xy' in dir(self):
-            ax.scatter(self.start_xy[0, 1] + 0.5, self.start_xy[0, 0] + 0.5, color='k', s=15, edgecolors='k', zorder=3)
-            ax.text(self.start_xy[0, 1] + 0.5, self.start_xy[0, 0] + 0.6, 'start', va='bottom', ha='center', color='k', fontsize=10)
-        if 'end_xy' in dir(self):
-            ax.scatter(self.end_xy[0, 1] + 0.5, self.end_xy[0, 0] + 0.5, color='k', s=15, edgecolors='k', zorder=3)
-            ax.text(self.end_xy[0, 1] + 0.5, self.end_xy[0, 0] + 0.6, 'end', va='bottom', ha='center', color='k', fontsize=10)
+        ax.scatter(self.start_vh[0, 1] + 0.5, self.start_vh[0, 0] + 0.5, color='k', s=15, edgecolors='k', zorder=3)
+        ax.text(self.start_vh[0, 1] + 0.5, self.start_vh[0, 0] + 0.6, 'start', va='bottom', ha='center', color='k', fontsize=10)
+        ax.scatter(self.end_vh[0, 1] + 0.5, self.end_vh[0, 0] + 0.5, color='k', s=15, edgecolors='k', zorder=3)
+        ax.text(self.end_vh[0, 1] + 0.5, self.end_vh[0, 0] + 0.6, 'end', va='bottom', ha='center', color='k', fontsize=10)
 
         # origin/last
-        ax.scatter(self.origin_xy[0, 1] + 0.5, self.origin_xy[0, 0] + 0.5, color='purple', s=15, zorder=3, label='Fixed Points')
-        ax.scatter(self.last_xy[0, 1] + 0.5, self.last_xy[0, 0] + 0.5, color='purple', s=15, zorder=3)
+        ax.scatter(self.origin_vh[0, 1] + 0.5, self.origin_vh[0, 0] + 0.5, color='purple', s=15, zorder=3, label='Fixed Points')
+        ax.scatter(self.last_vh[0, 1] + 0.5, self.last_vh[0, 0] + 0.5, color='purple', s=15, zorder=3)
 
         # buoy, intersection
         if getattr(self, 'buoy_xy', None) is not None : 
@@ -348,13 +236,13 @@ class Map:
             )
 
         # path chain (start -> origin -> path -> last -> end)
-        if 'path_xy' in dir(self):
+        if 'path_vh' in dir(self):
             all_points = []
-            all_points.append([self.start_xy[0, 1] + 0.5, self.start_xy[0, 0] + 0.5])
-            all_points.append([self.origin_xy[0, 1] + 0.5, self.origin_xy[0, 0] + 0.5])
-            all_points.extend(self.path_xy[:, [1, 0]] + 0.5)
-            all_points.append([self.last_xy[0, 1] + 0.5, self.last_xy[0, 0] + 0.5])
-            all_points.append([self.end_xy[0, 1] + 0.5, self.end_xy[0, 0] + 0.5])
+            all_points.append([self.start_vh[0, 1] + 0.5, self.start_vh[0, 0] + 0.5])
+            all_points.append([self.origin_vh[0, 1] + 0.5, self.origin_vh[0, 0] + 0.5])
+            all_points.extend(self.path_vh[:, [1, 0]] + 0.5)
+            all_points.append([self.last_vh[0, 1] + 0.5, self.last_vh[0, 0] + 0.5])
+            all_points.append([self.end_vh[0, 1] + 0.5, self.end_vh[0, 0] + 0.5])
             all_points = np.array(all_points)
             ax.plot(all_points[:, 0], all_points[:, 1], lw=1.0, color='r', ls='-')
 

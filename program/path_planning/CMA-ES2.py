@@ -70,6 +70,7 @@ class SD_contact_judge(StrEnum):
     OLD = "old"
     NEW = "new"
 
+name = "Yokkaichi"
 class Settings:
     def __init__(self):
         # port
@@ -78,6 +79,7 @@ class Settings:
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
         # ship
+
         self.L = 100
 
         # setup / initial path
@@ -572,7 +574,7 @@ def calculate_turning_points(initial_coords: np.ndarray, sample_map, last_pt: np
 
     while current_index < len(initial_coords) - 1:
         current_point = initial_coords[current_index]
-        d = np.hypot(current_point[0] - sample_map.end_xy[0, 0], current_point[1] - sample_map.end_xy[0, 1])
+        d = np.hypot(current_point[0] - sample_map.end_vh[0, 0], current_point[1] - sample_map.end_vh[0, 1])
         current_speed = sample_map.b_ave * d ** sample_map.a_ave + sample_map.b_SD * d ** sample_map.a_SD
         current_speed = min(current_speed, 9.5)
         minute_distance = current_speed * 1852.0 / 60.0 # km/min
@@ -807,7 +809,7 @@ class PathPlanning:
         pts = np.asarray(initial_pts, float).reshape(-1, 2)
         origin = np.asarray(self.origin_pt, float)
         last = np.asarray(self.last_pt, float)
-        end = sm.end_xy[0].astype(float)
+        end = sm.end_vh[0].astype(float)
 
         # length (normalized by straight origin-last)
         straight = float(np.hypot(last[0] - origin[0], last[1] - origin[1]))
@@ -849,7 +851,7 @@ class PathPlanning:
         # element (legacy end-side weights)
         elem_cost = 0.0
         if len(pts) >= 1:
-            elem_cost += cal.elem(sm.start_xy[0], origin, pts[0])
+            elem_cost += cal.elem(sm.start_vh[0], origin, pts[0])
         if len(pts) >= 2:
             elem_cost += cal.elem(origin, pts[0], pts[1])
         if len(pts) >= 2:
@@ -1080,8 +1082,8 @@ class PathPlanning:
         print(f"\nGenerating map from data")
 
         port = self.port
-        land_csv = f"outputs/MakeMap/Yokkaichi/outline_land_only/land_only_outline_vertices_latlon.csv"
-        no_go_csv = f"outputs/MakeMap/Yokkaichi/outline_impassable/impassable_outline_vertices_latlon.csv"
+        land_csv = f"outputs/MakeMap/{name}/outline_land_only/land_only_outline_vertices_latlon.csv"
+        no_go_csv = f"outputs/MakeMap/{name}/outline_impassable/impassable_outline_vertices_latlon.csv"
         map = Glaph.Map.GenerateMapFromCSV(
                                 land_file=land_csv,
                                 no_go_file=no_go_csv,
@@ -1089,12 +1091,6 @@ class PathPlanning:
                                 port_file=f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv",
                             )
         time_end_map_generation = time.time()
-        # print(f"H, W  =  {map.X.shape}")
-        # mask = map.mask_land
-        # ys, xs = np.where(mask > 0)
-        # fig, ax = plt.subplots(figsize=(8,8))
-        # ax.scatter(xs, ys, s=1)
-        # plt.show()
         print(f"Map generation is complete.\nCalculation time : {time_end_map_generation - time_start_map_generation}\n")
 
         df = pd.read_csv(f"{RAW_DATAS}/tmp/GuidelineFit_debug.csv")
@@ -1147,6 +1143,8 @@ class PathPlanning:
         hor_max_round = Glaph.Map.RoundRange(None, hor_max, sm.grid_pitch, "max")
         sm.ver_range = np.arange(ver_min_round, ver_max_round + sm.grid_pitch / 10, sm.grid_pitch)
         sm.hor_range = np.arange(hor_min_round, hor_max_round + sm.grid_pitch / 10, sm.grid_pitch)
+        self.end_ver_idx = np.where(sm.ver_range == sm.end_vh[0, 0])
+        self.end_hor_idx = np.where(sm.hor_range == sm.end_vh[0, 1])
 
         if self.ps.psi_mode == ParamMode.AUTO:
             self.psi_start = np.deg2rad(self.port["psi_start"])
@@ -1159,16 +1157,29 @@ class PathPlanning:
         start_speed = min(cal_speed(sm.start_vh[0], sm), self.ps.MAX_SPEED_KTS)
         print(f"start speed :{start_speed}[knots]")
 
+        # port node
+        v, h = [0.0, 0.0]
+        j = np.where(sm.ver_range == v)
+        i = np.where(sm.hor_range == h)
+        port_node = [int(np.asarray(i).reshape(-1)[0].item()), int(np.asarray(j).reshape(-1)[0].item())]
+        sm.port_node = port_node
+
         origin_navigation_distance = start_speed * 1852.0 / 60.0
         u_start = np.array([np.cos(self.psi_start), np.sin(self.psi_start)])
         origin_pt = sm.start_vh[0] + origin_navigation_distance * u_start
         sm.origin_vh = sm.FindNodeOfThePoint(origin_pt)
 
+        v, h = sm.start_vh[0]
+        j = np.where(sm.ver_range == v)
+        i = np.where(sm.hor_range == h)
+        start_node = [int(np.asarray(i).reshape(-1)[0].item()), int(np.asarray(j).reshape(-1)[0].item())]
+
         v, h = sm.origin_vh[0]
         j = np.where(sm.ver_range == v)
         i = np.where(sm.hor_range == h)
-        origin_node = [int(i[0]), int(j[0])]
+        origin_node = [int(np.asarray(i).reshape(-1)[0].item()), int(np.asarray(j).reshape(-1)[0].item())]
 
+        sm.start_node = start_node
         self.origin_pt = origin_pt
         sm.origin_node = origin_node
 
@@ -1184,11 +1195,17 @@ class PathPlanning:
         last_pt = sm.end_vh[0] - straight_dist * u_end
         sm.last_vh = sm.FindNodeOfThePoint(last_pt)
 
+        v, h = sm.end_vh[0]
+        j = np.where(sm.ver_range == v)
+        i = np.where(sm.hor_range == h)
+        end_node = [int(np.asarray(i).reshape(-1)[0].item()), int(np.asarray(j).reshape(-1)[0].item())]
+
         v, h = sm.last_vh[0]
         j = np.where(sm.ver_range == v)
         i = np.where(sm.hor_range == h)
-        last_node = [int(i[0]), int(j[0])]
+        last_node = [int(np.asarray(i).reshape(-1)[0].item()), int(np.asarray(j).reshape(-1)[0].item())]
 
+        sm.end_node = end_node
         self.last_pt = last_pt
         sm.last_node = last_node
 
@@ -1214,17 +1231,8 @@ class PathPlanning:
         sm.path_vh = np.empty((0, 2))
         #
         if self.ps.init_path_algo == InitPathAlgo.ASTAR:
-            sm.maze = np.where(sm.mask_land, 1, 0).astype(int)
+            sm.maze = np.where(sm.mask_nogo, 1, 0).astype(int)
             weight = sm.grid_pitch * 20  # default
-            print(f"H, W  =  {sm.maze.shape}")
-            mask = sm.mask_land
-            ys, xs = np.where(mask > 0)
-            fig, ax = plt.subplots(figsize=(8,8))
-            ax.scatter(xs, ys, s=1, alpha=0.3)
-            ax.plot([sm.origin_node[1]], [sm.origin_node[0]],"o", ms=12, mfc="red", mec="white", mew=1.5)
-            ax.plot([sm.last_node[1]], [sm.last_node[0]],"o", ms=12, mfc="red", mec="white", mew=1.5)
-            ax.set_aspect("equal")
-            plt.show()
             #
             sm.path_node, sm.psi, _ = Astar.astar2(
                 map=sm,
@@ -1236,11 +1244,11 @@ class PathPlanning:
                 weight=weight,
             ) # return : index=[i, j]
             # [i, j] -> [ver, hor]
-            initial_coord_xy = undo_conversion(
+            initial_coord_vh = undo_conversion(
                 self.end_hor_idx[0][0],
                 self.end_ver_idx[0][0],
-                sm.end_xy[0, 1],
-                sm.end_xy[0, 0],
+                sm.end_vh[0, 1],
+                sm.end_vh[0, 0],
                 sm.path_node,
                 self.ps.gridpitch,
             )
@@ -1271,13 +1279,13 @@ class PathPlanning:
             # manual configuration (not used here)
             pass
 
-        initial_points = calculate_turning_points(initial_coord_xy, sm, self.last_pt, port)
+        initial_points = calculate_turning_points(initial_coord_vh, sm, self.last_pt, port)
         print("Initial Turning Points:\n",)
         for i, (x, y) in enumerate(initial_points, 1):
             print(f"  P{i:02d}: ({x:.1f}, {y:.1f})")
 
         if self.ps.save_init_path:
-            sm.path_xy = initial_coord_xy
+            sm.path_vh = initial_coord_vh
             self.save_init_path(sm, initial_points)
 
         self.initial_points = np.array(initial_points, dtype=float)

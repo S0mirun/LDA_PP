@@ -113,7 +113,7 @@ def extract_land_shallow_magenta_masks(
     T_SHALLOW=35,
     MARGIN=1,
     rgb_magenta=(198, 71, 186),
-    T_MAG=22,
+    T_MAG=30,
 ):
     """
     元画像から
@@ -862,7 +862,7 @@ def process_all_and_export_outline(
 # Run example
 # =========================================================
 if __name__ == "__main__":
-    IMG_PATH = "raw_datas/海岸線データ/Sakai.PNG"
+    IMG_PATH = "raw_datas/海岸線データ/Yokkaichi.PNG"
 
     process_all_and_export_outline(
         IMG_PATH,
@@ -870,10 +870,10 @@ if __name__ == "__main__":
         border=2,
         # manual input (deg/min + anchor indices)
         lat0_deg=34,
-        lat0_min=36.0,
+        lat0_min=57.0,
         lat_anchor_idx=0,
-        lon0_deg=135,
-        lon0_min=24.0,
+        lon0_deg=136,
+        lon0_min=38.0,
         lon_anchor_idx=0,
         # mapping model
         lat_model="mercator",  # or "linear"

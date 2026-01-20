@@ -53,6 +53,20 @@ class Node:
         if not isinstance(other, Node):
             return False
         return self.position == other.position
+    
+    def __post_init__(self):
+        # list / np.array / (1,2) などが来ても (i, j) のtupleに統一
+        p = self.position
+        # numpy配列なども想定して平坦化
+        try:
+            import numpy as np
+            p = np.asarray(p).reshape(-1)
+            if p.size != 2:
+                raise ValueError
+            self.position = (int(p[0]), int(p[1]))
+        except Exception:
+            # numpyが無い/失敗した場合のフォールバック
+            self.position = (int(p[0]), int(p[1]))
 
 
 def angle_adaptor(angle_rad: float) -> float:
@@ -186,7 +200,7 @@ def astar2(
     # setup
     psi_start_astar = angle_adaptor(psi_start)
     psi_end_astar = angle_adaptor(psi_end)
-    maze = map.maze
+    maze = map.maze.T
     rows, cols = maze.shape
 
     start_node = Node(None, start, psi=psi_start_astar, g=0.0, h=0.0, f=0.0)
