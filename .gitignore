@@ -4,6 +4,7 @@ outputs/*
 !/outputs/303
 !/outputs/data
 !/outputs/CMA-ES
+!/outputs/CMA-ES2
 !/outputs/MakeMap
 .DS_Store
 **/.DS_Store
