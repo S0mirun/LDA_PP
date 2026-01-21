@@ -32,12 +32,12 @@
     "lon_anchor_idx": 0
   },
   "img_path": "raw_datas/海岸線データ/Yokkaichi.PNG",
-  "impassable_map_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Yokkaichi/impassable_map.png",
-  "grid_image_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Yokkaichi/tiles/_grid_detected_indexed.png",
-  "grid_info_csv": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Yokkaichi/tiles/tiles_manifest.csv",
-  "mask_land_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Yokkaichi/mask_land.png",
-  "mask_shallow_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Yokkaichi/mask_shallow.png",
-  "mask_magenta_path": "/Users/tokudashintaro/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Yokkaichi/mask_magenta.png",
+  "impassable_map_path": "/Users/tokudashintarou/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Yokkaichi/impassable_map.png",
+  "grid_image_path": "/Users/tokudashintarou/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Yokkaichi/tiles/_grid_detected_indexed.png",
+  "grid_info_csv": "/Users/tokudashintarou/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Yokkaichi/tiles/tiles_manifest.csv",
+  "mask_land_path": "/Users/tokudashintarou/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Yokkaichi/mask_land.png",
+  "mask_shallow_path": "/Users/tokudashintarou/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Yokkaichi/mask_shallow.png",
+  "mask_magenta_path": "/Users/tokudashintarou/Desktop/LDA_PP/program/path_planning/../../outputs/MakeMap/Yokkaichi/mask_magenta.png",
   "note": "lon_xs_px/lat_ys_px are from GREEN grid detection.",
   "outline_kind": "land_only(from mask_land.png)"
 }

@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import List, Tuple, Optional, Set, Dict
 
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 
 # 8-neighborhood (row, col)
@@ -67,7 +68,6 @@ class Node:
         except Exception:
             # numpyが無い/失敗した場合のフォールバック
             self.position = (int(p[0]), int(p[1]))
-
 
 def angle_adaptor(angle_rad: float) -> float:
     """convert user's angle to internal (vertical-axis=0°, CW positive)."""

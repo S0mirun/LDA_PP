@@ -112,9 +112,6 @@ class Map:
         fy = flat[:, 1]
 
         for p in polys:
-            if len(p) < 3:
-                continue
-
             # bbox で候補を絞る（高速化）
             xmin, xmax = float(p[:, 0].min()), float(p[:, 0].max())
             ymin, ymax = float(p[:, 1].min()), float(p[:, 1].max())

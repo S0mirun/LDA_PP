@@ -86,7 +86,7 @@ class Settings:
         self.start_end_mode: ParamMode = ParamMode.AUTO
         self.psi_mode: ParamMode = ParamMode.AUTO
         self.steady_course_coeff_mode: ParamMode = ParamMode.AUTO
-        self.init_path_algo: InitPathAlgo = InitPathAlgo.ASTAR
+        self.init_path_algo: InitPathAlgo = InitPathAlgo.BEZIER
         self.SD_contact_judge: SD_contact_judge = SD_contact_judge.NEW
         self.enable_pre_berthing_straight_segment: bool = True
 
@@ -1089,6 +1089,7 @@ class PathPlanning:
                                 no_go_file=no_go_csv,
                                 grid_pitch=10.0,
                                 port_file=f"{RAW_DATAS}/tmp/coordinates_of_port/_{port['name']}.csv",
+                                include_boundary=False
                             )
         time_end_map_generation = time.time()
         print(f"Map generation is complete.\nCalculation time : {time_end_map_generation - time_start_map_generation}\n")
@@ -1256,12 +1257,13 @@ class PathPlanning:
             print(f"Astar algorithm took {caltime:.3f} [s]\n")
 
         elif self.ps.init_path_algo == InitPathAlgo.BEZIER:
-            pts, sm.isect_xy = Bezier.stack(sm)
+            # pts, sm.isect_xy = Bezier.stack(sm)
+            pts = np.vstack(sm.nogo_polys)
             pts = Bezier.sort(pts,
-                              start=np.asarray(sm.origin_xy[0], dtype=float),
-                              end=np.asarray(sm.last_xy[0], dtype=float)
+                              start=np.asarray(sm.origin_vh[0], dtype=float),
+                              end=np.asarray(sm.last_vh[0], dtype=float)
                             )
-            initial_coord_xy, sm.psi = Bezier.bezier(pts, num=400)
+            initial_coord_vh, sm.psi = Bezier.bezier(pts, num=400)
             caltime = time.time() - time_start_init_path
             print(f"Bezier algorithm took {caltime:.3f} [s]\n")
 
