@@ -43,7 +43,6 @@ import utils.PP.Astar_for_CMAES as Astar
 import utils.PP.Bezier_curve as Bezier
 import utils.PP.graph_by_tokuda as Glaph
 from utils.PP.E_ddCMA import DdCma, Checker, Logger
-from utils.PP.Filtered_Dict import new_filtered_dict
 from utils.PP.graph_by_tokuda import ShipDomain_proposal
 from utils.PP.MultiPlot import RealTraj, Buoy
 
