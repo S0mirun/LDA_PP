@@ -1,11 +1,13 @@
 import glob
 import os
 
+from dataclasses import dataclass
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.patches import Polygon
 import numpy as np
 import pandas as pd
+from typing import ClassVar, Tuple
 
 from utils.LDA.ship_geometry import *
 from utils.PP.MultiPlot import RealTraj
@@ -13,8 +15,29 @@ from utils.PP.MultiPlot import RealTraj
 DIR = os.path.dirname(__file__)
 dirname = os.path.splitext(os.path.basename(__file__))[0]
 
-num = 2
-L = 103.8; B = 16.0
+
+@dataclass
+class Line:
+    """
+    theta : 真上が0 時計回りが負
+    """
+    fixed_pt:Tuple[float, float]
+    end_pt:Tuple[float, float] = None
+    theta:float = None
+
+    ver_range:ClassVar[Tuple[float, float] | None] = None
+    hor_range:ClassVar[Tuple[float, float] | None] = None
+
+    def __post_init__(self):
+        if self.end_pt == None:
+            end_pt = self.fixed_pt
+            while not self.check(end_pt):
+                end_pt = end_pt + np.array([np.cos(self.theta), np.sin(self.theta)])
+            self.end_pt = end_pt
+
+    def check(self, pt):
+        return pt[0] < self.ver_range[0] or self.ver_range[1] < pt[0] or pt[1] < self.hor_range[0] or self.hor_range[1] < pt[1]
+
 
 class Setting:
     def __init__(self):
@@ -23,6 +46,7 @@ class Setting:
 
         self.L = 103.8
         self.B = 16.0
+
 
 def convert(df, port_file, col_lat="lat", col_lon="lon"):
     df_coord = pd.read_csv(port_file)
@@ -44,9 +68,21 @@ def convert(df, port_file, col_lat="lat", col_lon="lon"):
         xs.append(x); ys.append(y)    
     return xs, ys
 
+def cal_angle(from_pt, to_pt):
+    """
+    符号付きの角度
+    真上を0としている
+    """
+    u = [1, 0]
+    v = np.asarray(to_pt) - np.asarray(from_pt)
+    dot = np.dot(u, v)
+    cross = u[0]*v[1] - u[1]*v[0]
+    return np.arctan2(cross, dot)
+
 class MakeLine:
     def __init__(self, ps):
         self.ps = ps
+
 
     def main(self):
         self.prepare()
@@ -91,10 +127,11 @@ class MakeLine:
         self.df_cap = df_cap
         self.SAVE_DIR = SAVE_DIR
 
+        Line.hor_range = self.port["hor_range"]
+        Line.ver_range = self.port["ver_range"]
 
     def init_fig(self):
         self.fig, self.ax = plt.subplots(figsize=(7, 7))
-
 
     def draw_basemap(self):
         port = self.port
@@ -147,26 +184,35 @@ class MakeLine:
         print("\nbase map saved")
 
     def make_init_route(self):
-        port = self.port
         ax = self.ax
+        lines = []
+
         # from birth point
-        segs = []
-
-        pt1 = (2*B, port["ver_range"][0])
-        pt2 = (2*B, port["ver_range"][1])
-        segs.append(np.array([pt1, pt2], dtype=float))
-
-        lines_np = np.stack(segs, axis=0)
-        ax.plot(lines_np[0], color="red", linestyle='-')
+        l1 = Line(fixed_pt=np.array((0.0, 2*self.ps.B)), theta=0)
+        lines.append(l1)
 
         # from shipping lane
         df = self.df_lane[self.df_lane['polygon_id'] == 1]
-        lane_pts = df[['x [m]', 'y [m]']].to_numpy()
-            
-
-        # plt.savefig(os.path.join(self.SAVE_DIR, "first route.png"))
-        # print("\nfirst route saved")
+        lane_pts = df[['y [m]', 'x [m]']].to_numpy()
+        length_best = 0
+        for i in range(len(lane_pts)):
+            mid_1 = (lane_pts[i-3] + lane_pts[i-2]) / 2
+            mid_2 = (lane_pts[i-1] + lane_pts[i]) / 2
+            length = np.linalg.norm(mid_1 - mid_2)
+            if length > length_best:
+                length_best = length
+                if np.linalg.norm(mid_1) > np.linalg.norm(mid_2):
+                    l2 = Line(fixed_pt=np.array((mid_1)), theta=cal_angle(mid_1, mid_2))
+                else:
+                    l2 = Line(fixed_pt=np.array((mid_2)), theta=cal_angle(mid_2, mid_1))
+                
+        lines.append(l2)
         
+        for ln in lines:
+            pts = np.vstack([ln.fixed_pt, ln.end_pt])
+            ax.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
+        plt.savefig(os.path.join(self.SAVE_DIR, "first route.png"))
+        print("\nfirst route saved")
 
     def dict_of_port(self, num):
         dictionary_of_port = {
