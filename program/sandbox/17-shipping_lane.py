@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from scipy import ndimage
 from typing import ClassVar, Tuple
+from tqdm import tqdm
 
 from utils.LDA.ship_geometry import *
 from utils.PP.MultiPlot import RealTraj
@@ -21,7 +22,7 @@ dirname = os.path.splitext(os.path.basename(__file__))[0]
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 9
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -37,8 +38,7 @@ class Line:
     """
     fixed_pt:Tuple[float, float]
     end_pt:Tuple[float, float] = None
-    theta:float = None
-
+    theta:float = None # [rad]
     parent=None
 
     ver_range:ClassVar[Tuple[float, float] | None] = None
@@ -54,7 +54,24 @@ class Line:
             self.end_pt = end_pt
 
     def check(self, pt):
-        return pt[0] < self.ver_range[0] or self.ver_range[1] < pt[0] or pt[1] < self.hor_range[0] or self.hor_range[1] < pt[1]
+        return (pt[0] < self.ver_range[0] or self.ver_range[1] < pt[0] 
+                    or pt[1] < self.hor_range[0] or self.hor_range[1] < pt[1])
+    
+    def swap(self):
+        fixed_pt = self.fixed_pt; end_pt = self.end_pt; theta = self.theta
+        self.fixed_pt = end_pt; self.end_pt = fixed_pt; self.theta = theta + np.pi
+
+    def extent_fixed_pt(self):
+        fixed_pt = self.fixed_pt
+        while self.check(fixed_pt):
+            fixed_pt = fixed_pt - np.array([np.cos(self.theta), np.sin(self.theta)])
+        while not self.check(fixed_pt):
+            fixed_pt = fixed_pt - np.array([np.cos(self.theta), np.sin(self.theta)])
+        self.fixed_pt = fixed_pt
+
+    def set_parent(self, ln):
+        self.fixed_pt = cal_intersect_pt(self, ln)
+        self.parent = ln
 
 
 def convert(df, port_file, col_lat="lat", col_lon="lon"):
@@ -91,7 +108,10 @@ def cal_angle(from_pt, to_pt):
     cross = cal_cross(u, v)
     return np.arctan2(cross, dot)
 
-def cal_intersect_pt(p1, p2, p3, p4):
+def cal_intersect_pt(ln1, ln2):
+    p1 = ln1.fixed_pt; p2 = ln1.end_pt
+    p3 = ln2.fixed_pt; p4 = ln2.end_pt
+
     a = p2 - p1; b = p4 - p3; c = p3 - p1
 
     cross_ab = cal_cross(a, b); cross_ca = cal_cross(c, a)
@@ -110,8 +130,6 @@ def cross_judge(l1, l2):
     cross3_12 = cal_cross(pt1-pt3, pt2-pt3); cross4_12 = cal_cross(pt1-pt4, pt2-pt4)
 
     if (cross1_34 * cross2_34 <= 0) and (cross3_12 * cross4_12 <= 0):
-        l1.end_pt = cal_intersect_pt(pt1, pt2, pt3, pt4)
-        l2.end_pt = l1.end_pt
         return True
     
     return False
@@ -234,34 +252,41 @@ class MakeLine:
         # ax.legend(handles=[legend_initial, legend_way, legend_fixed, legend_buoy, legend_captain, legend_SD])
         fig.savefig(os.path.join(self.SAVE_DIR, "base_map.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
-        print("\nbase map saved")
+        print("\nbase map saved\n")
 
     def make_init_line(self):
+        port = self.port
         ax1 = self.ax
         lines = []
 
-        # from birth point
-        l1 = Line(fixed_pt=np.array((0.0, 2*self.ps.B)), theta=np.deg2rad(10))
-        lines.append(l1)
+        # from start point
+        L_start = Line(fixed_pt=port["start"], theta=np.deg2rad(port["psi_start"]))
+        lines.append(L_start)
 
         # from shipping lane
-        df = self.df_lane[self.df_lane['polygon_id'] == 1]
-        lane_pts = df[['y [m]', 'x [m]']].to_numpy()
-        length_best = 0
-        for i in range(len(lane_pts)):
-            mid_1 = (lane_pts[i-3] + lane_pts[i-2]) / 2
-            mid_2 = (lane_pts[i-1] + lane_pts[i]) / 2
-            length = np.linalg.norm(mid_1 - mid_2)
-            if length > length_best:
-                length_best = length
-                mid1 = mid_1; mid2 = mid_2
+        for pid, g in self.df_lane.groupby("polygon_id", sort=True):
+            lane_pts = g[['y [m]', 'x [m]']].to_numpy()
+            length_best = 0
+            for i in range(len(lane_pts)):
+                mid_1 = (lane_pts[i-3] + lane_pts[i-2]) / 2
+                mid_2 = (lane_pts[i-1] + lane_pts[i]) / 2
+                length = np.linalg.norm(mid_1 - mid_2)
+                if length > length_best:
+                    length_best = length
+                    mid1 = mid_1; mid2 = mid_2
 
-        if np.linalg.norm(mid1) > np.linalg.norm(mid2):
-            l2 = Line(fixed_pt=np.array((mid1)), theta=cal_angle(mid1, mid2))
-        else:
-            l2 = Line(fixed_pt=np.array((mid2)), theta=cal_angle(mid2, mid1))
-        
-        lines.append(l2)
+            if np.linalg.norm(mid1) > np.linalg.norm(mid2):
+                L_lane = Line(fixed_pt=np.array((mid1)), theta=cal_angle(mid1, mid2))
+            else:
+                L_lane = Line(fixed_pt=np.array((mid2)), theta=cal_angle(mid2, mid1))
+            
+            L_lane.extent_fixed_pt()
+            lines.append(L_lane)
+
+        # from birth point
+        L_birth = Line(fixed_pt=np.array((0.0, 2*self.ps.B)), theta=np.deg2rad(10))
+        L_birth.swap()
+        lines.append(L_birth)
 
         handles = []
         for ln in lines:
@@ -270,7 +295,7 @@ class MakeLine:
             handles.append(h)
         plt.savefig(os.path.join(self.SAVE_DIR, "init line.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
-        print("\ninit line saved")
+        print("init line saved\n")
         for h in handles:
             h.remove()
 
@@ -278,15 +303,41 @@ class MakeLine:
 
     def make_init_route(self):
         lines = self.lines
-        ax2 = self.ax
 
-        if cross_judge(lines[0], lines[1]):
-            for ln in lines:
-                pts = np.vstack([ln.fixed_pt, ln.end_pt])
-                ax2.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
-            plt.savefig(os.path.join(self.SAVE_DIR, "init route.png"),
-                        dpi=400, bbox_inches="tight", pad_inches=0.05)
-            print("\ninit route saved")
+        # set parent
+        for i in range(len(lines) - 2):
+            lines[i+1].set_parent(lines[i])
+
+        # check nearlest intersection
+        L_birth = lines[-1]
+        shortest = np.linalg.norm(L_birth.fixed_pt - L_birth.end_pt); idx = None
+        for i in range(len(lines) - 1):
+            if cross_judge(lines[i], L_birth):
+                intersect_pt = cal_intersect_pt(lines[i], L_birth)
+                length = np.linalg.norm(intersect_pt - L_birth.end_pt)
+                if length < shortest:
+                    shortest = length; idx = i
+
+        if idx != None:
+            L_birth.set_parent(lines[idx])
+        
+        self.show_init_route()
+
+    def show_init_route(self):
+        ax2 = self.ax
+        lines = self.lines
+
+        ln = lines[-1]
+        pts_list = [np.asarray(ln.end_pt), np.asarray(ln.fixed_pt)]
+        while ln.parent is not None:
+            ln = ln.parent
+            pts_list.append(np.asarray(ln.fixed_pt))
+        pts = np.vstack(pts_list[::-1])
+
+        ax2.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
+        plt.savefig(os.path.join(self.SAVE_DIR, "init route.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        print("init route saved\n")
 
     def dict_of_port(self, num):
         dictionary_of_port = {
@@ -316,8 +367,8 @@ class MakeLine:
                 "name": "Yokkaichi_port2B",
                 "buoy": "四日市",
                 "side": "star board",
-                "start": [2000.0, 2000.0],
-                "psi_start": -125,
+                "start": [2450.0, 2300.0],
+                "psi_start": -145,
                 "psi_end": 175,
                 "berth_type": 1,
                 "ver_range": [-500, 2500],
