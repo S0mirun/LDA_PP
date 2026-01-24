@@ -2,11 +2,13 @@ import glob
 import os
 
 from dataclasses import dataclass
+import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from matplotlib.patches import Polygon
 import numpy as np
 import pandas as pd
+from scipy import ndimage
 from typing import ClassVar, Tuple
 
 from utils.LDA.ship_geometry import *
@@ -14,6 +16,18 @@ from utils.PP.MultiPlot import RealTraj
 
 DIR = os.path.dirname(__file__)
 dirname = os.path.splitext(os.path.basename(__file__))[0]
+
+
+class Setting:
+    def __init__(self):
+        # port
+        self.port_number: int = 2
+         # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
+         # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
+         # 10: Tomakomai, 11: KIX
+
+        self.L = 103.8
+        self.B = 16.0
 
 
 @dataclass
@@ -25,27 +39,22 @@ class Line:
     end_pt:Tuple[float, float] = None
     theta:float = None
 
+    parent=None
+
     ver_range:ClassVar[Tuple[float, float] | None] = None
     hor_range:ClassVar[Tuple[float, float] | None] = None
 
     def __post_init__(self):
         if self.end_pt == None:
             end_pt = self.fixed_pt
+            while self.check(end_pt):
+                end_pt = end_pt + np.array([np.cos(self.theta), np.sin(self.theta)])
             while not self.check(end_pt):
                 end_pt = end_pt + np.array([np.cos(self.theta), np.sin(self.theta)])
             self.end_pt = end_pt
 
     def check(self, pt):
         return pt[0] < self.ver_range[0] or self.ver_range[1] < pt[0] or pt[1] < self.hor_range[0] or self.hor_range[1] < pt[1]
-
-
-class Setting:
-    def __init__(self):
-        # port
-        self.port_number: int = 2
-
-        self.L = 103.8
-        self.B = 16.0
 
 
 def convert(df, port_file, col_lat="lat", col_lon="lon"):
@@ -68,16 +77,44 @@ def convert(df, port_file, col_lat="lat", col_lon="lon"):
         xs.append(x); ys.append(y)    
     return xs, ys
 
+def cal_cross(u, v):
+    return u[0]*v[1] - u[1]*v[0]
+
 def cal_angle(from_pt, to_pt):
     """
     符号付きの角度
     真上を0としている
     """
-    u = [1, 0]
+    u = [1.0, 0.0]
     v = np.asarray(to_pt) - np.asarray(from_pt)
     dot = np.dot(u, v)
-    cross = u[0]*v[1] - u[1]*v[0]
+    cross = cal_cross(u, v)
     return np.arctan2(cross, dot)
+
+def cal_intersect_pt(p1, p2, p3, p4):
+    a = p2 - p1; b = p4 - p3; c = p3 - p1
+
+    cross_ab = cal_cross(a, b); cross_ca = cal_cross(c, a)
+    u = cross_ca / cross_ab
+    return p3 + u * b
+
+
+def cross_judge(l1, l2):
+    """
+    l1, l2 : Lineで定義された直線
+    """
+    pt1, pt2 = l1.fixed_pt, l1.end_pt
+    pt3, pt4 = l2.fixed_pt, l2.end_pt
+
+    cross1_34 = cal_cross(pt3-pt1, pt4-pt1); cross2_34 = cal_cross(pt3-pt2, pt4-pt2)
+    cross3_12 = cal_cross(pt1-pt3, pt2-pt3); cross4_12 = cal_cross(pt1-pt4, pt2-pt4)
+
+    if (cross1_34 * cross2_34 <= 0) and (cross3_12 * cross4_12 <= 0):
+        l1.end_pt = cal_intersect_pt(pt1, pt2, pt3, pt4)
+        l2.end_pt = l1.end_pt
+        return True
+    
+    return False
 
 class MakeLine:
     def __init__(self, ps):
@@ -87,11 +124,11 @@ class MakeLine:
     def main(self):
         self.prepare()
 
-
     def prepare(self):
         self.read_csv()
         self.init_fig()
         self.draw_basemap()
+        self.make_init_line()
         self.make_init_route()
 
 
@@ -171,6 +208,22 @@ class MakeLine:
                                     color = 'gray', ls = '-', marker = 'D',
                                     markersize = 2, alpha = 0.8, lw = 1.0, label="captain's Route"
         )
+        # compas
+        img = mpimg.imread("raw_datas/compass icon2.png")
+        df = pd.read_csv(self.port_csv)
+        angle = float(df['Psi[deg]'].iloc[0])
+        img_rot = ndimage.rotate(img, angle, reshape=True)
+        img_rot = np.clip(img_rot, 0.0, 1.0)
+        imagebox = OffsetImage(img_rot, zoom=0.5)
+        ab = AnnotationBbox(
+            imagebox,
+            (0, 1), # ax1's upper left
+            xycoords='axes fraction',
+            box_alignment=(0, 1), # .png's upper left
+            frameon=False,
+            pad=0.0,
+        )
+        ax.add_artist(ab)
 
         ax.set_xlim(port["hor_range"])
         ax.set_ylim(port["ver_range"])
@@ -183,12 +236,12 @@ class MakeLine:
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         print("\nbase map saved")
 
-    def make_init_route(self):
-        ax = self.ax
+    def make_init_line(self):
+        ax1 = self.ax
         lines = []
 
         # from birth point
-        l1 = Line(fixed_pt=np.array((0.0, 2*self.ps.B)), theta=0)
+        l1 = Line(fixed_pt=np.array((0.0, 2*self.ps.B)), theta=np.deg2rad(10))
         lines.append(l1)
 
         # from shipping lane
@@ -201,18 +254,39 @@ class MakeLine:
             length = np.linalg.norm(mid_1 - mid_2)
             if length > length_best:
                 length_best = length
-                if np.linalg.norm(mid_1) > np.linalg.norm(mid_2):
-                    l2 = Line(fixed_pt=np.array((mid_1)), theta=cal_angle(mid_1, mid_2))
-                else:
-                    l2 = Line(fixed_pt=np.array((mid_2)), theta=cal_angle(mid_2, mid_1))
-                
-        lines.append(l2)
+                mid1 = mid_1; mid2 = mid_2
+
+        if np.linalg.norm(mid1) > np.linalg.norm(mid2):
+            l2 = Line(fixed_pt=np.array((mid1)), theta=cal_angle(mid1, mid2))
+        else:
+            l2 = Line(fixed_pt=np.array((mid2)), theta=cal_angle(mid2, mid1))
         
+        lines.append(l2)
+
+        handles = []
         for ln in lines:
             pts = np.vstack([ln.fixed_pt, ln.end_pt])
-            ax.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
-        plt.savefig(os.path.join(self.SAVE_DIR, "first route.png"))
-        print("\nfirst route saved")
+            h, = ax1.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
+            handles.append(h)
+        plt.savefig(os.path.join(self.SAVE_DIR, "init line.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        print("\ninit line saved")
+        for h in handles:
+            h.remove()
+
+        self.lines = lines
+
+    def make_init_route(self):
+        lines = self.lines
+        ax2 = self.ax
+
+        if cross_judge(lines[0], lines[1]):
+            for ln in lines:
+                pts = np.vstack([ln.fixed_pt, ln.end_pt])
+                ax2.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
+            plt.savefig(os.path.join(self.SAVE_DIR, "init route.png"),
+                        dpi=400, bbox_inches="tight", pad_inches=0.05)
+            print("\ninit route saved")
 
     def dict_of_port(self, num):
         dictionary_of_port = {
@@ -243,7 +317,6 @@ class MakeLine:
                 "buoy": "四日市",
                 "side": "star board",
                 "start": [2000.0, 2000.0],
-                "end": [100.0, 80.0], # 300, 80
                 "psi_start": -125,
                 "psi_end": 175,
                 "berth_type": 1,
