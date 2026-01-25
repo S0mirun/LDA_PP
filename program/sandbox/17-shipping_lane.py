@@ -5,10 +5,12 @@ from dataclasses import dataclass
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-from matplotlib.patches import Polygon
+from matplotlib.patches import Polygon as MplPolygon
 import numpy as np
 import pandas as pd
 from scipy import ndimage
+from shapely import contains_xy, intersects_xy, prepare
+from shapely.geometry import Polygon, Point
 from typing import ClassVar, Tuple
 from tqdm import tqdm
 
@@ -22,7 +24,7 @@ dirname = os.path.splitext(os.path.basename(__file__))[0]
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 7
+        self.port_number: int = 4
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -43,23 +45,37 @@ class Line:
 
     ver_range:ClassVar[Tuple[float, float] | None] = None
     hor_range:ClassVar[Tuple[float, float] | None] = None
+    map:ClassVar = None
 
     def __post_init__(self):
         if self.end_pt == None:
             end_pt = self.fixed_pt
-            while self.check(end_pt):
-                end_pt = end_pt + np.array([np.cos(self.theta), np.sin(self.theta)])
+            if self.check(end_pt):
+                while self.check(end_pt):
+                    end_pt = end_pt + np.array([np.cos(self.theta), np.sin(self.theta)])
             while not self.check(end_pt):
                 end_pt = end_pt + np.array([np.cos(self.theta), np.sin(self.theta)])
+
             self.end_pt = end_pt
 
     def check(self, pt):
         """
         点が画面の外かを判定する。
+        地形と接触していないかも判定する。
         True : 外, False : 内
         """
-        return (pt[0] < self.ver_range[0] or self.ver_range[1] < pt[0] 
+        # outside or not
+        outside =  (pt[0] < self.ver_range[0] or self.ver_range[1] < pt[0] 
                     or pt[1] < self.hor_range[0] or self.hor_range[1] < pt[1])
+        if outside:
+            return True
+        
+        # in Polygon or not
+        x, y = pt[1], pt[0]
+        if self.map.intersects(Point(x, y)):
+            return True
+        
+        return False
     
     def swap(self):
         fixed_pt = self.fixed_pt; end_pt = self.end_pt; theta = self.theta
@@ -143,7 +159,6 @@ class MakeLine:
     def __init__(self, ps):
         self.ps = ps
 
-
     def main(self):
         self.prepare()
 
@@ -205,7 +220,7 @@ class MakeLine:
         for pid, g in self.df_lane.groupby("polygon_id", sort=True):
             xy = g[["x [m]", "y [m]"]].to_numpy(float)
             xy = np.vstack([xy, xy[0]])  # close
-            patch = Polygon(
+            patch = MplPolygon(
                 xy,
                 closed=True,
                 fill=True,
@@ -264,6 +279,12 @@ class MakeLine:
         ax1 = self.ax
         lines = []
 
+        # for clossing algorithm
+        coords = self.df_map[["y [m]", "x [m]"]].to_numpy(dtype=float)
+        poly = Polygon(coords)
+        prepare(poly)
+        Line.map = poly
+
         # from start point
         L_start = Line(fixed_pt=port["start"], theta=np.deg2rad(port["psi_start"]))
         lines.append(L_start)
@@ -284,9 +305,10 @@ class MakeLine:
         margin = 2*self.ps.B
         if port["psi_end"] == 0:
             if port["side"] == "port":
-                theta = theta + 10
+                theta = 10
                 margin = 2*self.ps.B
             elif port["side"] == "starboard":
+                theta = 0
                 margin = -self.ps.B
             if port["style"] == "head in":
                 theta = 180 - theta
@@ -325,11 +347,25 @@ class MakeLine:
                 intersect_pt = cal_intersect_pt(lines[i], L_birth)
                 length = np.linalg.norm(intersect_pt - L_birth.end_pt)
                 if length < shortest:
-                    shortest = length; idx = i
+                    shortest = length; idx = i      
 
         if idx != None:
             L_birth.set_parent(lines[idx])
-        
+        else:
+            longest = 0.0
+            mid = (L_birth.fixed_pt + L_birth.end_pt) / 2
+            for deg_i in range(-90, 91):
+                theta = L_birth.theta + np.deg2rad(deg_i - 180)
+                L = Line(fixed_pt=mid, end_pt=None, theta=theta)
+                length = np.linalg.norm(L.end_pt - L.fixed_pt)
+                if length > longest:
+                    longest = length
+                    best_theta = theta
+
+            L_append = Line(fixed_pt=mid, theta=best_theta + np.deg2rad(10))
+            L_append.swap()
+            L_birth.set_parent(L_append)
+            
         self.show_init_route()
 
     def show_init_route(self):
@@ -352,9 +388,11 @@ class MakeLine:
         dictionary_of_port = {
             0: {
                 "name": "Osaka_port1A",
+                "side": "starboard",
+                "style": "head in",
                 "start": [-1400.0, -800.0],
                 "psi_start": 40,
-                "psi_end": 10,
+                "psi_end": 0,
                 "berth_type": 2,
                 "ver_range": [-1500, 500],
                 "hor_range": [-1000, 500],
@@ -447,11 +485,12 @@ class MakeLine:
             },
             9: {
                 "name": "Shimizu",
-                "buoy": "8-清水",
+                "side": "port",
+                "style": "head out",
                 "start": [1400, -2000],
                 "end": [150, 100],
-                "psi_start": 100,
-                "psi_end": 175,
+                "psi_start": 80,
+                "psi_end": 0,
                 "berth_type": 2,
                 "ver_range": [-1000, 2000],
                 "hor_range": [-3000, 1000],
