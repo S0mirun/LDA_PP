@@ -22,7 +22,7 @@ dirname = os.path.splitext(os.path.basename(__file__))[0]
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 9
+        self.port_number: int = 7
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -54,6 +54,10 @@ class Line:
             self.end_pt = end_pt
 
     def check(self, pt):
+        """
+        点が画面の外かを判定する。
+        True : 外, False : 内
+        """
         return (pt[0] < self.ver_range[0] or self.ver_range[1] < pt[0] 
                     or pt[1] < self.hor_range[0] or self.hor_range[1] < pt[1])
     
@@ -63,11 +67,12 @@ class Line:
 
     def extent_fixed_pt(self):
         fixed_pt = self.fixed_pt
-        while self.check(fixed_pt):
-            fixed_pt = fixed_pt - np.array([np.cos(self.theta), np.sin(self.theta)])
-        while not self.check(fixed_pt):
-            fixed_pt = fixed_pt - np.array([np.cos(self.theta), np.sin(self.theta)])
-        self.fixed_pt = fixed_pt
+        if not self.check(fixed_pt):
+            while self.check(fixed_pt):
+                fixed_pt = fixed_pt - np.array([np.cos(self.theta), np.sin(self.theta)])
+            while not self.check(fixed_pt):
+                fixed_pt = fixed_pt - np.array([np.cos(self.theta), np.sin(self.theta)])
+            self.fixed_pt = fixed_pt
 
     def set_parent(self, ln):
         self.fixed_pt = cal_intersect_pt(self, ln)
@@ -266,25 +271,29 @@ class MakeLine:
         # from shipping lane
         for pid, g in self.df_lane.groupby("polygon_id", sort=True):
             lane_pts = g[['y [m]', 'x [m]']].to_numpy()
-            length_best = 0
-            for i in range(len(lane_pts)):
-                mid_1 = (lane_pts[i-3] + lane_pts[i-2]) / 2
-                mid_2 = (lane_pts[i-1] + lane_pts[i]) / 2
-                length = np.linalg.norm(mid_1 - mid_2)
-                if length > length_best:
-                    length_best = length
-                    mid1 = mid_1; mid2 = mid_2
 
-            if np.linalg.norm(mid1) > np.linalg.norm(mid2):
-                L_lane = Line(fixed_pt=np.array((mid1)), theta=cal_angle(mid1, mid2))
-            else:
-                L_lane = Line(fixed_pt=np.array((mid2)), theta=cal_angle(mid2, mid1))
-            
+            mid_1 = (lane_pts[0] + lane_pts[1]) / 2
+            mid_2 = (lane_pts[2] + lane_pts[3]) / 2
+
+            L_lane = Line(fixed_pt=np.array((mid_1)), theta=cal_angle(mid_1, mid_2))
             L_lane.extent_fixed_pt()
             lines.append(L_lane)
+            print(f"shipping lane {pid} complete")
 
         # from birth point
-        L_birth = Line(fixed_pt=np.array((0.0, 2*self.ps.B)), theta=np.deg2rad(10))
+        margin = 2*self.ps.B
+        if port["psi_end"] == 0:
+            if port["side"] == "port":
+                theta = theta + 10
+                margin = 2*self.ps.B
+            elif port["side"] == "starboard":
+                margin = -self.ps.B
+            if port["style"] == "head in":
+                theta = 180 - theta
+            theta = np.deg2rad(theta)
+        else:
+            theta = np.deg2rad(port["psi_end"] + 10)
+        L_birth = Line(fixed_pt=np.array((0.0, margin)), theta=theta)
         L_birth.swap()
         lines.append(L_birth)
 
@@ -295,7 +304,7 @@ class MakeLine:
             handles.append(h)
         plt.savefig(os.path.join(self.SAVE_DIR, "init line.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
-        print("init line saved\n")
+        print("\ninit line saved\n")
         for h in handles:
             h.remove()
 
@@ -343,9 +352,7 @@ class MakeLine:
         dictionary_of_port = {
             0: {
                 "name": "Osaka_port1A",
-                "buoy": "1-堺",
                 "start": [-1400.0, -800.0],
-                "end": [0.0, -10.0],
                 "psi_start": 40,
                 "psi_end": 10,
                 "berth_type": 2,
@@ -365,11 +372,11 @@ class MakeLine:
             },
             2: {
                 "name": "Yokkaichi_port2B",
-                "buoy": "四日市",
-                "side": "star board",
+                "side": "port",
+                "style": "head out",
                 "start": [2450.0, 2300.0],
                 "psi_start": -145,
-                "psi_end": 175,
+                "psi_end": 0,
                 "berth_type": 1,
                 "ver_range": [-500, 2500],
                 "hor_range": [-500, 2500],
@@ -387,14 +394,14 @@ class MakeLine:
             },
             4: {
                 "name": "Osaka_port1B",
-                "buoy": "1-堺",
+                "side": "port",
+                "style": "head in",
                 "start": [-3000.0, -1080.0],
-                "end": [-480.0, -80.0], # [-480.0, -80.0]
-                "psi_start": -5,
-                "psi_end": 45, # 45
+                "psi_start": -15,
+                "psi_end": 0,
                 "berth_type": 2,
                 "ver_range": [-3200, 500],
-                "hor_range": [-1600, 500],
+                "hor_range": [-1500, 1500],
             },
             5: {
                 "name": "Else_port2",
@@ -420,11 +427,9 @@ class MakeLine:
             },
             7: {
                 "name": "Aomori",
-                "buoy": "6-青森",
                 "start": [350, 3400.0],
-                "end": [0, 100],
                 "psi_start": -115,
-                "psi_end": -90,
+                "psi_end": 90,
                 "berth_type": 2,
                 "ver_range": [-1500, 1500],
                 "hor_range": [-1000, 3500],
