@@ -1,5 +1,6 @@
 import glob
 import os
+import time
 
 from dataclasses import dataclass
 import matplotlib.image as mpimg
@@ -12,8 +13,11 @@ from scipy import ndimage
 from shapely import contains_xy, intersects_xy, prepare
 from shapely.geometry import Polygon, Point
 from typing import ClassVar, Tuple
+from tqdm.auto import tqdm
 
 from utils.LDA.ship_geometry import *
+from utils.PP.E_ddCMA import DdCma, Checker, Logger
+from utils.PP.graph_by_taneichi import ShipDomain_proposal
 from utils.PP.MultiPlot import RealTraj
 
 DIR = os.path.dirname(__file__)
@@ -28,8 +32,22 @@ class Setting:
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
 
+        # ship
         self.L = 103.8
         self.B = 16.0
+
+        # CMA-ES
+        self.seed: int = 42
+        self.MAX_SPEED_KTS: float = 9.5  # [knots]
+        self.MIN_SPEED_KTS: float = 1.5  # [knots]
+        self.speed_interval: float = 1.0
+        self.MAX_ANGLE_DEG: float = 60  # [deg]
+        self.MIN_ANGLE_DEG: float = 0  # [deg]
+        self.angle_interval: float = 5
+
+        # restart
+        self.restarts: int = 3
+        self.increase_popsize_on_restart: bool = False
 
 
 @dataclass
@@ -94,6 +112,39 @@ class Line:
         self.parent = ln
 
 
+class CostCalculator:
+    def __init__(self):
+        self.ps = None
+        self.SD = None
+        self.map = None
+        self.lines = None
+
+    def ShipDomain(self, parent_pt, current_pt, child_pt):
+        SD = self.SD
+        lines = self.lines
+        theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(10))
+
+        distance = np.linalg.norm(current_pt - lines[-1].end_pt)
+        speed = min(self.ps.MAX_SPEED_KTS, SD.b_ave * distance ** SD.a_ave + SD.a_SD * distance ** SD.a_SD)
+        psi = cal_psi(parent_pt, current_pt, child_pt)
+
+        r_list = []
+        for theta_i in theta_list:
+            r_list.append(SD.distance(speed, theta_i))
+
+        r = np.asarray(r_list, dtype=float)
+        domain_xy = np.column_stack([
+            current_pt[0] + r * np.cos(theta_list + psi),
+            current_pt[1] + r * np.sin(theta_list + psi),
+        ])
+        # count
+        xs = domain_xy[:, 1]; ys = domain_xy[:, 0]
+        hit = intersects_xy(self.map, xs, ys)
+        n_hit = int(np.count_nonzero(hit))
+
+        return n_hit
+    
+
 def convert(df, port_file, col_lat="lat", col_lon="lon"):
     df_coord = pd.read_csv(port_file)
     LAT_ORIGIN = df_coord["Latitude"].iloc[0]
@@ -117,6 +168,9 @@ def convert(df, port_file, col_lat="lat", col_lon="lon"):
 def cal_cross(u, v):
     return u[0]*v[1] - u[1]*v[0]
 
+def sigmoid(x, a, b, c):
+    return a / (b + np.exp(c * x))
+
 def cal_angle(from_pt, to_pt):
     """
     符号付きの角度
@@ -138,6 +192,28 @@ def cal_intersect_pt(ln1, ln2):
     u = cross_ca / cross_ab
     return p3 + u * b
 
+def cal_psi(parent_pt, current_pt, child_pt):
+    ver_p, hor_p = parent_pt
+    ver_c, hor_c = current_pt
+    ver_n, hor_n = child_pt
+
+    v1 = np.array([hor_c - hor_p, ver_c - ver_p], dtype=float)
+    v2 = np.array([hor_n - hor_c, ver_n - ver_c], dtype=float)
+    m1 = np.linalg.norm(v1)
+    m2 = np.linalg.norm(v2)
+
+    if m1 == 0.0 or m2 == 0.0:
+        theta = 0.0
+    else:
+        dot = float(np.dot(v1, v2))
+        cross = float(cal_cross(v1, v2))
+        theta = float(np.arctan2(cross, dot))  # CCW:+, CW:-
+
+    psi_in = np.pi/2 - np.arctan2(v1[1], v1[0])  # 0=North, CW:+
+    psi = psi_in - 0.5 * theta
+    psi = (psi + np.pi) % (2.0 * np.pi) - np.pi
+    return psi
+
 def cross_judge(l1, l2):
     """
     l1, l2 : Lineで定義された直線
@@ -158,15 +234,169 @@ class MakeLine:
         self.ps = ps
 
     def main(self):
-        self.prepare()
+        self.prepare_for_init_route()
+        self.prepare_for_SD()
+        self.prepare_for_CMAES()
+        self.CMAES()
 
-    def prepare(self):
+    def prepare_for_init_route(self):
         self.read_csv()
         self.init_fig()
         self.draw_basemap()
         self.make_init_line()
         self.make_init_route()
 
+    def prepare_for_SD(self):
+        SD = ShipDomain_proposal()
+        SD.initial_setting(self.SD_setup_csv, sigmoid)
+
+        SD.a_ave = self.df_debug["a_ave"].values[0]
+        SD.b_ave = self.df_debug["b_ave"].values[0]
+        SD.a_SD = self.df_debug["a_SD"].values[0]
+        SD.b_SD = self.df_debug["b_SD"].values[0]
+
+        self.SD = SD
+
+    def prepare_for_CMAES(self):
+        cal = CostCalculator()
+        cal.SD = self.SD
+        cal.lines = self.lines
+        cal.map = Line.map
+        cal.ps= ps
+        self.cal = cal
+
+        self.initial_D = self.cal_sigma_for_ddCMA(points=self.init_pts,
+                                                  last_point=self.lines[-1].end_pt
+                                                  )
+        self.initial_vec = self.init_pts.ravel()  # <<< important: flatten for CMA-ES
+        self.N = len(self.initial_vec)
+        print(
+            f"この最適化問題の次元Nは {self.N} です\n"
+            "### INITIAL CHECKPOINTS AND sigma0 SETUP COMPLETED ###\n"
+            "### MOVED TO THE OPTIMIZATION PROCESS ###\n"
+        )
+
+    def CMAES(self):
+        # compute auto scaling coefficients from initial solution
+        self.compute_cost_weights(self.init_pts)
+
+        # --- CMA-ES expects 1D mean (N,) and sigma0 of same length ---
+        ddcma = DdCma(xmean0=self.initial_vec, sigma0=self.initial_D, seed=self.ps.seed)
+        checker = Checker(ddcma)
+        logger = Logger(ddcma, prefix=f"{self.SAVE_DIR}/{self.port['name']}/log")
+
+        NEVAL_STANDARD = ddcma.lam * 5000
+        print("Start with first population size:", ddcma.lam)
+        print("Dimension:", ddcma.N)
+        print(f"NEVAL_STANDARD: {NEVAL_STANDARD}")
+        print("Path optimization start\n")
+
+        total_neval = 0
+        best_dict: dict[int, dict] = {}
+        time_start = time.time()
+        cur_seed = int(self.ps.seed)
+
+        for restart in range(self.ps.restarts):
+            is_satisfied = False
+            best_dict[restart] = {
+                "best_cost_so_far": float("inf"),
+                "best_mean_sofar": None,
+                "calculation_time": None,
+                "cp_list": None,
+                "mp_list": None,
+                "psi_list_at_cp": None,
+                "psi_list_at_mp": None,
+            }
+
+            t0 = time.time()
+
+            # --- Progress bar: show only Restart, %, eval/s, 試行数/Max, best_sofar ---
+            pbar = tqdm(
+                total=NEVAL_STANDARD,
+                desc=f"Restart {restart}",
+                dynamic_ncols=True,
+                bar_format="{desc}: {percentage:.0f}%|{bar}| {postfix}",
+                mininterval=0.2,
+                smoothing=0.1,
+            )
+            last_neval = ddcma.neval
+
+            def _refresh_postfix():
+                rate = pbar.format_dict.get("rate")
+                eval_per_s = f"{rate:.1f}" if rate is not None else "–"
+                trials_str = f"{ddcma.neval}/{NEVAL_STANDARD}"
+                best_sofar = best_dict[restart]["best_cost_so_far"]
+                pbar.set_postfix_str(
+                    f"eval/s={eval_per_s}  trials={trials_str}  best={best_sofar:.6g}"
+                )
+
+            while not is_satisfied:
+                ddcma.onestep(func=self.path_evaluate, check=self.enforce_max_turn_angle)
+
+                best_cost = float(np.min(ddcma.arf))
+                best_mean = ddcma.arx[int(ddcma.idx[0])].copy()
+
+                if best_cost < best_dict[restart]["best_cost_so_far"]:
+                    best_dict[restart]["best_cost_so_far"] = best_cost
+                    best_dict[restart]["best_mean_sofar"] = best_mean
+
+                is_satisfied, condition = checker()
+
+                # Update progress by increase in evaluation count
+                if ddcma.neval > last_neval:
+                    pbar.update(ddcma.neval - last_neval)
+                    last_neval = ddcma.neval
+                    _refresh_postfix()
+
+                if ddcma.t % 10 == 0:
+                    pbar.write(
+                        f"neval:{ddcma.neval :<6}  "
+                        f"cost:{best_cost:<10.9g}  "
+                        f"best:{best_dict[restart]['best_cost_so_far']:<10.9g}"
+                    )
+                    logger()
+
+            # final bar state
+            _refresh_postfix()
+            pbar.close()
+
+            logger(condition)
+            elapsed = time.time() - t0
+            best_dict[restart]["calculation_time"] = elapsed
+            print(f"Terminated with condition: {condition}")
+            print(f"Restart {restart} time: {elapsed:.2f} s")
+
+            cp_list, mp_list, psi_list_at_cp, psi_list_at_mp = self.figure_output(
+                best_dict[restart]["best_mean_sofar"], restart, initial_points=self.initial_points
+            )
+            best_dict[restart]["cp_list"] = cp_list
+            best_dict[restart]["mp_list"] = mp_list
+            best_dict[restart]["psi_list_at_cp"] = psi_list_at_cp
+            best_dict[restart]["psi_list_at_mp"] = psi_list_at_mp
+
+            total_neval += ddcma.neval
+            print(f"total number of evaluate function calls: {total_neval}\n")
+
+            if total_neval < NEVAL_STANDARD:
+                popsize = ddcma.lam if not self.ps.increase_popsize_on_restart else ddcma.lam * 2
+                cur_seed *= 2
+                # restart from the SAME initial mean as legacy code
+                ddcma = DdCma(xmean0=self.initial_vec, sigma0=self.initial_D, lam=popsize, seed=cur_seed)
+                checker = Checker(ddcma)
+                logger.setcma(ddcma)
+                print(f"Restart with popsize: {ddcma.lam}")
+            else:
+                print("Path optimization completed")
+                break
+
+        self.cma_caltime = time.time() - time_start
+        print(
+            f"Path optimization completed in {self.cma_caltime:.2f} s.\n\n"
+            f"best_cost_so_far の値とその値を記録した平均の遷移:\n{'='*50}\n"
+        )
+
+        self.logger = logger
+        self.best_dict = best_dict
 
     def read_csv(self):
         self.port = self.dict_of_port(self.ps.port_number)
@@ -174,7 +404,7 @@ class MakeLine:
         os.makedirs(SAVE_DIR, exist_ok=True)
         print(f"target : {self.port["name"]}")
 
-        # Data Frames
+        # Map
         ## port
         port_csv=f"raw_datas/tmp/coordinates_of_port/_{self.port["name"]}.csv"
 
@@ -195,12 +425,24 @@ class MakeLine:
         ## captain's loute
         df_cap = glob.glob(f"raw_datas/tmp/_{self.port['name']}/*.csv")
 
+        # CMA-ES
+        ## Ship Domain
+        ### setup
+        SD_setup_csv = "outputs/303/mirror5/fitting_parameter.csv"
+
+        ### something important
+        debug_csv = "raw_datas/tmp/GuidelineFit_debug.csv"
+        df_debug = pd.read_csv(debug_csv)
+
+        # save
+        self.SAVE_DIR = SAVE_DIR
         self.port_csv = port_csv
         self.df_map = df_map
         self.df_lane = df_lane
         self.df_buoy = df_buoy
         self.df_cap = df_cap
-        self.SAVE_DIR = SAVE_DIR
+        self.SD_setup_csv = SD_setup_csv
+        self.df_debug = df_debug
 
         Line.hor_range = self.port["hor_range"]
         Line.ver_range = self.port["ver_range"]
@@ -392,15 +634,124 @@ class MakeLine:
             pts_list.append(np.asarray(ln.fixed_pt))
         pts = np.vstack(pts_list[::-1])
 
-        # captain route in see map
         ax2.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
-
-        # expected route
-        # init_pts, _ = Beaier.bezier(pts, num=400)
-        # ax2.plot(init_pts[:, 1], init_pts[:, 0], color="blue", linestyle='-')
         plt.savefig(os.path.join(self.SAVE_DIR, "init route.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         print("init route saved\n")
+
+        self.init_pts = self.resampling(pts, num=20)
+
+    def resampling(self, pts, num):
+        # cal all length and sum
+        d = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
+        s = np.concatenate([[0.0], np.cumsum(d)])
+        total = s[-1]
+
+        # separate
+        dt = np.linspace(0.0, total, num + 1)
+        idx = np.searchsorted(s, dt, side="right") - 1
+        idx = np.clip(idx, 0, len(d) - 1)
+        seg_s0 = s[idx]
+        seg_len = d[idx]
+        alpha = (dt - seg_s0) / np.where(seg_len == 0, 1.0, seg_len)  # avoid /0
+        p0 = pts[idx]
+        p1 = pts[idx + 1]
+        out = p0 + (p1 - p0) * alpha[:, None]
+        return out
+    
+    # for CMA-ES
+
+    def cal_sigma_for_ddCMA(
+        self,
+        points: np.ndarray,
+        last_point: Tuple[float, float],
+        *,
+        min_sigma: float = 5.0,
+        scale: float = 0.5,
+    ) -> np.ndarray:
+        ver = points[:, 0]
+        hor = points[:, 1]
+        ver_diffs = np.abs(np.diff(ver, append=last_point[0])) * scale
+        hor_diffs = np.abs(np.diff(hor, append=last_point[1])) * scale
+        ver_diffs = np.maximum(ver_diffs, min_sigma)
+        hor_diffs = np.maximum(hor_diffs, min_sigma)
+        return np.column_stack((ver_diffs, hor_diffs)).ravel()
+    
+    def compute_cost_weights(self, pts):
+        """
+        評価関数を計算するときに、ある1つの要素のみが影響しすぎないようにするための関数
+        ex) L:100, SD:1000000 とかだとSDだけでほとんど決まってしまう
+        """
+        cal = self.cal
+        start_pt = pts[0]; end_pt = pts[-1]
+
+        # length
+        # 航路長の基準を作る
+        straight_length = np.linalg.norm(start_pt - end_pt)
+        d = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
+        s = np.concatenate([[0.0], np.cumsum(d)])
+        total_length = s[-1]
+        ratio = (total_length / straight_length) * 100 - 100  # [%]
+
+        # Ship Domain
+        # 衝突している点の数を数える
+        ## on point
+        SD_cost = 0.0
+        for j in range(1, len(pts) - 1):
+            SD_cost += cal.ShipDomain(pts[j - 1], pts[j], pts[j + 1])
+
+        ## mid point
+        for j in range(0, len(pts) - 1):
+            mid = (pts[j] + pts[j + 1]) / 2
+            parent = pts[j - 1] if j - 1 >= 0 else pts[j]
+            child  = pts[j + 2] if j + 2 < len(pts) else pts[j+1]
+            SD_cost += cal.ShipDomain(parent, mid, child)
+
+        return ratio
+
+    
+    def enforce_max_turn_angle(self, X: np.ndarray) -> np.ndarray:
+
+        def selective_laplacian_smoothing(poly, max_deg=60.0, n_iter=10, alpha=0.7):
+            poly = np.asarray(poly, float).copy()
+            for _ in range(n_iter):
+                v1 = poly[1:-1] - poly[:-2]
+                v2 = poly[2:]   - poly[1:-1]
+                a1 = np.arctan2(v1[:,1], v1[:,0])
+                a2 = np.arctan2(v2[:,1], v2[:,0])
+                deg  = (a2 - a1 + np.pi) % (2*np.pi) - np.pi
+                ang = np.degrees(np.abs(deg))
+
+                bad = np.where(ang > max_deg)[0] + 1  # 折れ点の index（1..M-2）
+                for i in bad:
+                    mid = (poly[i-1] + poly[i+1]) / 2
+                    poly[i] = (1 - alpha) * poly[i] + alpha * mid
+            return poly
+        
+        arr = np.asarray(X, float)
+        if arr.ndim == 1:
+            arr = arr[None, :]
+
+        out = arr.copy()
+
+        origin = np.asarray(self.origin_pt, float)
+        last   = np.asarray(self.last_pt, float)
+
+        for k in range(out.shape[0]):
+            pts = out[k].reshape(-1, 2)
+            poly = np.vstack([origin, pts, last])
+
+            poly2 = selective_laplacian_smoothing(
+                poly,
+                max_deg=self.ps.MAX_ANGLE_DEG,
+                n_iter=10,
+                alpha=0.7
+            )
+
+            pts[:] = poly2[1:-1]
+            out[k] = pts.reshape(-1)
+
+        return out if X.ndim == 2 else out[0]
 
     def dict_of_port(self, num):
         dictionary_of_port = {
