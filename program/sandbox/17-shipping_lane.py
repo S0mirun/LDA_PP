@@ -139,7 +139,6 @@ def cal_intersect_pt(ln1, ln2):
     u = cross_ca / cross_ab
     return p3 + u * b
 
-
 def cross_judge(l1, l2):
     """
     l1, l2 : Lineで定義された直線
@@ -252,12 +251,12 @@ class MakeLine:
         angle = float(df['Psi[deg]'].iloc[0])
         img_rot = ndimage.rotate(img, angle, reshape=True)
         img_rot = np.clip(img_rot, 0.0, 1.0)
-        imagebox = OffsetImage(img_rot, zoom=0.5)
+        imagebox = OffsetImage(img_rot, zoom=0.3)
         ab = AnnotationBbox(
             imagebox,
-            (0, 1), # ax1's upper left
+            (0, 1),
             xycoords='axes fraction',
-            box_alignment=(0, 1), # .png's upper left
+            box_alignment=(0, 1),
             frameon=False,
             pad=0.0,
         )
@@ -295,7 +294,6 @@ class MakeLine:
 
             mid_1 = (lane_pts[0] + lane_pts[1]) / 2
             mid_2 = (lane_pts[2] + lane_pts[3]) / 2
-
             L_lane = Line(fixed_pt=np.array((mid_1)), theta=cal_angle(mid_1, mid_2))
             L_lane.extent_fixed_pt()
             lines.append(L_lane)
@@ -323,7 +321,9 @@ class MakeLine:
         for ln in lines:
             pts = np.vstack([ln.fixed_pt, ln.end_pt])
             h, = ax1.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
-            handles.append(h)
+            h_fixed, = ax1.plot(ln.fixed_pt[1], ln.fixed_pt[0], marker='o', linestyle='None', color='k')
+            h_end, = ax1.plot(ln.end_pt[1], ln.end_pt[0], marker='o', linestyle='None', color='g')
+            handles.extend([h, h_fixed, h_end])
         plt.savefig(os.path.join(self.SAVE_DIR, "init line.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         print("\ninit line saved\n")
@@ -339,32 +339,40 @@ class MakeLine:
         for i in range(len(lines) - 2):
             lines[i+1].set_parent(lines[i])
 
-        # check nearlest intersection
-        L_birth = lines[-1]
-        shortest = np.linalg.norm(L_birth.fixed_pt - L_birth.end_pt); idx = None
-        for i in range(len(lines) - 1):
-            if cross_judge(lines[i], L_birth):
-                intersect_pt = cal_intersect_pt(lines[i], L_birth)
-                length = np.linalg.norm(intersect_pt - L_birth.end_pt)
-                if length < shortest:
-                    shortest = length; idx = i      
+        base_idx = len(lines) - 1
+        while True:
+            # check nearlest intersection
+            L_birth = lines[base_idx]; idx = None
+            shortest = np.linalg.norm(L_birth.fixed_pt - L_birth.end_pt)
 
-        if idx != None:
-            L_birth.set_parent(lines[idx])
-        else:
-            longest = 0.0
-            mid = (L_birth.fixed_pt + L_birth.end_pt) / 2
-            for deg_i in range(-90, 91):
-                theta = L_birth.theta + np.deg2rad(deg_i - 180)
-                L = Line(fixed_pt=mid, end_pt=None, theta=theta)
-                length = np.linalg.norm(L.end_pt - L.fixed_pt)
-                if length > longest:
-                    longest = length
-                    best_theta = theta
+            for i in range(base_idx):
+                if cross_judge(lines[i], L_birth):
+                    intersect_pt = cal_intersect_pt(lines[i], L_birth)
+                    length = np.linalg.norm(intersect_pt - L_birth.end_pt)
+                    if length < shortest:
+                        shortest = length; idx = i      
 
-            L_append = Line(fixed_pt=mid, theta=best_theta + np.deg2rad(10))
-            L_append.swap()
-            L_birth.set_parent(L_append)
+            if idx != None:
+                L_birth.set_parent(lines[idx])
+                break
+            else:
+                longest = 0.0
+                mid = (L_birth.fixed_pt + L_birth.end_pt) / 2
+                for deg_i in range(-90, 91):
+                    theta = L_birth.theta + np.deg2rad(deg_i - 180)
+                    L = Line(fixed_pt=mid, end_pt=None, theta=theta)
+                    length = np.linalg.norm(L.end_pt - L.fixed_pt)
+                    if length > longest:
+                        longest = length
+                        best_theta = theta
+
+                L_append = Line(fixed_pt=mid, theta=best_theta + np.deg2rad(5))
+                L_append.swap()
+                L_birth.set_parent(L_append)
+                lines.insert(base_idx, L_append)
+                if len(lines) > 10:
+                    print("too much line")
+                    break
             
         self.show_init_route()
 
@@ -421,14 +429,12 @@ class MakeLine:
             },
             3: {
                 "name": "Else_port1",
-                "buoy": "2-坂出",
                 "start": [2500.0, 0.0],
-                "end": [450.0, 20.0], # [450.0, 20.0]
-                "psi_start": -150,
-                "psi_end": 135, # 135
+                "psi_start": -120,
+                "psi_end": 90,
                 "berth_type": 1,
-                "ver_range": [0, 3000],
-                "hor_range": [-1000, 2000],
+                "ver_range": [-500, 3000],
+                "hor_range": [-1000, 1500],
             },
             4: {
                 "name": "Osaka_port1B",
@@ -454,14 +460,12 @@ class MakeLine:
             },
             6: {
                 "name": "Kashima",
-                "buoy": "4-鹿島",
-                "start": [1750.0, 1900.0],
-                "end": [250.0, -150.0],
-                "psi_start": -120,
-                "psi_end": -170,
+                "start": [1850.0, 1900.0],
+                "psi_start": -150,
+                "psi_end": -90,
                 "berth_type": 2,
-                "ver_range": [-1000, 2000],
-                "hor_range": [-1500, 2000],
+                "ver_range": [-500, 2500],
+                "hor_range": [-1000, 2500],
             },
             7: {
                 "name": "Aomori",
@@ -474,11 +478,9 @@ class MakeLine:
             },
             8: {
                 "name": "Hachinohe",
-                "buoy": "3-八戸",
                 "start": [1350, 2500.0],
-                "end": [100, 250],
                 "psi_start": -110,
-                "psi_end": -160,
+                "psi_end": 90,
                 "berth_type": 2,
                 "ver_range": [-1000, 2500],
                 "hor_range": [-1000, 3000],
@@ -487,9 +489,8 @@ class MakeLine:
                 "name": "Shimizu",
                 "side": "port",
                 "style": "head out",
-                "start": [1400, -2000],
-                "end": [150, 100],
-                "psi_start": 80,
+                "start": [1700, -2800],
+                "psi_start": 150,
                 "psi_end": 0,
                 "berth_type": 2,
                 "ver_range": [-1000, 2000],
