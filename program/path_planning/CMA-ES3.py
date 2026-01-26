@@ -283,7 +283,7 @@ class MakeLine:
         # --- CMA-ES expects 1D mean (N,) and sigma0 of same length ---
         ddcma = DdCma(xmean0=self.initial_vec, sigma0=self.initial_D, seed=self.ps.seed)
         checker = Checker(ddcma)
-        logger = Logger(ddcma, prefix=f"{self.SAVE_DIR}/{self.port['name']}/log")
+        logger = Logger(ddcma, prefix=f"{self.SAVE_DIR}/log")
 
         NEVAL_STANDARD = ddcma.lam * 5000
         print("Start with first population size:", ddcma.lam)
@@ -366,6 +366,7 @@ class MakeLine:
             print(f"Terminated with condition: {condition}")
             print(f"Restart {restart} time: {elapsed:.2f} s")
 
+            self.show_CMA_path(best_dict[restart]["best_mean_sofar"], restart)
             cp_list, mp_list, psi_list_at_cp, psi_list_at_mp = self.figure_output(
                 best_dict[restart]["best_mean_sofar"], restart, initial_points=self.initial_points
             )
@@ -518,7 +519,6 @@ class MakeLine:
 
     def make_init_line(self):
         port = self.port
-        ax1 = self.ax
         lines = []
 
         # for clossing algorithm
@@ -563,21 +563,8 @@ class MakeLine:
         L_birth = Line(fixed_pt=np.array((0.0, margin)), theta=theta)
         L_birth.swap()
         lines.append(L_birth)
-
-        handles = []
-        for ln in lines:
-            pts = np.vstack([ln.fixed_pt, ln.end_pt])
-            h, = ax1.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
-            h_fixed, = ax1.plot(ln.fixed_pt[1], ln.fixed_pt[0], marker='o', linestyle='None', color='k')
-            h_end, = ax1.plot(ln.end_pt[1], ln.end_pt[0], marker='o', linestyle='None', color='g')
-            handles.extend([h, h_fixed, h_end])
-        plt.savefig(os.path.join(self.SAVE_DIR, "init line.png"),
-                    dpi=400, bbox_inches="tight", pad_inches=0.05)
-        print("\ninit line saved\n")
-        for h in handles:
-            h.remove()
-
         self.lines = lines
+        self.show_init_line()
 
     def make_init_route(self):
         lines = self.lines
@@ -623,24 +610,6 @@ class MakeLine:
             
         self.show_init_route()
 
-    def show_init_route(self):
-        ax2 = self.ax
-        lines = self.lines
-
-        ln = lines[-1]
-        pts_list = [np.asarray(ln.end_pt), np.asarray(ln.fixed_pt)]
-        while ln.parent is not None:
-            ln = ln.parent
-            pts_list.append(np.asarray(ln.fixed_pt))
-        pts = np.vstack(pts_list[::-1])
-
-        ax2.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
-        plt.savefig(os.path.join(self.SAVE_DIR, "init route.png"),
-                    dpi=400, bbox_inches="tight", pad_inches=0.05)
-        print("init route saved\n")
-
-        self.init_pts = self.resampling(pts, num=20)
-
     def resampling(self, pts, num):
         # cal all length and sum
         d = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
@@ -659,7 +628,7 @@ class MakeLine:
         out = p0 + (p1 - p0) * alpha[:, None]
         return out
     
-    # for CMA-ES
+    # CMA-ES
 
     def cal_sigma_for_ddCMA(
         self,
@@ -707,7 +676,52 @@ class MakeLine:
             child  = pts[j + 2] if j + 2 < len(pts) else pts[j+1]
             SD_cost += cal.ShipDomain(parent, mid, child)
 
-        return ratio
+        self.length_coeff = 1.0
+        self.SD_coeff = 1.0
+
+    def path_evaluate(self, X):
+        batched = True
+        arr = np.asarray(X, float)
+        if arr.ndim == 1:
+            arr = arr[None, :]
+            batched = False
+
+        cal = self.cal
+        start = self.init_pts[0]
+        end = self.init_pts[-1]
+
+        # prepare for cost calculation
+        straight_length = np.linalg.norm(start - end)
+
+        costs = np.zeros(arr.shape[0], dtype=float)
+        for i in range(arr.shape[0]):
+            pts = arr[i].reshape(-1, 2)
+            poly = np.vstack([start, pts, end])
+            # length
+            # 航路長の基準を作る
+            d = np.linalg.norm(poly[1:] - poly[:-1], axis=1)
+            total_length = d.sum()
+            ratio = (total_length / straight_length) * 100 - 100  # [%]
+
+            # Ship Domain
+            # 衝突している点の数を数える
+            ## on point
+            SD_cost = 0.0
+            for j in range(1, len(pts) - 1):
+                SD_cost += cal.ShipDomain(pts[j - 1], pts[j], pts[j + 1])
+
+            ## mid point
+            for j in range(0, len(pts) - 1):
+                mid = (pts[j] + pts[j + 1]) / 2
+                parent = pts[j - 1] if j - 1 >= 0 else pts[j]
+                child  = pts[j + 2] if j + 2 < len(pts) else pts[j+1]
+                SD_cost += cal.ShipDomain(parent, mid, child)
+
+            total = (self.length_coeff * ratio
+                     + self.SD_coeff * SD_cost)
+            costs[i] = total
+
+        return float(costs[0]) if not batched else costs
 
     
     def enforce_max_turn_angle(self, X: np.ndarray) -> np.ndarray:
@@ -733,13 +747,11 @@ class MakeLine:
             arr = arr[None, :]
 
         out = arr.copy()
-
-        origin = np.asarray(self.origin_pt, float)
-        last   = np.asarray(self.last_pt, float)
+        start = self.init_pts[0]; end = self.init_pts[-1]
 
         for k in range(out.shape[0]):
             pts = out[k].reshape(-1, 2)
-            poly = np.vstack([origin, pts, last])
+            poly = np.vstack([start, pts, end])
 
             poly2 = selective_laplacian_smoothing(
                 poly,
@@ -752,6 +764,55 @@ class MakeLine:
             out[k] = pts.reshape(-1)
 
         return out if X.ndim == 2 else out[0]
+    
+    # show map
+    def show_init_line(self):
+        ax1 = self.ax
+        lines = self.lines
+
+        handles = []
+        for ln in lines:
+            pts = np.vstack([ln.fixed_pt, ln.end_pt])
+            h, = ax1.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
+            h_fixed, = ax1.plot(ln.fixed_pt[1], ln.fixed_pt[0], marker='o', linestyle='None', color='k')
+            h_end, = ax1.plot(ln.end_pt[1], ln.end_pt[0], marker='o', linestyle='None', color='g')
+            handles.extend([h, h_fixed, h_end])
+        plt.savefig(os.path.join(self.SAVE_DIR, "init line.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        print("\ninit line saved\n")
+        for h in handles:
+            h.remove()
+
+    def show_init_route(self):
+        ax2 = self.ax
+        lines = self.lines
+
+        ln = lines[-1]
+        pts_list = [np.asarray(ln.end_pt), np.asarray(ln.fixed_pt)]
+        while ln.parent is not None:
+            ln = ln.parent
+            pts_list.append(np.asarray(ln.fixed_pt))
+        pts = np.vstack(pts_list[::-1])
+        h, =ax2.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
+        plt.savefig(os.path.join(self.SAVE_DIR, "init route.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        print("init route saved\n")
+
+        h.remove()
+        self.init_pts = self.resampling(pts, num=20)
+
+    def show_CMA_path(self, best_mean, restart):
+        ax3 = self.ax
+        start = self.init_pts[0]; end = self.init_pts[-1]
+
+        pts = np.asarray(best_mean, float).reshape(-1, 2)
+        path = np.vstack([start, pts, end])
+
+        h, =ax3.plot(path[:, 1], path[:, 0], color="red", linestyle='-')
+        ax3.scatter(path[:, 1], path[:, 0], s=12, marker="o")
+        plt.savefig(os.path.join(self.SAVE_DIR, f"CMA route ver {restart}.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        print(f"CMA route ver {restart} saved")
 
     def dict_of_port(self, num):
         dictionary_of_port = {
