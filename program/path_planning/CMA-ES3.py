@@ -27,7 +27,7 @@ dirname = os.path.splitext(os.path.basename(__file__))[0]
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 9
+        self.port_number: int = 2
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -120,12 +120,15 @@ class CostCalculator:
         self.lines = None
 
     def ShipDomain(self, parent_pt, current_pt, child_pt):
+        """
+        岸壁との接触を shapely により判定。
+
+        """
         SD = self.SD
         lines = self.lines
         theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(10))
 
-        distance = np.linalg.norm(current_pt - lines[-1].end_pt)
-        speed = min(self.ps.MAX_SPEED_KTS, SD.b_ave * distance ** SD.a_ave + SD.a_SD * distance ** SD.a_SD)
+        speed = cal_speed(self, current_pt, lines[-1].end_pt)
         psi = cal_psi(parent_pt, current_pt, child_pt)
 
         r_list = []
@@ -143,6 +146,10 @@ class CostCalculator:
         n_hit = int(np.count_nonzero(hit))
 
         return n_hit
+    
+    def Shipping_Lane(self, current_pt):
+        pass
+
     
 
 def convert(df, port_file, col_lat="lat", col_lon="lon"):
@@ -193,6 +200,9 @@ def cal_intersect_pt(ln1, ln2):
     return p3 + u * b
 
 def cal_psi(parent_pt, current_pt, child_pt):
+    """
+    船首方位角の計算。北が0, 時計回りが正
+    """
     ver_p, hor_p = parent_pt
     ver_c, hor_c = current_pt
     ver_n, hor_n = child_pt
@@ -214,6 +224,16 @@ def cal_psi(parent_pt, current_pt, child_pt):
     psi = (psi + np.pi) % (2.0 * np.pi) - np.pi
     return psi
 
+def cal_speed(self, pt, base_pt):
+    SD = self.SD
+    distance = np.linalg.norm(pt - base_pt)
+    speed = SD.b_ave * distance ** SD.a_ave + SD.a_SD * distance ** SD.a_SD
+    if self.ps.MAX_SPEED_KTS < speed:
+        return self.ps.MAX_SPEED_KTS
+    if self.ps.MIN_SPEED_KTS > speed:
+        return self.ps.MIN_SPEED_KTS
+    return speed
+
 def cross_judge(l1, l2):
     """
     l1, l2 : Lineで定義された直線
@@ -234,10 +254,14 @@ class MakeLine:
         self.ps = ps
 
     def main(self):
+        self.prepare()
+        self.CMAES()
+        self.print_result()
+
+    def prepare(self):
         self.prepare_for_init_route()
         self.prepare_for_SD()
         self.prepare_for_CMAES()
-        self.CMAES()
 
     def prepare_for_init_route(self):
         self.read_csv()
@@ -256,6 +280,7 @@ class MakeLine:
         SD.b_SD = self.df_debug["b_SD"].values[0]
 
         self.SD = SD
+        print("Ship Domain set up complete\n")
 
     def prepare_for_CMAES(self):
         cal = CostCalculator()
@@ -265,6 +290,8 @@ class MakeLine:
         cal.ps= ps
         self.cal = cal
 
+        self.init_pts = self.resampling(self.init_route)
+        print("initial point calculated\n")
         self.initial_D = self.cal_sigma_for_ddCMA(points=self.init_pts,
                                                   last_point=self.lines[-1].end_pt
                                                   )
@@ -365,15 +392,14 @@ class MakeLine:
             best_dict[restart]["calculation_time"] = elapsed
             print(f"Terminated with condition: {condition}")
             print(f"Restart {restart} time: {elapsed:.2f} s")
-
+            
+            # show result
             self.show_CMA_path(best_dict[restart]["best_mean_sofar"], restart)
-            cp_list, mp_list, psi_list_at_cp, psi_list_at_mp = self.figure_output(
-                best_dict[restart]["best_mean_sofar"], restart, initial_points=self.initial_points
-            )
-            best_dict[restart]["cp_list"] = cp_list
-            best_dict[restart]["mp_list"] = mp_list
-            best_dict[restart]["psi_list_at_cp"] = psi_list_at_cp
-            best_dict[restart]["psi_list_at_mp"] = psi_list_at_mp
+            self.CMA_result()
+            best_dict[restart]["cp_list"] = self.path
+            best_dict[restart]["mp_list"] = self.MP_list
+            best_dict[restart]["psi_list_at_cp"] = self.CP_psi_list
+            best_dict[restart]["psi_list_at_mp"] = self.MP_psi_list
 
             total_neval += ddcma.neval
             print(f"total number of evaluate function calls: {total_neval}\n")
@@ -609,24 +635,6 @@ class MakeLine:
                     break
             
         self.show_init_route()
-
-    def resampling(self, pts, num):
-        # cal all length and sum
-        d = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
-        s = np.concatenate([[0.0], np.cumsum(d)])
-        total = s[-1]
-
-        # separate
-        dt = np.linspace(0.0, total, num + 1)
-        idx = np.searchsorted(s, dt, side="right") - 1
-        idx = np.clip(idx, 0, len(d) - 1)
-        seg_s0 = s[idx]
-        seg_len = d[idx]
-        alpha = (dt - seg_s0) / np.where(seg_len == 0, 1.0, seg_len)  # avoid /0
-        p0 = pts[idx]
-        p1 = pts[idx + 1]
-        out = p0 + (p1 - p0) * alpha[:, None]
-        return out
     
     # CMA-ES
 
@@ -677,7 +685,7 @@ class MakeLine:
             SD_cost += cal.ShipDomain(parent, mid, child)
 
         self.length_coeff = 1.0
-        self.SD_coeff = 1.0
+        self.SD_coeff = 10.0
 
     def path_evaluate(self, X):
         batched = True
@@ -705,7 +713,7 @@ class MakeLine:
 
             # Ship Domain
             # 衝突している点の数を数える
-            ## on point
+            ## check point
             SD_cost = 0.0
             for j in range(1, len(pts) - 1):
                 SD_cost += cal.ShipDomain(pts[j - 1], pts[j], pts[j + 1])
@@ -764,7 +772,7 @@ class MakeLine:
             out[k] = pts.reshape(-1)
 
         return out if X.ndim == 2 else out[0]
-    
+     
     # show map
     def show_init_line(self):
         ax1 = self.ax
@@ -799,7 +807,35 @@ class MakeLine:
         print("init route saved\n")
 
         h.remove()
-        self.init_pts = self.resampling(pts, num=20)
+        self.init_route = pts
+
+    def resampling(self, pts):
+        """
+        初期経路に合わせて自動で分割. グリッドを時間で分割
+        """
+        end_pt = pts[-1]
+
+        seg_len = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
+        s_cum = np.concatenate([[0.0], np.cumsum(seg_len)])
+        total_len = s_cum[-1]
+
+        def interp(u):
+            i = np.searchsorted(s_cum, u, side="right") - 1
+            i = int(np.clip(i, 0, len(seg_len) - 1))
+            a = (u - s_cum[i]) / seg_len[i]
+            return pts[i] + (pts[i + 1] - pts[i]) * a
+
+        out = [pts[0].copy()]
+        u = 0.0
+        while u < total_len:
+            curent_pt = interp(u)
+            speed_kt = cal_speed(self, curent_pt, end_pt)
+            speed = speed_kt *1852 / 60
+            u = min(u + speed, total_len)
+            out.append(interp(u) if u < total_len else pts[-1].copy())
+
+        return np.asarray(out, dtype=float)
+
 
     def show_CMA_path(self, best_mean, restart):
         ax3 = self.ax
@@ -813,6 +849,51 @@ class MakeLine:
         plt.savefig(os.path.join(self.SAVE_DIR, f"CMA route ver {restart}.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         print(f"CMA route ver {restart} saved")
+
+        self.path = path
+
+    def CMA_result(self):
+        path = self.path
+        # check point
+        CP_psi_list = []
+        for i in range(1, len(path) - 1):
+            psi_at_cp = cal_psi(path[i-1], path[i], path[i+1])
+            CP_psi_list.append(psi_at_cp)
+
+        # mid point
+        MP_list = []
+        MP_psi_list = []
+        for i in range(0, len(path) - 1):
+            mid = (path[i] + path[i + 1]) / 2
+            parent = path[i - 1] if i - 1 >= 0 else path[i]
+            child  = path[i + 2] if i + 2 < len(path) else path[i+1]
+            psi_at_mp = cal_psi(parent, mid, child)
+            MP_list.append(mid); MP_psi_list.append(psi_at_mp)
+        
+        self.CP_psi_list = CP_psi_list
+        self.MP_list = MP_list
+        self.MP_psi_list = MP_psi_list
+
+    def print_result(self, best_dict):
+        for restart, values in best_dict.items():
+            best_cost_so_far = values["best_cost_so_far"]
+            best_mean_sofar = values["best_mean_sofar"]
+            calculation_time = values["calculation_time"]
+            pairs = "\n".join(
+                f"  ({best_mean_sofar[i]:.6f}, {best_mean_sofar[i+1]:.6f})"
+                for i in range(0, len(best_mean_sofar), 2)
+            )
+            print(
+                f"\n[Restart {restart}]\n"
+                f"  best_cost_so_far: {best_cost_so_far:.6f}    計算時間: {calculation_time:.2f} s\n"
+                f"  best_mean_sofar:\n{pairs}"
+            )
+        print("\n" + "=" * 50 + "\n")
+        smallest_evaluation_key = min(best_dict, key=lambda k: best_dict[k]["best_cost_so_far"])
+        print(f"最も評価値が小さかった試行は {smallest_evaluation_key} 番目\n")
+
+        self.smallest_evaluation_key = smallest_evaluation_key
+
 
     def dict_of_port(self, num):
         dictionary_of_port = {

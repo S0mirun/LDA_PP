@@ -5,6 +5,7 @@ outputs/*
 !/outputs/data
 !/outputs/CMA-ES
 !/outputs/CMA-ES2
+!/outputs/CMA-ES3
 !/outputs/MakeMap
 .DS_Store
 **/.DS_Store
