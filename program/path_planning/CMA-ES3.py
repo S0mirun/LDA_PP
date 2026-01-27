@@ -10,6 +10,7 @@ from matplotlib.patches import Polygon as MplPolygon
 import numpy as np
 import pandas as pd
 from scipy import ndimage
+import shapely
 from shapely import contains_xy, intersects_xy, prepare
 from shapely.geometry import Polygon, Point
 from typing import ClassVar, Tuple
@@ -63,6 +64,7 @@ class Line:
     ver_range:ClassVar[Tuple[float, float] | None] = None
     hor_range:ClassVar[Tuple[float, float] | None] = None
     map:ClassVar = None
+    lane:ClassVar = None
 
     def __post_init__(self):
         if self.end_pt == None:
@@ -119,10 +121,10 @@ class CostCalculator:
         self.map = None
         self.lines = None
 
-    def ShipDomain(self, parent_pt, current_pt, child_pt):
+    def ShipDomain_penalty(self, parent_pt, current_pt, child_pt):
         """
         岸壁との接触を shapely により判定。
-
+        壁の中にある点の数をばつとして与える。
         """
         SD = self.SD
         lines = self.lines
@@ -142,15 +144,64 @@ class CostCalculator:
         ])
         # count
         xs = domain_xy[:, 1]; ys = domain_xy[:, 0]
-        hit = intersects_xy(self.map, xs, ys)
+        hit = intersects_xy(Line.map, xs, ys)
         n_hit = int(np.count_nonzero(hit))
 
         return n_hit
     
-    def Shipping_Lane(self, current_pt):
-        pass
+    def spacing_penalty(self, current_pt, child_pt):
+        """
+        CMA-ESで動かしている点は1分後の船体の位置を表している。
+        これが近すぎる/遠すぎるときに罰を与える。
+        """
+        lines = self.lines
 
+        d_max = self.ps.MAX_SPEED_KTS * 1852 / 60 # [m]
+        d_min = self.ps.MIN_SPEED_KTS * 1852 / 60 # [m]
+        dist = np.linalg.norm(current_pt - child_pt)
+
+        # rangeの外にあると大きな罰を与える
+        out_penalty = max(0, dist - d_min) ** 2 + max(0, d_max - dist) ** 2
+
+        # 理想的な距離からの変化に応じて軽い罰を与える
+        speed = cal_speed(self, current_pt, lines[-1].end_pt)
+        ideal_dist = speed * 1852 / 60 # [m/min]
+        space_penalty = (abs(dist - ideal_dist) / ideal_dist) * 100 # [%]
+        return out_penalty + space_penalty
     
+    def ShippingLaneInit(self, init_pts):
+        self.lane_poly = Line.lane
+        self.init_pts = init_pts
+        pts = shapely.points(init_pts[:, 1], init_pts[:, 0])
+
+        self.inside0 = shapely.covers(self.lane_poly, pts)
+        print(self.lane_poly.covers(pts))
+
+    def ShippingLane(self, pts_vh):
+        """
+        船は基本的に航路帯を航行する。
+        初期経路で航路帯にあったものは、航路帯から外れると大きな罰を与える
+        """
+        pts = shapely.points(pts_vh[:, 1], pts_vh[:, 0])
+        inside = shapely.covers(self.lane_poly, pts)
+
+        base = self.inside0
+        
+        in_mask = base & inside
+        pen = 0.0
+        if np.any(in_mask):
+            dvh = pts_vh[in_mask] - self.init_pts[in_mask]
+            d = np.linalg.norm(dvh, axis=1)
+            pen += 100 ** (float(d.sum()))
+
+        out_mask = base & (~inside)
+        if np.any(out_mask):
+            dvh = pts_vh[out_mask] - self.init_pts[out_mask]
+            d = np.linalg.norm(dvh, axis=1)
+            pen += 1000 * float(out_mask.sum())
+            pen += float(np.square(d).sum())
+
+        return pen
 
 def convert(df, port_file, col_lat="lat", col_lon="lon"):
     df_coord = pd.read_csv(port_file)
@@ -256,7 +307,7 @@ class MakeLine:
     def main(self):
         self.prepare()
         self.CMAES()
-        self.print_result()
+        self.print_result(self.best_dict)
 
     def prepare(self):
         self.prepare_for_init_route()
@@ -286,7 +337,6 @@ class MakeLine:
         cal = CostCalculator()
         cal.SD = self.SD
         cal.lines = self.lines
-        cal.map = Line.map
         cal.ps= ps
         self.cal = cal
 
@@ -547,11 +597,11 @@ class MakeLine:
         port = self.port
         lines = []
 
-        # for clossing algorithm
-        coords = self.df_map[["y [m]", "x [m]"]].to_numpy(dtype=float)
-        poly = Polygon(coords)
-        prepare(poly)
-        Line.map = poly
+        # for crossing algorithm
+        coords_map = self.df_map[["y [m]", "x [m]"]].to_numpy(dtype=float)
+        poly_map = Polygon(coords_map)
+        prepare(poly_map)
+        Line.map = poly_map
 
         # from start point
         L_start = Line(fixed_pt=port["start"], theta=np.deg2rad(port["psi_start"]))
@@ -570,6 +620,10 @@ class MakeLine:
             L_lane = Line(fixed_pt=np.array((mid_1)), theta=theta)
             L_lane.extent_fixed_pt()
             lines.append(L_lane)
+
+            # for crossing algorithm
+            poly_lane = Polygon(lane_pts)
+            Line.lane = poly_lane
             print(f"shipping lane {pid} complete")
 
         # from birth point
@@ -660,32 +714,24 @@ class MakeLine:
         ex) L:100, SD:1000000 とかだとSDだけでほとんど決まってしまう
         """
         cal = self.cal
-        start_pt = pts[0]; end_pt = pts[-1]
 
-        # length
-        # 航路長の基準を作る
-        straight_length = np.linalg.norm(start_pt - end_pt)
-        d = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
-        s = np.concatenate([[0.0], np.cumsum(d)])
-        total_length = s[-1]
-        ratio = (total_length / straight_length) * 100 - 100  # [%]
+        start = self.init_pts[0]
+        end = self.init_pts[-1]
+        poly = np.vstack([start, pts, end])
+        # Space Penalty
+        space_cost = 0.0
+        for j in range(len(pts) - 1):
+            space_cost += cal.spacing_penalty(pts[j], pts[j+1])
 
-        # Ship Domain
-        # 衝突している点の数を数える
-        ## on point
-        SD_cost = 0.0
-        for j in range(1, len(pts) - 1):
-            SD_cost += cal.ShipDomain(pts[j - 1], pts[j], pts[j + 1])
+        # shiping lane init
+        cal.ShippingLaneInit(poly)
 
-        ## mid point
-        for j in range(0, len(pts) - 1):
-            mid = (pts[j] + pts[j + 1]) / 2
-            parent = pts[j - 1] if j - 1 >= 0 else pts[j]
-            child  = pts[j + 2] if j + 2 < len(pts) else pts[j+1]
-            SD_cost += cal.ShipDomain(parent, mid, child)
-
-        self.length_coeff = 1.0
-        self.SD_coeff = 10.0
+        self.length_coeff = 0.1
+        self.SD_coeff = 1.0
+        self.space_coeff = 30.0 / space_cost
+        self.lane_coeff = 1.0
+        print(f"length_coeff : {self.length_coeff}, SD_coeff : {self.SD_coeff}")
+        print(f"space_coeff : {self.space_coeff}, lane_coeff : {self.lane_coeff}\n")
 
     def path_evaluate(self, X):
         batched = True
@@ -711,22 +757,32 @@ class MakeLine:
             total_length = d.sum()
             ratio = (total_length / straight_length) * 100 - 100  # [%]
 
-            # Ship Domain
+            # Ship Domain Penalty
             # 衝突している点の数を数える
             ## check point
             SD_cost = 0.0
-            for j in range(1, len(pts) - 1):
-                SD_cost += cal.ShipDomain(pts[j - 1], pts[j], pts[j + 1])
+            for j in range(1, len(poly) - 1):
+                SD_cost += cal.ShipDomain_penalty(poly[j - 1], poly[j], poly[j + 1])
 
             ## mid point
-            for j in range(0, len(pts) - 1):
-                mid = (pts[j] + pts[j + 1]) / 2
-                parent = pts[j - 1] if j - 1 >= 0 else pts[j]
-                child  = pts[j + 2] if j + 2 < len(pts) else pts[j+1]
-                SD_cost += cal.ShipDomain(parent, mid, child)
+            for j in range(0, len(poly) - 1):
+                mid = (poly[j] + poly[j + 1]) / 2
+                parent = poly[j - 1] if j - 1 >= 0 else poly[j]
+                child  = poly[j + 2] if j + 2 < len(poly) else poly[j+1]
+                SD_cost += cal.ShipDomain_penalty(parent, mid, child)
+
+            # Space Penalty
+            space_cost = 0.0
+            for j in range(len(poly) - 1):
+                space_cost += cal.spacing_penalty(poly[j], poly[j+1])
+
+            # Shippping lane
+            lane_reward = cal.ShippingLane(poly)
 
             total = (self.length_coeff * ratio
-                     + self.SD_coeff * SD_cost)
+                     + self.SD_coeff * SD_cost
+                     + self.space_coeff * space_cost
+                     + self.lane_coeff * lane_reward)
             costs[i] = total
 
         return float(costs[0]) if not batched else costs
@@ -830,7 +886,7 @@ class MakeLine:
         while u < total_len:
             curent_pt = interp(u)
             speed_kt = cal_speed(self, curent_pt, end_pt)
-            speed = speed_kt *1852 / 60
+            speed = speed_kt *1852 / 60 # [m/min]
             u = min(u + speed, total_len)
             out.append(interp(u) if u < total_len else pts[-1].copy())
 
