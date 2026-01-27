@@ -175,31 +175,33 @@ class CostCalculator:
         pts = shapely.points(init_pts[:, 1], init_pts[:, 0])
 
         self.inside0 = shapely.covers(self.lane_poly, pts)
-        print(self.lane_poly.covers(pts))
+        inside = shapely.covers(Line.lane, pts)
+        print("inside count:", inside.sum(), "/", len(inside), "\n")
 
     def ShippingLane(self, pts_vh):
         """
         船は基本的に航路帯を航行する。
         初期経路で航路帯にあったものは、航路帯から外れると大きな罰を与える
         """
+        p = 2; eps=self.ps.B
+        w = 1e2; w_out = 1e4
         pts = shapely.points(pts_vh[:, 1], pts_vh[:, 0])
-        inside = shapely.covers(self.lane_poly, pts)
+        inside = shapely.contains(self.lane_poly, pts)
 
         base = self.inside0
-        
         in_mask = base & inside
+
         pen = 0.0
         if np.any(in_mask):
             dvh = pts_vh[in_mask] - self.init_pts[in_mask]
             d = np.linalg.norm(dvh, axis=1)
-            pen += 100 ** (float(d.sum()))
+            pen += w * float(np.sum((d / eps) ** p))
 
         out_mask = base & (~inside)
         if np.any(out_mask):
             dvh = pts_vh[out_mask] - self.init_pts[out_mask]
             d = np.linalg.norm(dvh, axis=1)
-            pen += 1000 * float(out_mask.sum())
-            pen += float(np.square(d).sum())
+            pen += w_out * float(np.sum((d / eps) ** p))
 
         return pen
 
@@ -278,7 +280,7 @@ def cal_psi(parent_pt, current_pt, child_pt):
 def cal_speed(self, pt, base_pt):
     SD = self.SD
     distance = np.linalg.norm(pt - base_pt)
-    speed = SD.b_ave * distance ** SD.a_ave + SD.a_SD * distance ** SD.a_SD
+    speed = SD.b_ave * distance ** SD.a_ave + SD.b_SD * distance ** SD.a_SD
     if self.ps.MAX_SPEED_KTS < speed:
         return self.ps.MAX_SPEED_KTS
     if self.ps.MIN_SPEED_KTS > speed:
@@ -307,12 +309,15 @@ class MakeLine:
     def main(self):
         self.prepare()
         self.CMAES()
-        self.print_result(self.best_dict)
+        self.result()
 
     def prepare(self):
         self.prepare_for_init_route()
         self.prepare_for_SD()
         self.prepare_for_CMAES()
+
+    def result(self):
+        self.print_result(self.best_dict)
 
     def prepare_for_init_route(self):
         self.read_csv()
@@ -530,6 +535,7 @@ class MakeLine:
     def draw_basemap(self):
         port = self.port
         fig, ax = self.fig, self.ax
+        legends = []
         # map
         map_X, map_Y = self.df_map["x [m]"].values, self.df_map["y [m]"].values
         ax.fill_betweenx(map_X, map_Y, facecolor="gray", alpha=0.3)
@@ -553,6 +559,7 @@ class MakeLine:
                     color='orange', s=20, zorder=4)
         legend_buoy = plt.Line2D([0], [0], marker="o", color="w",
                                     markerfacecolor="orange", markersize=2, label="Buoy Point")
+        legends.append(legend_buoy)
 
         # captain's route
         for df in self.df_cap:
@@ -563,8 +570,8 @@ class MakeLine:
                         markersize = 2, alpha = 0.8, lw = 1.0, zorder = 1)
         legend_captain = plt.Line2D([0], [0],
                                     color = 'gray', ls = '-', marker = 'D',
-                                    markersize = 2, alpha = 0.8, lw = 1.0, label="captain's Route"
-        )
+                                    markersize = 2, alpha = 0.8, lw = 1.0, label="captain's Route")
+        legends.append(legend_captain)
         # compas
         img = mpimg.imread("raw_datas/compass icon2.png")
         df = pd.read_csv(self.port_csv)
@@ -588,10 +595,13 @@ class MakeLine:
         ax.grid()
         ax.set_xlabel(r"$Y\,\rm{[m]}$")
         ax.set_ylabel(r"$X\,\rm{[m]}$")
-        # ax.legend(handles=[legend_initial, legend_way, legend_fixed, legend_buoy, legend_captain, legend_SD])
+        h = ax.legend(handles=legends)
         fig.savefig(os.path.join(self.SAVE_DIR, "base_map.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         print("\nbase map saved\n")
+
+        h.remove()
+        self.regends = legends
 
     def make_init_line(self):
         port = self.port
@@ -608,6 +618,7 @@ class MakeLine:
         lines.append(L_start)
 
         # from shipping lane
+        lane_polys = []
         dist_both_ship = 0.5 * self.ps.L + self.ps.B
         for pid, g in self.df_lane.groupby("polygon_id", sort=True):
             lane_pts = g[['y [m]', 'x [m]']].to_numpy()
@@ -622,9 +633,10 @@ class MakeLine:
             lines.append(L_lane)
 
             # for crossing algorithm
-            poly_lane = Polygon(lane_pts)
-            Line.lane = poly_lane
+            poly_lane = Polygon(lane_pts[:, [1, 0]])
+            lane_polys.append(poly_lane)
             print(f"shipping lane {pid} complete")
+        Line.lane = shapely.union_all(lane_polys)
 
         # from birth point
         margin = 2*self.ps.B
@@ -659,12 +671,19 @@ class MakeLine:
             L_birth = lines[base_idx]; idx = None
             shortest = np.linalg.norm(L_birth.fixed_pt - L_birth.end_pt)
 
-            for i in range(1, base_idx):
-                if cross_judge(lines[i], L_birth):
-                    intersect_pt = cal_intersect_pt(lines[i], L_birth)
+            if base_idx == 1:
+                if cross_judge(lines[0], L_birth):
+                    intersect_pt = cal_intersect_pt(lines[0], L_birth)
                     length = np.linalg.norm(intersect_pt - L_birth.end_pt)
                     if length < shortest:
-                        shortest = length; idx = i      
+                        shortest = length; idx = 0
+            else:
+                for i in range(1, base_idx):
+                    if cross_judge(lines[i], L_birth):
+                        intersect_pt = cal_intersect_pt(lines[i], L_birth)
+                        length = np.linalg.norm(intersect_pt - L_birth.end_pt)
+                        if length < shortest:
+                            shortest = length; idx = i      
 
             if idx != None:
                 L_birth.set_parent(lines[idx])
@@ -721,14 +740,14 @@ class MakeLine:
         # Space Penalty
         space_cost = 0.0
         for j in range(len(pts) - 1):
-            space_cost += cal.spacing_penalty(pts[j], pts[j+1])
+            space_cost += cal.spacing_penalty(poly[j], poly[j+1])
 
         # shiping lane init
         cal.ShippingLaneInit(poly)
 
         self.length_coeff = 0.1
-        self.SD_coeff = 1.0
-        self.space_coeff = 30.0 / space_cost
+        self.SD_coeff = 10.0
+        self.space_coeff = 10.0 / space_cost
         self.lane_coeff = 1.0
         print(f"length_coeff : {self.length_coeff}, SD_coeff : {self.SD_coeff}")
         print(f"space_coeff : {self.space_coeff}, lane_coeff : {self.lane_coeff}\n")
@@ -759,13 +778,16 @@ class MakeLine:
 
             # Ship Domain Penalty
             # 衝突している点の数を数える
-            ## check point
             SD_cost = 0.0
-            for j in range(1, len(poly) - 1):
+            idx = np.where(~cal.inside0)[0]
+            idx = idx[(idx >= 1) & (idx <= len(poly) - 2)]
+
+            ## check point
+            for j in idx:
                 SD_cost += cal.ShipDomain_penalty(poly[j - 1], poly[j], poly[j + 1])
 
             ## mid point
-            for j in range(0, len(poly) - 1):
+            for j in idx:
                 mid = (poly[j] + poly[j + 1]) / 2
                 parent = poly[j - 1] if j - 1 >= 0 else poly[j]
                 child  = poly[j + 2] if j + 2 < len(poly) else poly[j+1]
@@ -831,15 +853,15 @@ class MakeLine:
      
     # show map
     def show_init_line(self):
-        ax1 = self.ax
+        ax = self.ax
         lines = self.lines
 
         handles = []
         for ln in lines:
             pts = np.vstack([ln.fixed_pt, ln.end_pt])
-            h, = ax1.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
-            h_fixed, = ax1.plot(ln.fixed_pt[1], ln.fixed_pt[0], marker='o', linestyle='None', color='k')
-            h_end, = ax1.plot(ln.end_pt[1], ln.end_pt[0], marker='o', linestyle='None', color='g')
+            h, = ax.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
+            h_fixed, = ax.plot(ln.fixed_pt[1], ln.fixed_pt[0], marker='o', linestyle='None', color='k')
+            h_end, = ax.plot(ln.end_pt[1], ln.end_pt[0], marker='o', linestyle='None', color='g')
             handles.extend([h, h_fixed, h_end])
         plt.savefig(os.path.join(self.SAVE_DIR, "init line.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
@@ -848,7 +870,7 @@ class MakeLine:
             h.remove()
 
     def show_init_route(self):
-        ax2 = self.ax
+        ax = self.ax
         lines = self.lines
 
         ln = lines[-1]
@@ -857,7 +879,7 @@ class MakeLine:
             ln = ln.parent
             pts_list.append(np.asarray(ln.fixed_pt))
         pts = np.vstack(pts_list[::-1])
-        h, =ax2.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
+        h, =ax.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
         plt.savefig(os.path.join(self.SAVE_DIR, "init route.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         print("init route saved\n")
@@ -869,6 +891,7 @@ class MakeLine:
         """
         初期経路に合わせて自動で分割. グリッドを時間で分割
         """
+        ax = self.ax
         end_pt = pts[-1]
 
         seg_len = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
@@ -886,26 +909,75 @@ class MakeLine:
         while u < total_len:
             curent_pt = interp(u)
             speed_kt = cal_speed(self, curent_pt, end_pt)
+            if speed_kt == self.ps.MIN_SPEED_KTS:
+                speed_kt = self.ps.MIN_SPEED_KTS * 2
             speed = speed_kt *1852 / 60 # [m/min]
             u = min(u + speed, total_len)
             out.append(interp(u) if u < total_len else pts[-1].copy())
+
+        # show
+        out_pt = np.asarray(out, dtype=float).reshape(-1, 2)
+        ax.plot(out_pt[:, 1], out_pt[:, 0], color="blue", linestyle='-')
+        ax.scatter(out_pt[:, 1], out_pt[:, 0], s=12, marker="o", c="blue")
+        legend_init_path = plt.Line2D([0], [0],
+                                    color = 'blue', ls = '-', marker = 'D',
+                                    markersize = 2, lw = 1.0, label="Initial Path")
+        self.regends.append(legend_init_path)
+        h = ax.legend(handles=self.regends)
+        plt.savefig(os.path.join(self.SAVE_DIR, "CMA route init.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        print("init route saved\n")
+
+        h.remove()
 
         return np.asarray(out, dtype=float)
 
 
     def show_CMA_path(self, best_mean, restart):
-        ax3 = self.ax
+        ax = self.ax
+        SD = self.SD
         start = self.init_pts[0]; end = self.init_pts[-1]
+        h_list = []
 
         pts = np.asarray(best_mean, float).reshape(-1, 2)
         path = np.vstack([start, pts, end])
 
-        h, =ax3.plot(path[:, 1], path[:, 0], color="red", linestyle='-')
-        ax3.scatter(path[:, 1], path[:, 0], s=12, marker="o")
+        # path, point
+        h1, = ax.plot(path[:, 1], path[:, 0], color="red", linestyle='-')
+        h2 = ax.scatter(path[:, 1], path[:, 0], c="r",s=12, marker="o")
+        h_list.append(h1); h_list.append(h2)
+        if restart == 0:
+            legend_path = plt.Line2D([0], [0],
+                                        color = 'red', ls = '-', marker = 'D',
+                                        markersize = 2, lw = 1.0, label="CMA result")
+            self.regends.append(legend_path)
+        
+
+        # ship domain
+        theta = np.deg2rad(np.arange(0, 360, 10))
+        theta_c = np.r_[theta, theta[0]] 
+        for i in range(1, len(path)-1):
+            speed = cal_speed(self, path[i], path[-1])
+            psi = cal_psi(path[i-1], path[i], path[i+1])
+            ang = theta_c + psi
+
+            r = np.array([SD.distance(speed, th) for th in theta], dtype=float)
+            r_c = np.r_[r, r[0]]
+
+            xs = path[i][1] + r_c * np.sin(ang)
+            ys = path[i][0] + r_c * np.cos(ang)
+
+            h, = ax.plot(xs, ys, lw=0.5, color='r', ls='--')
+            h_list.append(h)
+
+        h3 = ax.legend(handles=self.regends)
+        h_list.append(h3)
         plt.savefig(os.path.join(self.SAVE_DIR, f"CMA route ver {restart}.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         print(f"CMA route ver {restart} saved")
 
+        for h in h_list:
+            h.remove()
         self.path = path
 
     def CMA_result(self):
