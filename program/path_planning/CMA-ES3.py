@@ -17,6 +17,7 @@ from typing import ClassVar, Tuple
 from tqdm.auto import tqdm
 
 from utils.LDA.ship_geometry import *
+from utils.LDA.ship_geometry import ship_shape_poly
 from utils.PP import Bezier_curve as Bezier
 from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
