@@ -17,6 +17,7 @@ from typing import ClassVar, Tuple
 from tqdm.auto import tqdm
 
 from utils.LDA.ship_geometry import *
+from utils.PP import Bezier_curve as Bezier
 from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
 from utils.PP.MultiPlot import RealTraj
@@ -38,6 +39,7 @@ class Setting:
         self.B = 16.0
 
         # CMA-ES
+        self.target = "point"
         self.seed: int = 42
         self.MAX_SPEED_KTS: float = 9.5  # [knots]
         self.MIN_SPEED_KTS: float = 1.5  # [knots]
@@ -204,6 +206,12 @@ class CostCalculator:
             pen += w_out * float(np.sum((d / eps) ** p))
 
         return pen
+    
+    def turnig_angle(self, pt, beta):
+        straight = np.linalg.norm(self.lines[0].end_pt - self.lines[-1].end_pt)
+        dist = np.linalg.norm(pt - self.lines[-1].end_pt)
+        return (dist / straight) * beta
+
 
 def convert(df, port_file, col_lat="lat", col_lon="lon"):
     df_coord = pd.read_csv(port_file)
@@ -346,6 +354,8 @@ class MakeLine:
         self.cal = cal
 
         self.init_pts = self.resampling(self.init_route)
+        self.init_spi_list, self.init_beta_list = self.set_beta(self.init_pts)
+        self.show_beta_pt(self.init_pts, self.init_spi_list, self.init_beta_list)
         print("initial point calculated\n")
         self.initial_D = self.cal_sigma_for_ddCMA(points=self.init_pts,
                                                   last_point=self.lines[-1].end_pt
@@ -639,16 +649,13 @@ class MakeLine:
         Line.lane = shapely.union_all(lane_polys)
 
         # from birth point
+        theta = 0
         margin = 2*self.ps.B
         if port["psi_end"] == 0:
-            if port["side"] == "port":
-                theta = 10
-                margin = 2*self.ps.B
-            elif port["side"] == "starboard":
-                theta = 0
+            if port["side"] == "starboard":
                 margin = -self.ps.B
             if port["style"] == "head in":
-                theta = 180 - theta
+                theta = 180
             theta = np.deg2rad(theta)
         else:
             theta = np.deg2rad(port["psi_end"] + 10)
@@ -768,44 +775,52 @@ class MakeLine:
 
         costs = np.zeros(arr.shape[0], dtype=float)
         for i in range(arr.shape[0]):
-            pts = arr[i].reshape(-1, 2)
-            poly = np.vstack([start, pts, end])
-            # length
-            # 航路長の基準を作る
-            d = np.linalg.norm(poly[1:] - poly[:-1], axis=1)
-            total_length = d.sum()
-            ratio = (total_length / straight_length) * 100 - 100  # [%]
+            if self.ps.target == "point":
+                pts = arr[i].reshape(-1, 2)
+                poly = np.vstack([start, pts, end])
+                # length
+                # 航路長の基準を作る
+                d = np.linalg.norm(poly[1:] - poly[:-1], axis=1)
+                total_length = d.sum()
+                ratio = (total_length / straight_length) * 100 - 100  # [%]
 
-            # Ship Domain Penalty
-            # 衝突している点の数を数える
-            SD_cost = 0.0
-            idx = np.where(~cal.inside0)[0]
-            idx = idx[(idx >= 1) & (idx <= len(poly) - 2)]
+                # Ship Domain Penalty
+                # 衝突している点の数を数える
+                SD_cost = 0.0
+                idx = np.where(~cal.inside0)[0]
+                idx = idx[(idx >= 1) & (idx <= len(poly) - 2)]
 
-            ## check point
-            for j in idx:
-                SD_cost += cal.ShipDomain_penalty(poly[j - 1], poly[j], poly[j + 1])
+                ## check point
+                for j in idx:
+                    SD_cost += cal.ShipDomain_penalty(poly[j - 1], poly[j], poly[j + 1])
 
-            ## mid point
-            for j in idx:
-                mid = (poly[j] + poly[j + 1]) / 2
-                parent = poly[j - 1] if j - 1 >= 0 else poly[j]
-                child  = poly[j + 2] if j + 2 < len(poly) else poly[j+1]
-                SD_cost += cal.ShipDomain_penalty(parent, mid, child)
+                ## mid point
+                for j in idx:
+                    mid = (poly[j] + poly[j + 1]) / 2
+                    parent = poly[j - 1] if j - 1 >= 0 else poly[j]
+                    child  = poly[j + 2] if j + 2 < len(poly) else poly[j+1]
+                    SD_cost += cal.ShipDomain_penalty(parent, mid, child)
 
-            # Space Penalty
-            space_cost = 0.0
-            for j in range(len(poly) - 1):
-                space_cost += cal.spacing_penalty(poly[j], poly[j+1])
+                # Space Penalty
+                space_cost = 0.0
+                for j in range(len(poly) - 1):
+                    space_cost += cal.spacing_penalty(poly[j], poly[j+1])
 
-            # Shippping lane
-            lane_reward = cal.ShippingLane(poly)
+                # Shippping lane
+                lane_reward = cal.ShippingLane(poly)
 
-            total = (self.length_coeff * ratio
-                     + self.SD_coeff * SD_cost
-                     + self.space_coeff * space_cost
-                     + self.lane_coeff * lane_reward)
-            costs[i] = total
+                total = (self.length_coeff * ratio
+                        + self.SD_coeff * SD_cost
+                        + self.space_coeff * space_cost
+                        + self.lane_coeff * lane_reward)
+                costs[i] = total
+            
+            elif self.ps.target == "beta":
+                beta_list = arr[i].reshape(-1, 1)
+                pts = None
+                for j in range(len(pts)):
+                    pt = pts[j], beta=beta_list[j]
+                    turn_cost = cal.turnig_angle(pt, beta)
 
         return float(costs[0]) if not batched else costs
 
@@ -890,30 +905,50 @@ class MakeLine:
     def resampling(self, pts):
         """
         初期経路に合わせて自動で分割. グリッドを時間で分割
+        pts : 真上のinit_route
         """
         ax = self.ax
         end_pt = pts[-1]
 
-        seg_len = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
-        s_cum = np.concatenate([[0.0], np.cumsum(seg_len)])
-        total_len = s_cum[-1]
+        def cal_total_len(pts):
+            seg_len = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
+            s_cum = np.concatenate([[0.0], np.cumsum(seg_len)])
+            total_len = s_cum[-1]
+            return seg_len, s_cum, total_len
 
-        def interp(u):
+        def interp(u, pts):
+            """
+            u : 開始地点からの距離[m]
+            """
             i = np.searchsorted(s_cum, u, side="right") - 1
             i = int(np.clip(i, 0, len(seg_len) - 1))
             a = (u - s_cum[i]) / seg_len[i]
             return pts[i] + (pts[i + 1] - pts[i]) * a
 
+        # Bezierを使う点とCMAを使う点を分割
+        seg_len, s_cum, total_len = cal_total_len(pts)
+        u_split = np.clip(total_len - 500, 0.0, total_len)
+        i = np.searchsorted(s_cum, u_split, side="right") - 1
+        i = int(np.clip(i, 0, len(seg_len) - 1))
+        split_pt = interp(u_split, pts)
+        bezier_pts = np.vstack([pts[1:i+1], split_pt])
+        barthing_pts = pts[i+1:]
+
+        # s_cumを更新
+        aproach_pts, _ = Bezier.bezier(bezier_pts, 100)
+        poly = np.vstack([pts[0], aproach_pts, barthing_pts])
+        seg_len, s_cum, total_len = cal_total_len(poly)
+
         out = [pts[0].copy()]
         u = 0.0
         while u < total_len:
-            curent_pt = interp(u)
+            curent_pt = interp(u, poly)
             speed_kt = cal_speed(self, curent_pt, end_pt)
             if speed_kt == self.ps.MIN_SPEED_KTS:
                 speed_kt = self.ps.MIN_SPEED_KTS * 2
             speed = speed_kt *1852 / 60 # [m/min]
             u = min(u + speed, total_len)
-            out.append(interp(u) if u < total_len else pts[-1].copy())
+            out.append(interp(u, poly) if u < total_len else pts[-1].copy())
 
         # show
         out_pt = np.asarray(out, dtype=float).reshape(-1, 2)
@@ -931,7 +966,48 @@ class MakeLine:
         h.remove()
 
         return np.asarray(out, dtype=float)
+    
+    def set_beta(self, init_pts):
+        n = len(init_pts)
+        beta_list = np.zeros(n, dtype=float)
+        dy = init_pts[1:, 0] - init_pts[:-1, 0]
+        dx = init_pts[1:, 1] - init_pts[:-1, 1]
 
+        psi = np.zeros(n - 1, dtype=float)
+        for k in range(n - 1):
+            psi[k] = np.arctan2(dy[k], dx[k])
+
+        def wrap_pi(a):
+            return np.arctan2(np.sin(a), np.cos(a))
+
+        for i in range(1, n - 1):
+            beta_list[i] = wrap_pi(psi[i] - psi[i - 1]) if i <= n - 2 else 0.0
+
+        # 最終方位角に合わせてbetaを分配
+        mask = np.linalg.norm(init_pts - init_pts[-1], axis=1) < 500
+        m = np.where(~mask)[0][-1]
+        beta_list[mask] = (- 2 * np.pi - psi[m]) / len(np.arange(m+1, len(init_pts) - 1) - 1)
+
+        beta_list[0] = 0.0
+        beta_list[-1] = 0.0
+
+        return psi, beta_list
+    
+    def show_beta_pt(self, init_pts, psi_list, beta_list):
+        ax = self.ax
+        d = float(self.ps.L) / 4
+        psi_list = np.r_[psi_list, psi_list[-1] + np.pi]
+
+        dx0 = -d * np.cos(psi_list); dy0 = -d * np.sin(psi_list)
+        cb = np.cos(beta_list); sb = np.sin(beta_list)
+
+        dx = cb * dx0 - sb * dy0; dy = sb * dx0 + cb * dy0
+        beta_pts = np.column_stack([init_pts[:, 0] + dy, init_pts[:, 1] + dx])
+        ax.plot(beta_pts[:, 1], beta_pts[:, 0], color="red", linestyle='-')
+        ax.scatter(beta_pts[:, 1], beta_pts[:, 0], c="r",s=12, marker="o")
+        plt.savefig(os.path.join(self.SAVE_DIR, f"psi.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        print("A")
 
     def show_CMA_path(self, best_mean, restart):
         ax = self.ax
@@ -951,7 +1027,6 @@ class MakeLine:
                                         color = 'red', ls = '-', marker = 'D',
                                         markersize = 2, lw = 1.0, label="CMA result")
             self.regends.append(legend_path)
-        
 
         # ship domain
         theta = np.deg2rad(np.arange(0, 360, 10))
