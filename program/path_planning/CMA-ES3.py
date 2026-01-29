@@ -212,7 +212,36 @@ class CostCalculator:
         straight = np.linalg.norm(self.lines[0].end_pt - self.lines[-1].end_pt)
         dist = np.linalg.norm(pt - self.lines[-1].end_pt)
         return (dist / straight) * beta
+    
+    # 別のん
+    
+    def SD_penalty(self, pt, psi):
+        SD = self.SD
+        lines = self.lines
+        theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(10))
+        
+        speed = cal_speed(self, pt, lines[-1].end_pt)
+        r_list = []
+        for theta_i in theta_list:
+            r_list.append(SD.distance(speed, theta_i))
 
+        r = np.asarray(r_list, dtype=float)
+        domain_xy = np.column_stack([
+            pt[0] + r * np.cos(theta_list + psi),
+            pt[1] + r * np.sin(theta_list + psi),
+        ])
+        # count
+        xs = domain_xy[:, 1]; ys = domain_xy[:, 0]
+        hit = intersects_xy(Line.map, xs, ys)
+        n_hit = int(np.count_nonzero(hit))
+
+        return n_hit
+    
+    def beta_penalty(self, beta):
+        if abs(beta) > 20:
+            return 1000
+        else:
+            return beta ** 2
 
 def convert(df, port_file, col_lat="lat", col_lon="lon"):
     df_coord = pd.read_csv(port_file)
@@ -1040,6 +1069,9 @@ class MakeLine:
         plt.savefig(os.path.join(self.SAVE_DIR, f"psi zoom.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         print("A")
+
+        self.init_list = np.vstack([beta_pts[idx], psi_tail])
+
 
     def show_CMA_path(self, best_mean, restart):
         ax = self.ax
