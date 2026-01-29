@@ -30,7 +30,7 @@ dirname = os.path.splitext(os.path.basename(__file__))[0]
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 9
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -355,8 +355,8 @@ class MakeLine:
         self.cal = cal
 
         self.init_pts = self.resampling(self.init_route)
-        self.init_spi_list, self.init_beta_list = self.set_beta(self.init_pts)
-        self.show_beta_pt(self.init_pts, self.init_spi_list, self.init_beta_list)
+        self.init_beta_list = self.set_beta(self.init_pts)
+        self.show_beta_pt(self.init_pts, self.init_beta_list)
         print("initial point calculated\n")
         self.initial_D = self.cal_sigma_for_ddCMA(points=self.init_pts,
                                                   last_point=self.lines[-1].end_pt
@@ -946,7 +946,7 @@ class MakeLine:
             curent_pt = interp(u, poly)
             speed_kt = cal_speed(self, curent_pt, end_pt)
             if speed_kt == self.ps.MIN_SPEED_KTS:
-                speed_kt = self.ps.MIN_SPEED_KTS * 2
+                speed_kt = self.ps.MIN_SPEED_KTS
             speed = speed_kt *1852 / 60 # [m/min]
             u = min(u + speed, total_len)
             out.append(interp(u, poly) if u < total_len else pts[-1].copy())
@@ -971,42 +971,81 @@ class MakeLine:
     def set_beta(self, init_pts):
         n = len(init_pts)
         beta_list = np.zeros(n, dtype=float)
-        dy = init_pts[1:, 0] - init_pts[:-1, 0]
-        dx = init_pts[1:, 1] - init_pts[:-1, 1]
 
-        psi = np.zeros(n - 1, dtype=float)
-        for k in range(n - 1):
-            psi[k] = np.arctan2(dy[k], dx[k])
+        dy = init_pts[1:, 1] - init_pts[:-1, 1]
+        dx = init_pts[1:, 0] - init_pts[:-1, 0]
+
+        psi = np.arctan2(dy, dx) % (2 * np.pi )# (n-1)
 
         def wrap_pi(a):
             return np.arctan2(np.sin(a), np.cos(a))
 
-        for i in range(1, n - 1):
-            beta_list[i] = wrap_pi(psi[i] - psi[i - 1]) if i <= n - 2 else 0.0
-
-        # 最終方位角に合わせてbetaを分配
         mask = np.linalg.norm(init_pts - init_pts[-1], axis=1) < 500
-        m = np.where(~mask)[0][-1]
-        beta_list[mask] = (- 2 * np.pi - psi[m]) / len(np.arange(m+1, len(init_pts) - 1) - 1)
+        m = np.sum(mask)
+        psi_start = psi[m-1]
+        psi_end = 2 * np.pi
 
-        beta_list[0] = 0.0
+        psi_err = psi_end - psi_start
+        tail = np.arange(n-m, n-1)        # ここに補正を入れる
+
+        K = len(tail)
+        w = np.arange(1, K+1, dtype=float)   # 1,2,...,K（終端側が最大）
+
+        # beta_list[tail] += psi_err * (w / w.sum())
+        beta_list[tail] += psi_err / (tail-1)
+
+        beta_list[0]  = 0.0
         beta_list[-1] = 0.0
 
-        return psi, beta_list
+        self.psi_start = psi_start
+
+        return beta_list
     
-    def show_beta_pt(self, init_pts, psi_list, beta_list):
+    def show_beta_pt(self, init_pts, beta_list):
         ax = self.ax
         d = float(self.ps.L) / 4
-        psi_list = np.r_[psi_list, psi_list[-1] + np.pi]
+        psi_start = self.psi_start
 
-        dx0 = -d * np.cos(psi_list); dy0 = -d * np.sin(psi_list)
-        cb = np.cos(beta_list); sb = np.sin(beta_list)
+        n = len(init_pts)
+        beta_list = np.asarray(beta_list, float)
 
-        dx = cb * dx0 - sb * dy0; dy = sb * dx0 + cb * dy0
-        beta_pts = np.column_stack([init_pts[:, 0] + dy, init_pts[:, 1] + dx])
+        # どこから beta が入っているか（例：非ゼロが始まる点）
+        nz = np.flatnonzero(np.abs(beta_list) > 1e-12)
+        m = nz[0]                 # beta が入っている開始 index
+        idx = np.arange(m, n)     # この点たちだけずらす（後半）
+
+        # 点ごとの方位（beta の累積で作る）
+        # beta_list[0]=0 なら psi_pts[0]=psi_start のまま
+        psi_pts = psi_start + np.cumsum(beta_list)     # (n,)
+
+        # 後半だけ取り出す（長さ K）
+        psi_tail  = psi_pts[idx]                       # (K,)
+        beta_tail = beta_list[idx]                     # (K,)
+
+        # ずらし量（Kだけ計算）
+        dx0 = d * np.sin(psi_tail - np.pi/2)
+        dy0 = d * np.cos(psi_tail - np.pi/2)
+
+        cb = np.cos(beta_tail)
+        sb = np.sin(beta_tail)
+
+        dx = cb * dx0 - sb * dy0
+        dy = sb * dx0 + cb * dy0
+
+        # まず全部そのまま
+        beta_pts = init_pts.copy()
+
+        # 後半（betaがあるところ）だけ上書き
+        beta_pts[idx, 0] = init_pts[idx, 0] + dy
+        beta_pts[idx, 1] = init_pts[idx, 1] + dx
+
         ax.plot(beta_pts[:, 1], beta_pts[:, 0], color="red", linestyle='-')
         ax.scatter(beta_pts[:, 1], beta_pts[:, 0], c="r",s=12, marker="o")
         plt.savefig(os.path.join(self.SAVE_DIR, f"psi.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        ax.set_xlim(-500, 500)
+        ax.set_ylim(-500, 500)
+        plt.savefig(os.path.join(self.SAVE_DIR, f"psi zoom.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         print("A")
 
