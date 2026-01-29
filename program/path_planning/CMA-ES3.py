@@ -30,7 +30,7 @@ dirname = os.path.splitext(os.path.basename(__file__))[0]
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 9
+        self.port_number: int = 2
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -982,17 +982,13 @@ class MakeLine:
 
         mask = np.linalg.norm(init_pts - init_pts[-1], axis=1) < 500
         m = np.sum(mask)
-        psi_start = psi[m-1]
+        psi_start = psi[n-m-1]
         psi_end = 2 * np.pi
 
         psi_err = psi_end - psi_start
-        tail = np.arange(n-m, n-1)        # ここに補正を入れる
+        tail = np.arange(n-m, n)
 
-        K = len(tail)
-        w = np.arange(1, K+1, dtype=float)   # 1,2,...,K（終端側が最大）
-
-        # beta_list[tail] += psi_err * (w / w.sum())
-        beta_list[tail] += psi_err / (tail-1)
+        beta_list[tail] += psi_err / (len(tail) - 1)
 
         beta_list[0]  = 0.0
         beta_list[-1] = 0.0
@@ -1011,20 +1007,16 @@ class MakeLine:
 
         # どこから beta が入っているか（例：非ゼロが始まる点）
         nz = np.flatnonzero(np.abs(beta_list) > 1e-12)
-        m = nz[0]                 # beta が入っている開始 index
-        idx = np.arange(m, n)     # この点たちだけずらす（後半）
+        m = nz[0]
+        idx = np.arange(m, n)
 
-        # 点ごとの方位（beta の累積で作る）
-        # beta_list[0]=0 なら psi_pts[0]=psi_start のまま
-        psi_pts = psi_start + np.cumsum(beta_list)     # (n,)
+        psi_pts = psi_start + np.cumsum(beta_list)
 
-        # 後半だけ取り出す（長さ K）
-        psi_tail  = psi_pts[idx]                       # (K,)
-        beta_tail = beta_list[idx]                     # (K,)
+        psi_tail  = psi_pts[idx]
+        beta_tail = beta_list[idx]
 
-        # ずらし量（Kだけ計算）
-        dx0 = d * np.sin(psi_tail - np.pi/2)
-        dy0 = d * np.cos(psi_tail - np.pi/2)
+        dx0 = -d * np.sin(psi_tail)
+        dy0 = -d * np.cos(psi_tail)
 
         cb = np.cos(beta_tail)
         sb = np.sin(beta_tail)
