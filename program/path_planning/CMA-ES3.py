@@ -40,7 +40,7 @@ class Setting:
         self.B = 16.0
 
         # CMA-ES
-        self.target = "point"
+        self.target = "beta"
         self.seed: int = 42
         self.MAX_SPEED_KTS: float = 9.5  # [knots]
         self.MIN_SPEED_KTS: float = 1.5  # [knots]
@@ -387,10 +387,10 @@ class MakeLine:
         self.init_beta_list = self.set_beta(self.init_pts)
         self.show_beta_pt(self.init_pts, self.init_beta_list)
         print("initial point calculated\n")
-        self.initial_D = self.cal_sigma_for_ddCMA(points=self.init_pts,
-                                                  last_point=self.lines[-1].end_pt
+        self.initial_D = self.cal_sigma_for_ddCMA(points=self.target_list,
+                                                  last_point=self.init_list[-1]
                                                   )
-        self.initial_vec = self.init_pts.ravel()  # <<< important: flatten for CMA-ES
+        self.initial_vec = self.target_list.ravel()  # <<< important: flatten for CMA-ES
         self.N = len(self.initial_vec)
         print(
             f"この最適化問題の次元Nは {self.N} です\n"
@@ -400,7 +400,7 @@ class MakeLine:
 
     def CMAES(self):
         # compute auto scaling coefficients from initial solution
-        self.compute_cost_weights(self.init_pts)
+        self.compute_cost_weights(self.target_list)
 
         # --- CMA-ES expects 1D mean (N,) and sigma0 of same length ---
         ddcma = DdCma(xmean0=self.initial_vec, sigma0=self.initial_D, seed=self.ps.seed)
@@ -453,7 +453,8 @@ class MakeLine:
                 )
 
             while not is_satisfied:
-                ddcma.onestep(func=self.path_evaluate, check=self.enforce_max_turn_angle)
+                # ddcma.onestep(func=self.path_evaluate, check=self.enforce_max_turn_angle)
+                ddcma.onestep(func=self.path_evaluate, check=None)
 
                 best_cost = float(np.min(ddcma.arf))
                 best_mean = ddcma.arx[int(ddcma.idx[0])].copy()
@@ -754,7 +755,9 @@ class MakeLine:
         last_point: Tuple[float, float],
         *,
         min_sigma: float = 5.0,
+        min_sigma_psi: float = 5.0,
         scale: float = 0.5,
+        scale_psi: float = 0.5,
     ) -> np.ndarray:
         ver = points[:, 0]
         hor = points[:, 1]
@@ -762,7 +765,14 @@ class MakeLine:
         hor_diffs = np.abs(np.diff(hor, append=last_point[1])) * scale
         ver_diffs = np.maximum(ver_diffs, min_sigma)
         hor_diffs = np.maximum(hor_diffs, min_sigma)
-        return np.column_stack((ver_diffs, hor_diffs)).ravel()
+
+        psi = points[:, 2]
+        dpsi = np.diff(psi, append=last_point[2])
+        dpsi = dpsi % (2 * np.pi)
+        psi_diffs = np.abs(dpsi) * scale_psi
+        psi_diffs = np.maximum(psi_diffs, min_sigma_psi)
+
+        return np.column_stack((ver_diffs, hor_diffs, psi_diffs)).ravel()
     
     def compute_cost_weights(self, pts):
         """
@@ -771,23 +781,29 @@ class MakeLine:
         """
         cal = self.cal
 
-        start = self.init_pts[0]
-        end = self.init_pts[-1]
+        start = self.init_list[0]
+        end = self.init_list[-1]
         poly = np.vstack([start, pts, end])
-        # Space Penalty
+        pts = poly[:, :2]; head = poly[:, 2] 
+
+        # beta
+        beta_cost = 0.0
+        # for j in range(1, len(poly) - 1):
+        #     psi = (cal_psi(pts[j-1], pts[j], pts[j+1]) ) % (2*np.pi)
+        #     beta = head[j] - psi
+        #     beta_cost += cal.beta_penalty(np.rad2deg(beta))
+
+        beta_list = np.diff(head) 
+        for beta in beta_list: 
+            beta_cost += cal.beta_penalty(np.rad2deg(beta))
+
         space_cost = 0.0
-        for j in range(len(pts) - 1):
-            space_cost += cal.spacing_penalty(poly[j], poly[j+1])
+        for j in range(len(poly) - 1):
+            space_cost += cal.spacing_penalty(pts[j], pts[j+1])
 
-        # shiping lane init
-        cal.ShippingLaneInit(poly)
+        self.space_coeff = beta_cost / space_cost
 
-        self.length_coeff = 0.1
-        self.SD_coeff = 10.0
-        self.space_coeff = 10.0 / space_cost
-        self.lane_coeff = 1.0
-        print(f"length_coeff : {self.length_coeff}, SD_coeff : {self.SD_coeff}")
-        print(f"space_coeff : {self.space_coeff}, lane_coeff : {self.lane_coeff}\n")
+        print(f"space_coeff : {self.space_coeff}\n")
 
     def path_evaluate(self, X):
         batched = True
@@ -797,8 +813,10 @@ class MakeLine:
             batched = False
 
         cal = self.cal
-        start = self.init_pts[0]
-        end = self.init_pts[-1]
+        # start = self.init_pts[0]
+        # end = self.init_pts[-1]
+        start = self.init_list[0]
+        end = self.init_list[-1]
 
         # prepare for cost calculation
         straight_length = np.linalg.norm(start - end)
@@ -846,11 +864,34 @@ class MakeLine:
                 costs[i] = total
             
             elif self.ps.target == "beta":
-                beta_list = arr[i].reshape(-1, 1)
-                pts = None
-                for j in range(len(pts)):
-                    pt = pts[j], beta=beta_list[j]
-                    turn_cost = cal.turnig_angle(pt, beta)
+                arr_i = arr[i].reshape(-1, 3)
+                poly = np.vstack([start, arr_i, end])
+                pts = poly[:, :2]; head = poly[:, 2] 
+
+                # Ship Domain
+                SD_cost = 0.0
+                for j in range(1, len(poly)-1):
+                    SD_cost += cal.SD_penalty(pts[j], head[j])
+
+                # beta
+                beta_cost = 0.0
+                # for j in range(1, len(poly) - 1):
+                #     psi = (cal_psi(pts[j-1], pts[j], pts[j+1]) ) % (2*np.pi)
+                #     beta = head[j] - psi
+                #     beta_cost += cal.beta_penalty(np.rad2deg(beta))
+
+                # beta 
+                beta_cost = 0.0 
+                beta_list = np.diff(head) 
+                for beta in beta_list: 
+                    beta_cost += cal.beta_penalty(np.rad2deg(beta))
+
+                space_cost = 0.0
+                for j in range(len(poly) - 1):
+                    space_cost += cal.spacing_penalty(pts[j], pts[j+1])
+
+                total = (100 *SD_cost + 0.1 * beta_cost + 0.1 * self.space_coeff * space_cost)
+                costs[i] = SD_cost
 
         return float(costs[0]) if not batched else costs
 
@@ -1060,27 +1101,32 @@ class MakeLine:
         beta_pts[idx, 0] = init_pts[idx, 0] + dy
         beta_pts[idx, 1] = init_pts[idx, 1] + dx
 
-        ax.plot(beta_pts[:, 1], beta_pts[:, 0], color="red", linestyle='-')
-        ax.scatter(beta_pts[:, 1], beta_pts[:, 0], c="r",s=12, marker="o")
+        h1, = ax.plot(beta_pts[:, 1], beta_pts[:, 0], color="red", linestyle='-')
+        h2 = ax.scatter(beta_pts[:, 1], beta_pts[:, 0], c="r",s=12, marker="o")
         plt.savefig(os.path.join(self.SAVE_DIR, f"psi.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         ax.set_xlim(-500, 500)
         ax.set_ylim(-500, 500)
         plt.savefig(os.path.join(self.SAVE_DIR, f"psi zoom.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
-        print("A")
+        print(beta_pts[idx].shape)
+        print(psi_tail.shape)
 
-        self.init_list = np.vstack([beta_pts[idx], psi_tail])
-
+        self.init_list = np.hstack([beta_pts[idx], psi_tail.reshape(-1, 1)])
+        self.target_list = self.init_list[1:-1]
+        h1.remove(); h2.remove()
 
     def show_CMA_path(self, best_mean, restart):
         ax = self.ax
         SD = self.SD
-        start = self.init_pts[0]; end = self.init_pts[-1]
+        # start = self.init_pts[0]; end = self.init_pts[-1]
+        start = self.init_list[0]; end = self.init_list[-1]
         h_list = []
 
-        pts = np.asarray(best_mean, float).reshape(-1, 2)
-        path = np.vstack([start, pts, end])
+        list = np.asarray(best_mean, float).reshape(-1, 3)
+        poly = np.vstack([start, list, end])
+        path = poly[:, :2]; psi_list = poly[:, 2] 
+        # path = np.vstack([start, pts, end])
 
         # path, point
         h1, = ax.plot(path[:, 1], path[:, 0], color="red", linestyle='-')
@@ -1147,8 +1193,8 @@ class MakeLine:
             best_mean_sofar = values["best_mean_sofar"]
             calculation_time = values["calculation_time"]
             pairs = "\n".join(
-                f"  ({best_mean_sofar[i]:.6f}, {best_mean_sofar[i+1]:.6f})"
-                for i in range(0, len(best_mean_sofar), 2)
+                f"  ({best_mean_sofar[i]:.6f}, {best_mean_sofar[i+1]:.6f}, {best_mean_sofar[i+2]:.6f})"
+                for i in range(0, len(best_mean_sofar), 3)
             )
             print(
                 f"\n[Restart {restart}]\n"
