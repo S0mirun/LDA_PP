@@ -29,7 +29,7 @@ dirname = os.path.splitext(os.path.basename(__file__))[0]
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 9
+        self.port_number: int = 4
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -216,6 +216,9 @@ class CostCalculator:
         SD = self.SD
         lines = self.lines
         theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
+        # theta_list_1 = np.arange(np.deg2rad(0), np.deg2rad(90), np.deg2rad(3))
+        # theta_list_2 = np.arange(np.deg2rad(270), np.deg2rad(360), np.deg2rad(3))
+        # theta_list = np.vstack([theta_list_1, theta_list_2])
         
         speed = cal_speed(self, pt, lines[-1].end_pt)
         r_list = []
@@ -846,7 +849,8 @@ class MakeLine:
             elif self.ps.target == "beta":
                 arr_i = arr[i].reshape(-1, 3)
                 poly = np.vstack([start, arr_i, end])
-                pts = poly[:, :2]; head = poly[:, 2] 
+                pts = poly[:, :2]; head = poly[:, 2]
+                pts[-1] = self.init_pts[-1]
 
                 # ship domain
                 SD_cost = 0.0
@@ -1104,7 +1108,8 @@ class MakeLine:
 
         list = np.asarray(best_mean, float).reshape(-1, 3)
         poly = np.vstack([start, list, end])
-        path = poly[:, :2]; head = poly[:, 2] 
+        path = poly[:, :2]; head = poly[:, 2]
+        path[-1] = self.init_pts[-1]
 
         # path, point
         h1, = ax.plot(path[:, 1], path[:, 0], color="red", linestyle='-')
@@ -1228,6 +1233,7 @@ class MakeLine:
                 "side": "port",
                 "style": "head out",
                 "start": [2450.0, 2300.0],
+                "turn start": [200, 100],
                 "psi_start": -145,
                 "psi_end": 0,
                 "berth_type": 1,
@@ -1297,6 +1303,7 @@ class MakeLine:
                 "side": "port",
                 "style": "head out",
                 "start": [1700, -2800],
+                "turn start": [200, 100],
                 "psi_start": 120,
                 "psi_end": 0,
                 "berth_type": 2,
