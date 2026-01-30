@@ -29,7 +29,7 @@ dirname = os.path.splitext(os.path.basename(__file__))[0]
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 9
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -1241,13 +1241,19 @@ class MakeLine:
             h = ax.add_patch(shipshape)
             h_list.append(h)
         
-        ## set
+        ## save
         ax.set_xlim(port["hor_range"])
         ax.set_ylim(port["ver_range"])
         ax.legend(handles=self.legends)
         plt.savefig(os.path.join(self.SAVE_DIR, f"CMA Result.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
-        print(f"Result fig saved")
+
+        ax.set_xlim([-500, 500])
+        ax.set_ylim([-500, 500])
+        plt.savefig(os.path.join(self.SAVE_DIR, f"CMA Result zoom.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        print(f"Result fig saved\n")
+        print(f"{port["name"]} end\n")
     
 
     def dict_of_port(self, num):
