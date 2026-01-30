@@ -29,7 +29,7 @@ dirname = os.path.splitext(os.path.basename(__file__))[0]
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 4
+        self.port_number: int = 2
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -350,6 +350,7 @@ class MakeLine:
 
     def result(self):
         self.print_result(self.best_dict)
+        self.show_best_result(self.best_dict)
 
     def prepare_for_init_route(self):
         self.read_csv()
@@ -635,7 +636,7 @@ class MakeLine:
         print("\nbase map saved\n")
 
         h.remove()
-        self.regends = legends
+        self.legends = legends
 
     def make_init_line(self):
         port = self.port
@@ -978,9 +979,10 @@ class MakeLine:
         u_split = np.clip(total_len - 500, 0.0, total_len)
         i = np.searchsorted(s_cum, u_split, side="right") - 1
         i = int(np.clip(i, 0, len(seg_len) - 1))
-        split_pt = interp(u_split, pts)
-        bezier_pts = np.vstack([pts[1:i+1], split_pt])
-        barthing_pts = pts[i+1:]
+        turn_start_pt = self.port["turn start"]
+        bezier_end_pt = [500, turn_start_pt[1]]
+        bezier_pts = np.vstack([pts[1:i+1], bezier_end_pt]) # 
+        barthing_pts = np.vstack([turn_start_pt, pts[-1]])
 
         # s_cumを更新
         aproach_pts, _ = Bezier.bezier(bezier_pts, 100)
@@ -1000,17 +1002,19 @@ class MakeLine:
 
         # show
         out_pt = np.asarray(out, dtype=float).reshape(-1, 2)
-        ax.plot(out_pt[:, 1], out_pt[:, 0], color="blue", linestyle='-')
-        ax.scatter(out_pt[:, 1], out_pt[:, 0], s=12, marker="o", c="blue")
+        h1, = ax.plot(out_pt[:, 1], out_pt[:, 0], color="blue", linestyle='-')
+        h2 = ax.scatter(out_pt[:, 1], out_pt[:, 0], s=12, marker="o", c="blue")
         legend_init_path = plt.Line2D([0], [0],
                                     color = 'blue', ls = '-', marker = 'D',
                                     markersize = 2, lw = 1.0, label="Initial Path")
-        self.regends.append(legend_init_path)
-        h = ax.legend(handles=self.regends)
+        self.legends.append(legend_init_path)
+        h = ax.legend(handles=self.legends)
         plt.savefig(os.path.join(self.SAVE_DIR, "CMA route init.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         print("init route saved\n")
 
+        self.init_show = []
+        self.init_show.append(h1), self.init_show.append(h2)
         h.remove()
 
         return np.asarray(out, dtype=float)
@@ -1024,7 +1028,7 @@ class MakeLine:
 
         psi = np.arctan2(dy, dx) % (2 * np.pi )# (n-1)
 
-        mask = np.linalg.norm(init_pts - init_pts[-1], axis=1) < 500
+        mask = np.linalg.norm(init_pts - init_pts[-1], axis=1) < self.port["turn start"][0]
         m = np.sum(mask)
         psi_start = psi[n-m-1]
         psi_end = 2 * np.pi
@@ -1075,11 +1079,7 @@ class MakeLine:
         beta_pts[idx, 0] = init_pts[idx, 0] + dy
         beta_pts[idx, 1] = init_pts[idx, 1] + dx
 
-        # h1, = ax.plot(beta_pts[:, 1], beta_pts[:, 0], color="red", linestyle='-')
-        # h2 = ax.scatter(beta_pts[:, 1], beta_pts[:, 0], c="r",s=12, marker="o")
-        plt.savefig(os.path.join(self.SAVE_DIR, f"psi.png"),
-                    dpi=400, bbox_inches="tight", pad_inches=0.05)
-        
+        h_list = []
         for pose in np.hstack([init_pts[idx], psi_tail.reshape(-1, 1)]):
             shipshape = MplPolygon(
                 ship_shape_poly(
@@ -1089,15 +1089,18 @@ class MakeLine:
                 facecolor='blue',
                 alpha=0.4
             )
-            ax.add_patch(shipshape)
+            h = ax.add_patch(shipshape)
+            h_list.append(h)
         ax.set_xlim(-500, 500)
         ax.set_ylim(-500, 500)
-        plt.savefig(os.path.join(self.SAVE_DIR, f"psi zoom_a.png"),
+        plt.savefig(os.path.join(self.SAVE_DIR, f"psi zoom.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
 
         self.init_list = np.hstack([beta_pts[idx], psi_tail.reshape(-1, 1)])
+        self.non_target_pts = beta_pts[:m]
         self.target_list = self.init_list[1:-1]
-        # h1.remove(); h2.remove()
+        for h in h_list:
+            h.remove()
 
     def show_CMA_path(self, best_mean, restart):
         ax = self.ax
@@ -1149,9 +1152,9 @@ class MakeLine:
             legend_path = plt.Line2D([0], [0],
                                         color = 'red', ls = '-', marker = 'D',
                                         markersize = 2, lw = 1.0, label="CMA result")
-            self.regends.append(legend_path)
+            self.legends.append(legend_path)
 
-        h3 = ax.legend(handles=self.regends)
+        h3 = ax.legend(handles=self.legends)
         h_list.append(h3)
         plt.savefig(os.path.join(self.SAVE_DIR, f"CMA route ver {restart}.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
@@ -1203,6 +1206,49 @@ class MakeLine:
 
         self.smallest_evaluation_key = smallest_evaluation_key
 
+    def show_best_result(self, best_dict):
+        ax = self.ax
+        port = self.port
+        for h in self.init_show:
+            h.remove()
+        h_list = []
+        # bezier root
+        non_opt_pts = np.asarray(self.non_target_pts)
+        non_opt_psi = np.array([
+            cal_angle(non_opt_pts[i], non_opt_pts[i+1]) % (2*np.pi)
+            for i in range(len(non_opt_pts) - 1)
+        ])
+        end_pt = np.asarray(self.init_list[0])
+        psi_end = cal_angle(non_opt_pts[-1], end_pt[:2]) % (2*np.pi)
+        non_opt_psi = np.append(non_opt_psi, psi_end)
+        non_opt_list = np.hstack([non_opt_pts, non_opt_psi.reshape(-1, 1)])
+
+        # best root
+        opt_list = best_dict[self.smallest_evaluation_key]["best_mean_sofar"].reshape(-1, 3)
+        best_list = np.vstack([non_opt_list, opt_list, self.init_list[-1]])
+
+        # show
+        ## ship shape
+        for pose in best_list:
+            shipshape = MplPolygon(
+                ship_shape_poly(
+                pose=pose,
+                L=self.ps.L, B=self.ps.B,
+                ),
+                facecolor='red',
+                alpha=0.7
+            )
+            h = ax.add_patch(shipshape)
+            h_list.append(h)
+        
+        ## set
+        ax.set_xlim(port["hor_range"])
+        ax.set_ylim(port["ver_range"])
+        ax.legend(handles=self.legends)
+        plt.savefig(os.path.join(self.SAVE_DIR, f"CMA Result.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        print(f"Result fig saved")
+    
 
     def dict_of_port(self, num):
         dictionary_of_port = {
