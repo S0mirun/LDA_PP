@@ -17,7 +17,6 @@ from typing import ClassVar, Tuple
 from tqdm.auto import tqdm
 
 from utils.LDA.ship_geometry import *
-from utils.LDA.ship_geometry import ship_shape_poly
 from utils.PP import Bezier_curve as Bezier
 from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
@@ -30,7 +29,7 @@ dirname = os.path.splitext(os.path.basename(__file__))[0]
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 9
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -213,12 +212,10 @@ class CostCalculator:
         dist = np.linalg.norm(pt - self.lines[-1].end_pt)
         return (dist / straight) * beta
     
-    # 別のん
-    
     def SD_penalty(self, pt, psi):
         SD = self.SD
         lines = self.lines
-        theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(10))
+        theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
         
         speed = cal_speed(self, pt, lines[-1].end_pt)
         r_list = []
@@ -236,12 +233,6 @@ class CostCalculator:
         n_hit = int(np.count_nonzero(hit))
 
         return n_hit
-    
-    def beta_penalty(self, beta):
-        if abs(beta) > 20:
-            return 1000
-        else:
-            return beta ** 2
 
 def convert(df, port_file, col_lat="lat", col_lon="lon"):
     df_coord = pd.read_csv(port_file)
@@ -447,9 +438,8 @@ class MakeLine:
                 rate = pbar.format_dict.get("rate")
                 eval_per_s = f"{rate:.1f}" if rate is not None else "–"
                 trials_str = f"{ddcma.neval}/{NEVAL_STANDARD}"
-                best_sofar = best_dict[restart]["best_cost_so_far"]
                 pbar.set_postfix_str(
-                    f"eval/s={eval_per_s}  trials={trials_str}  best={best_sofar:.6g}"
+                    f"eval/s={eval_per_s}  trials={trials_str}"
                 )
 
             while not is_satisfied:
@@ -784,24 +774,14 @@ class MakeLine:
         start = self.init_list[0]
         end = self.init_list[-1]
         poly = np.vstack([start, pts, end])
-        pts = poly[:, :2]; head = poly[:, 2] 
+        pts = poly[:, :2]; head = poly[:, 2]
 
-        # beta
-        beta_cost = 0.0
-        # for j in range(1, len(poly) - 1):
-        #     psi = (cal_psi(pts[j-1], pts[j], pts[j+1]) ) % (2*np.pi)
-        #     beta = head[j] - psi
-        #     beta_cost += cal.beta_penalty(np.rad2deg(beta))
-
-        beta_list = np.diff(head) 
-        for beta in beta_list: 
-            beta_cost += cal.beta_penalty(np.rad2deg(beta))
-
+        # space cost
         space_cost = 0.0
         for j in range(len(poly) - 1):
             space_cost += cal.spacing_penalty(pts[j], pts[j+1])
 
-        self.space_coeff = beta_cost / space_cost
+        self.space_coeff = 0 / space_cost
 
         print(f"space_coeff : {self.space_coeff}\n")
 
@@ -868,30 +848,23 @@ class MakeLine:
                 poly = np.vstack([start, arr_i, end])
                 pts = poly[:, :2]; head = poly[:, 2] 
 
-                # Ship Domain
+                # ship domain
                 SD_cost = 0.0
-                for j in range(1, len(poly)-1):
+                for j in range(len(poly)):
                     SD_cost += cal.SD_penalty(pts[j], head[j])
+                
+                # psi smooth
+                angle_cost = 0.0
+                for j in range(len(head)-1):
+                    angle_cost += (head[j+1] - head[j]) ** 2 # 1次差分
 
-                # beta
-                beta_cost = 0.0
-                # for j in range(1, len(poly) - 1):
-                #     psi = (cal_psi(pts[j-1], pts[j], pts[j+1]) ) % (2*np.pi)
-                #     beta = head[j] - psi
-                #     beta_cost += cal.beta_penalty(np.rad2deg(beta))
+                # (x, y) smooth
+                xy_cost = 0.0
+                for j in range(1, len(pts)-1):
+                    xy_cost += np.linalg.norm(pts[j-1] - 2*pts[j] + pts[j+1]) ** 2 # 2次差分
 
-                # beta 
-                beta_cost = 0.0 
-                beta_list = np.diff(head) 
-                for beta in beta_list: 
-                    beta_cost += cal.beta_penalty(np.rad2deg(beta))
-
-                space_cost = 0.0
-                for j in range(len(poly) - 1):
-                    space_cost += cal.spacing_penalty(pts[j], pts[j+1])
-
-                total = (100 *SD_cost + 0.1 * beta_cost + 0.1 * self.space_coeff * space_cost)
-                costs[i] = SD_cost
+                total = 0.1 * SD_cost + angle_cost + 0.01 * xy_cost
+                costs[i] = total
 
         return float(costs[0]) if not batched else costs
 
@@ -1047,9 +1020,6 @@ class MakeLine:
 
         psi = np.arctan2(dy, dx) % (2 * np.pi )# (n-1)
 
-        def wrap_pi(a):
-            return np.arctan2(np.sin(a), np.cos(a))
-
         mask = np.linalg.norm(init_pts - init_pts[-1], axis=1) < 500
         m = np.sum(mask)
         psi_start = psi[n-m-1]
@@ -1058,10 +1028,10 @@ class MakeLine:
         psi_err = psi_end - psi_start
         tail = np.arange(n-m, n)
 
-        beta_list[tail] += psi_err / (len(tail) - 1)
+        beta_list[tail] += psi_err / (len(tail))
 
         beta_list[0]  = 0.0
-        beta_list[-1] = 0.0
+        beta_list[-1] = beta_list[-2]
 
         self.psi_start = psi_start
 
@@ -1101,20 +1071,29 @@ class MakeLine:
         beta_pts[idx, 0] = init_pts[idx, 0] + dy
         beta_pts[idx, 1] = init_pts[idx, 1] + dx
 
-        h1, = ax.plot(beta_pts[:, 1], beta_pts[:, 0], color="red", linestyle='-')
-        h2 = ax.scatter(beta_pts[:, 1], beta_pts[:, 0], c="r",s=12, marker="o")
+        # h1, = ax.plot(beta_pts[:, 1], beta_pts[:, 0], color="red", linestyle='-')
+        # h2 = ax.scatter(beta_pts[:, 1], beta_pts[:, 0], c="r",s=12, marker="o")
         plt.savefig(os.path.join(self.SAVE_DIR, f"psi.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
+        
+        for pose in np.hstack([init_pts[idx], psi_tail.reshape(-1, 1)]):
+            shipshape = MplPolygon(
+                ship_shape_poly(
+                pose=pose,
+                L=self.ps.L, B=self.ps.B,
+                ),
+                facecolor='blue',
+                alpha=0.4
+            )
+            ax.add_patch(shipshape)
         ax.set_xlim(-500, 500)
         ax.set_ylim(-500, 500)
-        plt.savefig(os.path.join(self.SAVE_DIR, f"psi zoom.png"),
+        plt.savefig(os.path.join(self.SAVE_DIR, f"psi zoom_a.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
-        print(beta_pts[idx].shape)
-        print(psi_tail.shape)
 
         self.init_list = np.hstack([beta_pts[idx], psi_tail.reshape(-1, 1)])
         self.target_list = self.init_list[1:-1]
-        h1.remove(); h2.remove()
+        # h1.remove(); h2.remove()
 
     def show_CMA_path(self, best_mean, restart):
         ax = self.ax
@@ -1125,35 +1104,47 @@ class MakeLine:
 
         list = np.asarray(best_mean, float).reshape(-1, 3)
         poly = np.vstack([start, list, end])
-        path = poly[:, :2]; psi_list = poly[:, 2] 
-        # path = np.vstack([start, pts, end])
+        path = poly[:, :2]; head = poly[:, 2] 
 
         # path, point
         h1, = ax.plot(path[:, 1], path[:, 0], color="red", linestyle='-')
         h2 = ax.scatter(path[:, 1], path[:, 0], c="r",s=12, marker="o")
         h_list.append(h1); h_list.append(h2)
+
+        # ship shape
+        for pose in poly:
+            shipshape = MplPolygon(
+                ship_shape_poly(
+                pose=pose,
+                L=self.ps.L, B=self.ps.B,
+                ),
+                facecolor='red',
+                alpha=0.4
+            )
+            h = ax.add_patch(shipshape)
+            h_list.append(h)
+
+        # ship domain
+        theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
+        for pts, psi in zip(path, head):
+            speed = cal_speed(self, pts, path[-1])
+            r_list = []
+            for theta_i in theta_list:
+                r_list.append(SD.distance(speed, theta_i))
+
+            r = np.asarray(r_list, dtype=float)
+            domain_xy = np.column_stack([
+                pts[0] + r * np.cos(theta_list + psi),
+                pts[1] + r * np.sin(theta_list + psi),
+            ])
+            h3, = ax.plot(domain_xy[:, 1], domain_xy[:, 0], color="red", linestyle='--')
+            h_list.append(h3)
+
         if restart == 0:
             legend_path = plt.Line2D([0], [0],
                                         color = 'red', ls = '-', marker = 'D',
                                         markersize = 2, lw = 1.0, label="CMA result")
             self.regends.append(legend_path)
-
-        # ship domain
-        theta = np.deg2rad(np.arange(0, 360, 10))
-        theta_c = np.r_[theta, theta[0]] 
-        for i in range(1, len(path)-1):
-            speed = cal_speed(self, path[i], path[-1])
-            psi = cal_psi(path[i-1], path[i], path[i+1])
-            ang = theta_c + psi
-
-            r = np.array([SD.distance(speed, th) for th in theta], dtype=float)
-            r_c = np.r_[r, r[0]]
-
-            xs = path[i][1] + r_c * np.sin(ang)
-            ys = path[i][0] + r_c * np.cos(ang)
-
-            h, = ax.plot(xs, ys, lw=0.5, color='r', ls='--')
-            h_list.append(h)
 
         h3 = ax.legend(handles=self.regends)
         h_list.append(h3)
