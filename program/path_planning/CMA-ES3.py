@@ -371,7 +371,7 @@ class MakeLine:
         SD.b_SD = self.df_debug["b_SD"].values[0]
 
         self.SD = SD
-        print("Ship Domain set up complete\n")
+        print("\nShip Domain set up complete\n")
 
     def prepare_for_init_route(self):
         self.init_fig()
@@ -570,6 +570,8 @@ class MakeLine:
         Line.hor_range = self.port["hor_range"]
         Line.ver_range = self.port["ver_range"]
 
+        print("all csv read\n")
+
     def init_fig(self):
         self.fig, self.ax = plt.subplots(figsize=(7, 7))
 
@@ -640,12 +642,13 @@ class MakeLine:
         h = ax.legend(handles=legends)
         fig.savefig(os.path.join(self.SAVE_DIR, "base_map.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
-        print("\nbase map saved\n")
+        print("base map saved\n")
 
         h.remove()
         self.legends = legends
 
     def make_init_line(self):
+        ax = self.ax
         port = self.port
         lines = []
 
@@ -655,9 +658,24 @@ class MakeLine:
         Line.map_poly = poly_map
         Line.map_poly_prep = prep(poly_map)
 
-        # from start point
-        L_start = Line(fixed_pt=port["start"], theta=np.deg2rad(port["psi_start"]))
-        lines.append(L_start)
+        # from berth point
+        theta = 0
+        margin = 2*self.ps.B
+        if port["psi_end"] == 0:
+            if port["side"] == "starboard":
+                margin = -self.ps.B
+            if port["style"] == "head in":
+                theta = 180
+            theta = np.deg2rad(theta)
+        else:
+            theta = np.deg2rad(port["psi_end"] + 10)
+        L_berth = Line(fixed_pt=np.array((0.0, margin)), theta=theta)
+        L_berth.swap()
+        lines.append(L_berth)
+        self.lines = lines
+
+        ## save fig
+        self.show_init_lines("init lines step.1")
 
         # from shipping lane
         lane_polys = []
@@ -679,23 +697,18 @@ class MakeLine:
             lane_polys.append(poly_lane)
             print(f"shipping lane {pid} complete")
         Line.lane = shapely.union_all(lane_polys)
+        lines[:] = lines[1:] + lines[:1]
 
-        # from birth point
-        theta = 0
-        margin = 2*self.ps.B
-        if port["psi_end"] == 0:
-            if port["side"] == "starboard":
-                margin = -self.ps.B
-            if port["style"] == "head in":
-                theta = 180
-            theta = np.deg2rad(theta)
-        else:
-            theta = np.deg2rad(port["psi_end"] + 10)
-        L_birth = Line(fixed_pt=np.array((0.0, margin)), theta=theta)
-        L_birth.swap()
-        lines.append(L_birth)
-        self.lines = lines
-        self.show_init_line()
+        ## save fig
+        self.show_init_lines("init lines step.2")
+
+        # from start point
+        L_start = Line(fixed_pt=port["start"], theta=np.deg2rad(port["psi_start"]))
+        lines.insert(0, L_start)
+
+        ## save fig
+        self.show_init_lines("init lines step.3")
+        print("\ninit lines saved\n")
 
     def make_captain_line(self):
         lines = self.lines
@@ -707,31 +720,31 @@ class MakeLine:
         base_idx = len(lines) - 1
         while True:
             # check nearlest intersection
-            L_birth = lines[base_idx]; idx = None
-            shortest = np.linalg.norm(L_birth.fixed_pt - L_birth.end_pt)
+            L_berth = lines[base_idx]; idx = None
+            shortest = np.linalg.norm(L_berth.fixed_pt - L_berth.end_pt)
 
             if base_idx == 1:
-                if cross_judge(lines[0], L_birth):
-                    intersect_pt = cal_intersect_pt(lines[0], L_birth)
-                    length = np.linalg.norm(intersect_pt - L_birth.end_pt)
+                if cross_judge(lines[0], L_berth):
+                    intersect_pt = cal_intersect_pt(lines[0], L_berth)
+                    length = np.linalg.norm(intersect_pt - L_berth.end_pt)
                     if length < shortest:
                         shortest = length; idx = 0
             else:
                 for i in range(1, base_idx):
-                    if cross_judge(lines[i], L_birth):
-                        intersect_pt = cal_intersect_pt(lines[i], L_birth)
-                        length = np.linalg.norm(intersect_pt - L_birth.end_pt)
+                    if cross_judge(lines[i], L_berth):
+                        intersect_pt = cal_intersect_pt(lines[i], L_berth)
+                        length = np.linalg.norm(intersect_pt - L_berth.end_pt)
                         if length < shortest:
                             shortest = length; idx = i      
 
             if idx != None:
-                L_birth.set_parent(lines[idx])
+                L_berth.set_parent(lines[idx])
                 break
             else:
                 longest = 0.0
-                mid = (L_birth.fixed_pt + L_birth.end_pt) / 2
+                mid = (L_berth.fixed_pt + L_berth.end_pt) / 2
                 for deg_i in range(-90, 91):
-                    theta = L_birth.theta + np.deg2rad(deg_i - 180)
+                    theta = L_berth.theta + np.deg2rad(deg_i - 180)
                     L = Line(fixed_pt=mid, end_pt=None, theta=theta)
                     length = np.linalg.norm(L.end_pt - L.fixed_pt)
                     if length > longest:
@@ -740,7 +753,7 @@ class MakeLine:
 
                 L_append = Line(fixed_pt=mid, theta=best_theta + np.deg2rad(5))
                 L_append.swap()
-                L_birth.set_parent(L_append)
+                L_berth.set_parent(L_append)
                 lines.insert(base_idx, L_append)
                 if len(lines) > 10:
                     print("too much line")
@@ -781,11 +794,11 @@ class MakeLine:
         i = np.searchsorted(s_cum, u_split, side="right") - 1
         i = int(np.clip(i, 0, len(seg_len) - 1))
         turn_start_pt = port["turn start"]
-        bitrh_start_pt = [turn_start_pt[0] + 300, turn_start_pt[1]]
-        pts_for_bezier = np.vstack([pts[1:i+1], bitrh_start_pt])
+        berth_start_pt = [turn_start_pt[0] + 300, turn_start_pt[1]]
+        pts_for_bezier = np.vstack([pts[1:i+1], berth_start_pt])
 
         bezier_pts, _ = Bezier.bezier(pts_for_bezier, 100)
-        straight_pts = np.vstack([bitrh_start_pt, turn_start_pt])
+        straight_pts = np.vstack([berth_start_pt, turn_start_pt])
         curve_pts = np.vstack([turn_start_pt, pts[-1]])
 
         # aproach, straight
@@ -838,8 +851,8 @@ class MakeLine:
         self.target_list = self.turn_list[1:-1]
 
         self.aproach_start = aproach_pts[0]
-        self.aproach_end = aproach_pts[-1]
-        self.turn_start = turn_pts[0]
+        self.berth_start = berth_start_pt
+        self.turn_start = turn_start_pt
         self.turn_end = turn_pts[-1]
 
         print(init_list)
@@ -1032,7 +1045,7 @@ class MakeLine:
         return out if X.ndim == 2 else out[0]
      
     # show map
-    def show_init_line(self):
+    def show_init_lines(self, name):
         ax = self.ax
         lines = self.lines
 
@@ -1043,11 +1056,12 @@ class MakeLine:
             h_fixed, = ax.plot(ln.fixed_pt[1], ln.fixed_pt[0], marker='o', linestyle='None', color='k')
             h_end, = ax.plot(ln.end_pt[1], ln.end_pt[0], marker='o', linestyle='None', color='g')
             handles.extend([h, h_fixed, h_end])
-        plt.savefig(os.path.join(self.SAVE_DIR, "init line.png"),
+        plt.savefig(os.path.join(self.SAVE_DIR, f"{name}.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
-        print("\ninit line saved\n")
+        
         for h in handles:
             h.remove()
+        print(f"{name} saved")
 
     def show_captain_line(self):
         ax = self.ax
@@ -1072,10 +1086,6 @@ class MakeLine:
         h_list = []
 
         list = self.init_list
-        pt_list = list[:,:2]; psi_list = list[:, 2]
-
-        # path
-        # ax.plot(pt_list[:, 1], pt_list[:, 0], color="blue", linestyle='-', alpha=0.5, zorder=6)
 
         # ship shape
         for pose in list:
@@ -1103,8 +1113,8 @@ class MakeLine:
         plt.savefig(os.path.join(self.SAVE_DIR, "init path.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         # zoom
-        ax.set_xlim([-500, 500])
-        ax.set_ylim([-500, 500])
+        ax.set_xlim([-750, 750])
+        ax.set_ylim([-750, 750])
         plt.savefig(os.path.join(self.SAVE_DIR, "init path zoom.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         print("init path saved\n")
@@ -1115,30 +1125,30 @@ class MakeLine:
 
     def add_text(self, ax, h_list):
         x_as, y_as = self.aproach_start
-        p1 = ax.scatter(y_as, x_as, c="black", s=20)
+        p1 = ax.scatter(y_as, x_as, c="black", s=20, zorder=10)
         t1 = ax.annotate("aproach start", xy=(y_as, x_as),
-                        xytext=(0, -10), textcoords="offset points",
-                        ha="right", va="top", fontsize=15, zorder=10)
+                        xytext=(0, 0), textcoords="offset points",
+                        ha="center", va="bottom", fontsize=15, zorder=10)
 
-        x_ae, y_ae = self.aproach_end
-        p2 = ax.scatter(y_ae, x_ae, c="black", s=20)
-        t2 = ax.annotate("aproach end / birth start", xy=(y_ae, x_ae),
-                        xytext=(0, -10), textcoords="offset points",
-                        ha="right", va="top", fontsize=15, zorder=10)
+        x_bs, y_bs = self.berth_start
+        p2 = ax.scatter(y_bs, x_bs, c="black", s=20, zorder=10)
+        t2 = ax.annotate("aproach end / berthing start", xy=(y_bs, x_bs),
+                        xytext=(0, 0), textcoords="offset points",
+                        ha="center", va="bottom", fontsize=15, zorder=10)
 
-        # x_ts, y_ts = self.turn_start
-        # p3 = ax.scatter(y_ts, x_ts, c="black", s=20)
-        # t3 = ax.annotate("turn start", xy=(y_ts, x_ts),
-        #                 xytext=(0, -10), textcoords="offset points",
-        #                 ha="right", va="top", fontsize=15)
+        x_ts, y_ts = self.turn_start
+        p3 = ax.scatter(y_ts, x_ts, c="black", s=20, zorder=10)
+        t3 = ax.annotate("turn start", xy=(y_ts, x_ts),
+                        xytext=(+10, 0), textcoords="offset points",
+                        ha="left", va="center", fontsize=15, zorder=10)
 
         x_te, y_te = self.turn_end
-        p4 = ax.scatter(y_te, x_te, c="black", s=20)
-        t4 = ax.annotate("birth end", xy=(y_te, x_te),
-                        xytext=(0, -10), textcoords="offset points",
-                        ha="right", va="top", fontsize=15, zorder=10)
+        p4 = ax.scatter(y_te, x_te, c="black", s=20, zorder=10)
+        t4 = ax.annotate("berth end", xy=(y_te, x_te),
+                        xytext=(+10, 0), textcoords="offset points",
+                        ha="left", va="center", fontsize=15, zorder=10)
 
-        h_list.extend([t1, p1, t2, p2, t4, p4])
+        h_list.extend([t1, p1, t2, p2, p3, t3, t4, p4])
 
     def show_CMA_path(self, best_mean, restart):
         ax = self.ax
@@ -1295,8 +1305,8 @@ class MakeLine:
         # zoom
         for h in h_list:
             h.remove()
-        ax.set_xlim([-500, 500])
-        ax.set_ylim([-500, 500])
+        ax.set_xlim([-750, 750])
+        ax.set_ylim([-750, 750])
         plt.savefig(os.path.join(self.SAVE_DIR, f"CMA Result zoom.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         print(f"Result fig saved\n")
@@ -1336,8 +1346,8 @@ class MakeLine:
                 "psi_start": -145,
                 "psi_end": 0,
                 "berth_type": 1,
-                "ver_range": [-500, 2500],
-                "hor_range": [-500, 2500],
+                "ver_range": [-750, 2700],
+                "hor_range": [-750, 2700],
             },
             3: {
                 "name": "Else_port1",
