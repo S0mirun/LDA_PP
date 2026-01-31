@@ -31,7 +31,7 @@ dirname = os.path.splitext(os.path.basename(__file__))[0]
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 9
+        self.port_number: int = 2
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -352,20 +352,14 @@ class MakeLine:
         self.result()
 
     def prepare(self):
-        self.prepare_for_init_route()
+        self.read_csv()
         self.prepare_for_SD()
+        self.prepare_for_init_route()
         self.prepare_for_CMAES()
 
     def result(self):
         self.print_result(self.best_dict)
         self.show_best_result(self.best_dict)
-
-    def prepare_for_init_route(self):
-        self.read_csv()
-        self.init_fig()
-        self.draw_basemap()
-        self.make_init_line()
-        self.make_init_route()
 
     def prepare_for_SD(self):
         SD = ShipDomain_proposal()
@@ -379,6 +373,13 @@ class MakeLine:
         self.SD = SD
         print("Ship Domain set up complete\n")
 
+    def prepare_for_init_route(self):
+        self.init_fig()
+        self.draw_basemap()
+        self.make_init_line()
+        self.make_captain_line()
+        self.make_init_route()
+
     def prepare_for_CMAES(self):
         cal = CostCalculator()
         cal.SD = self.SD
@@ -386,9 +387,6 @@ class MakeLine:
         cal.ps= ps
         self.cal = cal
 
-        self.init_pts = self.resampling(self.init_route)
-        self.init_beta_list = self.set_beta(self.init_pts)
-        self.show_beta_pt(self.init_pts, self.init_beta_list)
         print("initial point calculated\n")
         self.initial_D = self.cal_sigma_for_ddCMA(points=self.target_list,
                                                   last_point=self.init_list[-1]
@@ -579,10 +577,11 @@ class MakeLine:
         port = self.port
         fig, ax = self.fig, self.ax
         legends = []
+
         # map
         map_X, map_Y = self.df_map["x [m]"].values, self.df_map["y [m]"].values
-        ax.fill_betweenx(map_X, map_Y, facecolor="gray", alpha=0.3)
-        ax.plot(map_Y, map_X, color="k", linestyle="--", lw=0.5, alpha=0.8)
+        ax.fill_betweenx(map_X, map_Y, facecolor="gray", alpha=0.3, zorder=0)
+        ax.plot(map_Y, map_X, color="k", linestyle="--", lw=0.5, alpha=0.8, zorder=0)
 
         # shipping lane
         for pid, g in self.df_lane.groupby("polygon_id", sort=True):
@@ -593,7 +592,7 @@ class MakeLine:
                 closed=True,
                 fill=True,
                 facecolor='magenta',
-                alpha=0.2
+                alpha=0.2, zorder=1
             )
             ax.add_patch(patch)
         
@@ -610,7 +609,7 @@ class MakeLine:
             traj.input_csv(df, self.port_csv)
             ax.plot(traj.Y, traj.X, 
                         color = 'gray', ls = '-', marker = 'D',
-                        markersize = 2, alpha = 0.8, lw = 1.0, zorder = 1)
+                        markersize = 2, alpha = 0.8, lw = 1.0, zorder = 3)
         legend_captain = plt.Line2D([0], [0],
                                     color = 'gray', ls = '-', marker = 'D',
                                     markersize = 2, alpha = 0.8, lw = 1.0, label="captain's Route")
@@ -698,7 +697,7 @@ class MakeLine:
         self.lines = lines
         self.show_init_line()
 
-    def make_init_route(self):
+    def make_captain_line(self):
         lines = self.lines
 
         # set parent
@@ -747,6 +746,103 @@ class MakeLine:
                     print("too much line")
                     break
             
+        self.show_captain_line()
+
+    def make_init_route(self):
+        """
+        航路をaproachとbarthingに分割
+        berthingをstraightとturnに分割
+        各航路ですること
+            aproach  : 大雑把でいいのでBezier
+            straight : 着桟の前は直進したい.一旦 300 [m]としている.
+            turn     : 着桟姿勢に応じて回頭,変針
+        """
+        port = self.port
+        pts = self.captain_pts
+
+        def cal_total_len(pts):
+            seg_len = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
+            s_cum = np.concatenate([[0.0], np.cumsum(seg_len)])
+            total_len = s_cum[-1]
+            return seg_len, s_cum, total_len
+
+        def interp(u, pts):
+            """
+            u : 開始地点からの距離[m]
+            """
+            i = np.searchsorted(s_cum, u, side="right") - 1
+            i = int(np.clip(i, 0, len(seg_len) - 1))
+            a = (u - s_cum[i]) / seg_len[i]
+            return pts[i] + (pts[i + 1] - pts[i]) * a
+        
+        # separate phase
+        seg_len, s_cum, total_len = cal_total_len(pts)
+        u_split = np.clip(total_len - 500, 0.0, total_len)
+        i = np.searchsorted(s_cum, u_split, side="right") - 1
+        i = int(np.clip(i, 0, len(seg_len) - 1))
+        turn_start_pt = port["turn start"]
+        bitrh_start_pt = [turn_start_pt[0] + 300, turn_start_pt[1]]
+        pts_for_bezier = np.vstack([pts[1:i+1], bitrh_start_pt])
+
+        bezier_pts, _ = Bezier.bezier(pts_for_bezier, 100)
+        straight_pts = np.vstack([bitrh_start_pt, turn_start_pt])
+        curve_pts = np.vstack([turn_start_pt, pts[-1]])
+
+        # aproach, straight
+        ## besier pts spread by speed
+        ap_and_st_pts = np.vstack([pts[0], bezier_pts, turn_start_pt])
+        seg_len, s_cum, total_len = cal_total_len(ap_and_st_pts)
+        aproach_pts = [pts[0].copy()]
+        u = 0.0
+        while u < total_len:
+            curent_pt = interp(u, ap_and_st_pts)
+            speed_kt = cal_speed(self, curent_pt, pts[-1])
+            speed = speed_kt *1852 / 60 # [m/min]
+            u = min(u + speed, total_len)
+            aproach_pts.append(interp(u, ap_and_st_pts) if u < total_len else ap_and_st_pts[-1].copy())
+        
+        ## psi
+        psi_list = np.array([
+            cal_angle(aproach_pts[i], aproach_pts[i+1]) % (2*np.pi)
+            for i in range(len(aproach_pts) - 1)
+        ])
+        aproach_pts.pop()
+
+        # turn
+        seg_len, s_cum, total_len = cal_total_len(curve_pts)
+        turn_pts = [curve_pts[0].copy()]
+        u = 0.0
+        while u < total_len:
+            curent_pt = interp(u, curve_pts)
+            speed_kt = cal_speed(self, curent_pt, pts[-1])
+            speed = speed_kt *1852 / 60 # [m/min]
+            u = min(u + speed, total_len)
+            turn_pts.append(interp(u, curve_pts) if u < total_len else curve_pts[-1].copy())
+
+        ## psi
+        psi_list = np.append(psi_list, psi_list[-1])
+        n = len(turn_pts)
+        beta = (2 * np.pi - psi_list[-1]) / (n-1)
+        for i in range(n-1):
+            psi = psi_list[-1] + beta
+            psi_list = np.append(psi_list, psi)
+
+        # init list
+        init_path = np.vstack([aproach_pts, turn_pts])
+        init_list = np.hstack([init_path, psi_list.reshape(-1, 1)])
+        
+
+        self.init_list = init_list
+        self.aproach_list = init_list[:(len(init_list) - n)]
+        self.turn_list = init_list[(len(init_list) - n):]
+        self.target_list = self.turn_list[1:-1]
+
+        self.aproach_start = aproach_pts[0]
+        self.aproach_end = aproach_pts[-1]
+        self.turn_start = turn_pts[0]
+        self.turn_end = turn_pts[-1]
+
+        print(init_list)
         self.show_init_route()
     
     # CMA-ES
@@ -783,19 +879,31 @@ class MakeLine:
         """
         cal = self.cal
 
-        start = self.init_list[0]
-        end = self.init_list[-1]
+        start = self.turn_list[0]
+        end = self.turn_list[-1]
         poly = np.vstack([start, pts, end])
         pts = poly[:, :2]; head = poly[:, 2]
 
-        # space cost
-        space_cost = 0.0
-        for j in range(len(poly) - 1):
-            space_cost += cal.spacing_penalty(pts[j], pts[j+1])
+        # ship domain
+        SD_cost = 0.0
+        for j in range(len(poly)):
+            SD_cost += cal.SD_penalty(pts[j], head[j])
+        
+        # psi smooth
+        angle_cost = 0.0
+        for j in range(len(head)-1):
+            angle_cost += (head[j+1] - head[j]) ** 2 # 1次差分
 
-        self.space_coeff = 0 / space_cost
+        # (x, y) smooth
+        xy_cost = 0.0
+        for j in range(1, len(pts)-1):
+            # xy_cost += np.linalg.norm(pts[j+1] - pts[j]) ** 2 # 1次差分
+            xy_cost += np.linalg.norm(pts[j-1] - 2*pts[j] + pts[j+1]) ** 2 # 2次差分
 
-        print(f"space_coeff : {self.space_coeff}\n")
+        self.sd_coeff = 100 / SD_cost
+        self.angle_coeff = 100 / angle_cost
+        self.xy_coeff = 100 / xy_cost
+        
 
     def path_evaluate(self, X):
         batched = True
@@ -805,10 +913,8 @@ class MakeLine:
             batched = False
 
         cal = self.cal
-        # start = self.init_pts[0]
-        # end = self.init_pts[-1]
-        start = self.init_list[0]
-        end = self.init_list[-1]
+        start = self.turn_list[0]
+        end = self.turn_list[-1]
 
         # prepare for cost calculation
         straight_length = np.linalg.norm(start - end)
@@ -859,7 +965,6 @@ class MakeLine:
                 arr_i = arr[i].reshape(-1, 3)
                 poly = np.vstack([start, arr_i, end])
                 pts = poly[:, :2]; head = poly[:, 2]
-                pts[-1] = self.init_pts[-1]
 
                 # ship domain
                 SD_cost = 0.0
@@ -874,9 +979,12 @@ class MakeLine:
                 # (x, y) smooth
                 xy_cost = 0.0
                 for j in range(1, len(pts)-1):
+                    # xy_cost += np.linalg.norm(pts[j+1] - pts[j]) ** 2 # 1次差分
                     xy_cost += np.linalg.norm(pts[j-1] - 2*pts[j] + pts[j+1]) ** 2 # 2次差分
 
-                total = SD_cost + angle_cost + 0.01 * xy_cost
+                total = (self.sd_coeff * SD_cost 
+                         + self.angle_coeff * angle_cost 
+                         + self.xy_coeff * xy_cost)
                 costs[i] = total
 
         return float(costs[0]) if not batched else costs
@@ -941,7 +1049,7 @@ class MakeLine:
         for h in handles:
             h.remove()
 
-    def show_init_route(self):
+    def show_captain_line(self):
         ax = self.ax
         lines = self.lines
 
@@ -951,176 +1059,97 @@ class MakeLine:
             ln = ln.parent
             pts_list.append(np.asarray(ln.fixed_pt))
         pts = np.vstack(pts_list[::-1])
-        h, =ax.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
-        plt.savefig(os.path.join(self.SAVE_DIR, "init route.png"),
+        h, =ax.plot(pts[:, 1], pts[:, 0], color="blue", linestyle='-')
+        plt.savefig(os.path.join(self.SAVE_DIR, "captain's line.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
-        print("init route saved\n")
+        print("captain's line saved\n")
 
         h.remove()
-        self.init_route = pts
+        self.captain_pts = pts
 
-    def resampling(self, pts):
-        """
-        初期経路に合わせて自動で分割. グリッドを時間で分割
-        pts : 真上のinit_route
-        """
+    def show_init_route(self):
         ax = self.ax
-        end_pt = pts[-1]
-
-        def cal_total_len(pts):
-            seg_len = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
-            s_cum = np.concatenate([[0.0], np.cumsum(seg_len)])
-            total_len = s_cum[-1]
-            return seg_len, s_cum, total_len
-
-        def interp(u, pts):
-            """
-            u : 開始地点からの距離[m]
-            """
-            i = np.searchsorted(s_cum, u, side="right") - 1
-            i = int(np.clip(i, 0, len(seg_len) - 1))
-            a = (u - s_cum[i]) / seg_len[i]
-            return pts[i] + (pts[i + 1] - pts[i]) * a
-
-        # Bezierを使う点とCMAを使う点を分割
-        seg_len, s_cum, total_len = cal_total_len(pts)
-        u_split = np.clip(total_len - 500, 0.0, total_len)
-        i = np.searchsorted(s_cum, u_split, side="right") - 1
-        i = int(np.clip(i, 0, len(seg_len) - 1))
-        turn_start_pt = self.port["turn start"]
-        bezier_end_pt = [500, turn_start_pt[1]]
-        bezier_pts = np.vstack([pts[1:i+1], bezier_end_pt]) # 
-        barthing_pts = np.vstack([turn_start_pt, pts[-1]])
-
-        # s_cumを更新
-        aproach_pts, _ = Bezier.bezier(bezier_pts, 100)
-        poly = np.vstack([pts[0], aproach_pts, barthing_pts])
-        seg_len, s_cum, total_len = cal_total_len(poly)
-
-        out = [pts[0].copy()]
-        u = 0.0
-        while u < total_len:
-            curent_pt = interp(u, poly)
-            speed_kt = cal_speed(self, curent_pt, end_pt)
-            if speed_kt == self.ps.MIN_SPEED_KTS:
-                speed_kt = self.ps.MIN_SPEED_KTS
-            speed = speed_kt *1852 / 60 # [m/min]
-            u = min(u + speed, total_len)
-            out.append(interp(u, poly) if u < total_len else pts[-1].copy())
-
-        # show
-        out_pt = np.asarray(out, dtype=float).reshape(-1, 2)
-        h1, = ax.plot(out_pt[:, 1], out_pt[:, 0], color="blue", linestyle='-')
-        h2 = ax.scatter(out_pt[:, 1], out_pt[:, 0], s=12, marker="o", c="blue")
-        legend_init_path = plt.Line2D([0], [0],
-                                    color = 'blue', ls = '-', marker = 'D',
-                                    markersize = 2, lw = 1.0, label="Initial Path")
-        self.legends.append(legend_init_path)
-        h = ax.legend(handles=self.legends)
-        plt.savefig(os.path.join(self.SAVE_DIR, "CMA route init.png"),
-                    dpi=400, bbox_inches="tight", pad_inches=0.05)
-        print("init route saved\n")
-
-        self.init_show = []
-        self.init_show.append(h1), self.init_show.append(h2)
-        h.remove()
-
-        return np.asarray(out, dtype=float)
-    
-    def set_beta(self, init_pts):
-        n = len(init_pts)
-        beta_list = np.zeros(n, dtype=float)
-
-        dy = init_pts[1:, 1] - init_pts[:-1, 1]
-        dx = init_pts[1:, 0] - init_pts[:-1, 0]
-
-        psi = np.arctan2(dy, dx) % (2 * np.pi )# (n-1)
-
-        mask = np.linalg.norm(init_pts - init_pts[-1], axis=1) < self.port["turn start"][0]
-        m = np.sum(mask)
-        psi_start = psi[n-m-1]
-        psi_end = 2 * np.pi
-
-        psi_err = psi_end - psi_start
-        tail = np.arange(n-m, n)
-
-        beta_list[tail] += psi_err / (len(tail))
-
-        beta_list[0]  = 0.0
-        beta_list[-1] = beta_list[-2]
-
-        self.psi_start = psi_start
-
-        return beta_list
-    
-    def show_beta_pt(self, init_pts, beta_list):
-        ax = self.ax
-        d = float(self.ps.L) / 4
-        psi_start = self.psi_start
-
-        n = len(init_pts)
-        beta_list = np.asarray(beta_list, float)
-
-        # どこから beta が入っているか（例：非ゼロが始まる点）
-        nz = np.flatnonzero(np.abs(beta_list) > 1e-12)
-        m = nz[0]
-        idx = np.arange(m, n)
-
-        psi_pts = psi_start + np.cumsum(beta_list)
-
-        psi_tail  = psi_pts[idx]
-        beta_tail = beta_list[idx]
-
-        dx0 = -d * np.sin(psi_tail)
-        dy0 = -d * np.cos(psi_tail)
-
-        cb = np.cos(beta_tail)
-        sb = np.sin(beta_tail)
-
-        dx = cb * dx0 - sb * dy0
-        dy = sb * dx0 + cb * dy0
-
-        # まず全部そのまま
-        beta_pts = init_pts.copy()
-
-        # 後半（betaがあるところ）だけ上書き
-        beta_pts[idx, 0] = init_pts[idx, 0] + dy
-        beta_pts[idx, 1] = init_pts[idx, 1] + dx
-
         h_list = []
-        for pose in np.hstack([init_pts[idx], psi_tail.reshape(-1, 1)]):
+
+        list = self.init_list
+        pt_list = list[:,:2]; psi_list = list[:, 2]
+
+        # path
+        # ax.plot(pt_list[:, 1], pt_list[:, 0], color="blue", linestyle='-', alpha=0.5, zorder=6)
+
+        # ship shape
+        for pose in list:
             shipshape = MplPolygon(
                 ship_shape_poly(
                 pose=pose,
                 L=self.ps.L, B=self.ps.B,
                 ),
                 facecolor='blue',
-                alpha=0.4
+                alpha=0.7, zorder=6
             )
-            h = ax.add_patch(shipshape)
-            h_list.append(h)
-        ax.set_xlim(-500, 500)
-        ax.set_ylim(-500, 500)
-        plt.savefig(os.path.join(self.SAVE_DIR, f"psi zoom.png"),
-                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+            ax.add_patch(shipshape)
+        
+        # text
+        self.add_text(ax, h_list)
 
-        self.init_list = np.hstack([beta_pts[idx], psi_tail.reshape(-1, 1)])
-        self.non_target_pts = beta_pts[:m]
-        self.target_list = self.init_list[1:-1]
+        # setting
+        legend_init_path = plt.Line2D([0], [0],
+                                    color = 'blue', ls = '-', marker = 'D',
+                                    markersize = 2, lw = 1.0, label="Initial Path")
+        self.legends.append(legend_init_path)
+        h = ax.legend(handles=self.legends)
+        h_list.append(h)
+
+        plt.savefig(os.path.join(self.SAVE_DIR, "init path.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        # zoom
+        ax.set_xlim([-500, 500])
+        ax.set_ylim([-500, 500])
+        plt.savefig(os.path.join(self.SAVE_DIR, "init path zoom.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        print("init path saved\n")
+
         for h in h_list:
             h.remove()
+
+
+    def add_text(self, ax, h_list):
+        x_as, y_as = self.aproach_start
+        p1 = ax.scatter(y_as, x_as, c="black", s=20)
+        t1 = ax.annotate("aproach start", xy=(y_as, x_as),
+                        xytext=(0, -10), textcoords="offset points",
+                        ha="right", va="top", fontsize=15, zorder=10)
+
+        x_ae, y_ae = self.aproach_end
+        p2 = ax.scatter(y_ae, x_ae, c="black", s=20)
+        t2 = ax.annotate("aproach end / birth start", xy=(y_ae, x_ae),
+                        xytext=(0, -10), textcoords="offset points",
+                        ha="right", va="top", fontsize=15, zorder=10)
+
+        # x_ts, y_ts = self.turn_start
+        # p3 = ax.scatter(y_ts, x_ts, c="black", s=20)
+        # t3 = ax.annotate("turn start", xy=(y_ts, x_ts),
+        #                 xytext=(0, -10), textcoords="offset points",
+        #                 ha="right", va="top", fontsize=15)
+
+        x_te, y_te = self.turn_end
+        p4 = ax.scatter(y_te, x_te, c="black", s=20)
+        t4 = ax.annotate("birth end", xy=(y_te, x_te),
+                        xytext=(0, -10), textcoords="offset points",
+                        ha="right", va="top", fontsize=15, zorder=10)
+
+        h_list.extend([t1, p1, t2, p2, t4, p4])
 
     def show_CMA_path(self, best_mean, restart):
         ax = self.ax
         SD = self.SD
-        # start = self.init_pts[0]; end = self.init_pts[-1]
-        start = self.init_list[0]; end = self.init_list[-1]
         h_list = []
+
+        start = self.turn_list[0]; end = self.turn_list[-1]
 
         list = np.asarray(best_mean, float).reshape(-1, 3)
         poly = np.vstack([start, list, end])
         path = poly[:, :2]; head = poly[:, 2]
-        path[-1] = self.init_pts[-1]
 
         # path, point
         h1, = ax.plot(path[:, 1], path[:, 0], color="red", linestyle='-')
@@ -1135,7 +1164,7 @@ class MakeLine:
                 L=self.ps.L, B=self.ps.B,
                 ),
                 facecolor='red',
-                alpha=0.4
+                alpha=0.7, zorder=7
             )
             h = ax.add_patch(shipshape)
             h_list.append(h)
@@ -1217,26 +1246,16 @@ class MakeLine:
     def show_best_result(self, best_dict):
         ax = self.ax
         port = self.port
-        for h in self.init_show:
-            h.remove()
         h_list = []
-        # bezier root
-        non_opt_pts = np.asarray(self.non_target_pts)
-        non_opt_psi = np.array([
-            cal_angle(non_opt_pts[i], non_opt_pts[i+1]) % (2*np.pi)
-            for i in range(len(non_opt_pts) - 1)
-        ])
-        end_pt = np.asarray(self.init_list[0])
-        psi_end = cal_angle(non_opt_pts[-1], end_pt[:2]) % (2*np.pi)
-        non_opt_psi = np.append(non_opt_psi, psi_end)
-        non_opt_list = np.hstack([non_opt_pts, non_opt_psi.reshape(-1, 1)])
 
-        # best root
+        # best path
         opt_list = best_dict[self.smallest_evaluation_key]["best_mean_sofar"].reshape(-1, 3)
-        best_list = np.vstack([non_opt_list, opt_list, self.init_list[-1]])
+        n = len(opt_list)
+        best_list = self.init_list.copy()
+        best_list[-(n+1):-1] = opt_list
+        best_pts = best_list[:, :2]; best_psi = best_list[:, 2]
 
-        # show
-        ## ship shape
+        # ship shape
         for pose in best_list:
             shipshape = MplPolygon(
                 ship_shape_poly(
@@ -1244,10 +1263,12 @@ class MakeLine:
                 L=self.ps.L, B=self.ps.B,
                 ),
                 facecolor='red',
-                alpha=0.7
+                alpha=0.7, zorder=7,
             )
-            h = ax.add_patch(shipshape)
-            h_list.append(h)
+            ax.add_patch(shipshape)
+
+        # text
+        self.add_text(ax, h_list)
         
         ## save
         ax.set_xlim(port["hor_range"])
@@ -1255,7 +1276,25 @@ class MakeLine:
         ax.legend(handles=self.legends)
         plt.savefig(os.path.join(self.SAVE_DIR, f"CMA Result.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
+        
+        # init path
+        for pose in self.init_list:
+            shipshape = MplPolygon(
+                ship_shape_poly(
+                pose=pose,
+                L=self.ps.L, B=self.ps.B,
+                ),
+                facecolor='blue',
+                alpha=0.7, zorder=6,
+            )
+            ax.add_patch(shipshape)
 
+        plt.savefig(os.path.join(self.SAVE_DIR, f"CMA Result with init.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        
+        # zoom
+        for h in h_list:
+            h.remove()
         ax.set_xlim([-500, 500])
         ax.set_ylim([-500, 500])
         plt.savefig(os.path.join(self.SAVE_DIR, f"CMA Result zoom.png"),
