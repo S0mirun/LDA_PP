@@ -13,6 +13,8 @@ from scipy import ndimage
 import shapely
 from shapely import contains_xy, intersects_xy, prepare
 from shapely.geometry import Polygon, Point
+from shapely.prepared import prep
+from shapely.validation import make_valid
 from typing import ClassVar, Tuple
 from tqdm.auto import tqdm
 
@@ -65,7 +67,8 @@ class Line:
 
     ver_range:ClassVar[Tuple[float, float] | None] = None
     hor_range:ClassVar[Tuple[float, float] | None] = None
-    map:ClassVar = None
+    map_poly:ClassVar = None
+    map_poly_prep:ClassVar = None
     lane:ClassVar = None
 
     def __post_init__(self):
@@ -93,7 +96,7 @@ class Line:
         
         # in Polygon or not
         x, y = pt[1], pt[0]
-        if self.map.intersects(Point(x, y)):
+        if self.map_poly_prep.intersects(Point(x, y)):
             return True
         
         return False
@@ -120,7 +123,6 @@ class CostCalculator:
     def __init__(self):
         self.ps = None
         self.SD = None
-        self.map = None
         self.lines = None
 
     def ShipDomain_penalty(self, parent_pt, current_pt, child_pt):
@@ -146,7 +148,7 @@ class CostCalculator:
         ])
         # count
         xs = domain_xy[:, 1]; ys = domain_xy[:, 0]
-        hit = intersects_xy(Line.map, xs, ys)
+        hit = intersects_xy(Line.map_poly, xs, ys)
         n_hit = int(np.count_nonzero(hit))
 
         return n_hit
@@ -216,9 +218,6 @@ class CostCalculator:
         SD = self.SD
         lines = self.lines
         theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
-        # theta_list_1 = np.arange(np.deg2rad(0), np.deg2rad(90), np.deg2rad(3))
-        # theta_list_2 = np.arange(np.deg2rad(270), np.deg2rad(360), np.deg2rad(3))
-        # theta_list = np.vstack([theta_list_1, theta_list_2])
         
         speed = cal_speed(self, pt, lines[-1].end_pt)
         r_list = []
@@ -230,12 +229,21 @@ class CostCalculator:
             pt[0] + r * np.cos(theta_list + psi),
             pt[1] + r * np.sin(theta_list + psi),
         ])
-        # count
-        xs = domain_xy[:, 1]; ys = domain_xy[:, 0]
-        hit = intersects_xy(Line.map, xs, ys)
-        n_hit = int(np.count_nonzero(hit))
+        sd_poly = Polygon(domain_xy)
 
-        return n_hit
+        # count
+        # hit = Line.map_poly_prep.intersects(sd_poly)
+        # n_hit = int(np.count_nonzero(hit))
+
+        # return n_hit
+
+        # area
+        if Line.map_poly_prep.intersects(sd_poly):
+            pen = sd_poly.intersection(Line.map_poly).area
+        else:
+            pen = 0.0
+
+        return pen
 
 def convert(df, port_file, col_lat="lat", col_lon="lon"):
     df_coord = pd.read_csv(port_file)
@@ -644,9 +652,9 @@ class MakeLine:
 
         # for crossing algorithm
         coords_map = self.df_map[["y [m]", "x [m]"]].to_numpy(dtype=float)
-        poly_map = Polygon(coords_map)
-        prepare(poly_map)
-        Line.map = poly_map
+        poly_map = make_valid(Polygon(coords_map))
+        Line.map_poly = poly_map
+        Line.map_poly_prep = prep(poly_map)
 
         # from start point
         L_start = Line(fixed_pt=port["start"], theta=np.deg2rad(port["psi_start"]))
@@ -868,7 +876,7 @@ class MakeLine:
                 for j in range(1, len(pts)-1):
                     xy_cost += np.linalg.norm(pts[j-1] - 2*pts[j] + pts[j+1]) ** 2 # 2次差分
 
-                total = 0.1 * SD_cost + angle_cost + 0.01 * xy_cost
+                total = SD_cost + angle_cost + 0.01 * xy_cost
                 costs[i] = total
 
         return float(costs[0]) if not batched else costs
