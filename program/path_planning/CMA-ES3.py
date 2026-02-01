@@ -31,7 +31,7 @@ dirname = os.path.splitext(os.path.basename(__file__))[0]
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 9
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -208,11 +208,6 @@ class CostCalculator:
             pen += w_out * float(np.sum((d / eps) ** p))
 
         return pen
-    
-    def turnig_angle(self, pt, beta):
-        straight = np.linalg.norm(self.lines[0].end_pt - self.lines[-1].end_pt)
-        dist = np.linalg.norm(pt - self.lines[-1].end_pt)
-        return (dist / straight) * beta
     
     def SD_penalty(self, pt, psi):
         SD = self.SD
@@ -616,6 +611,7 @@ class MakeLine:
                                     color = 'gray', ls = '-', marker = 'D',
                                     markersize = 2, alpha = 0.8, lw = 1.0, label="captain's Route")
         legends.append(legend_captain)
+
         # compas
         img = mpimg.imread("raw_datas/compass icon2.png")
         df = pd.read_csv(self.port_csv)
@@ -648,7 +644,6 @@ class MakeLine:
         self.legends = legends
 
     def make_init_line(self):
-        ax = self.ax
         port = self.port
         lines = []
 
@@ -1067,11 +1062,15 @@ class MakeLine:
         ax = self.ax
         lines = self.lines
 
+
         ln = lines[-1]
         pts_list = [np.asarray(ln.end_pt), np.asarray(ln.fixed_pt)]
         while ln.parent is not None:
             ln = ln.parent
             pts_list.append(np.asarray(ln.fixed_pt))
+        
+        self.show_init_lines("captain's line before")
+
         pts = np.vstack(pts_list[::-1])
         h, =ax.plot(pts[:, 1], pts[:, 0], color="blue", linestyle='-')
         plt.savefig(os.path.join(self.SAVE_DIR, "captain's line.png"),
@@ -1144,7 +1143,7 @@ class MakeLine:
 
         x_te, y_te = self.turn_end
         p4 = ax.scatter(y_te, x_te, c="black", s=20, zorder=10)
-        t4 = ax.annotate("berth end", xy=(y_te, x_te),
+        t4 = ax.annotate("berthing end", xy=(y_te, x_te),
                         xytext=(+10, 0), textcoords="offset points",
                         ha="left", va="center", fontsize=15, zorder=10)
 
