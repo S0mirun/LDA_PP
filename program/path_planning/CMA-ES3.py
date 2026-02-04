@@ -12,7 +12,7 @@ import pandas as pd
 from scipy import ndimage
 import shapely
 from shapely import contains_xy, intersects_xy, prepare
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon, Point, LineString
 from shapely.prepared import prep
 from shapely.validation import make_valid
 from typing import ClassVar, Tuple
@@ -26,12 +26,13 @@ from utils.PP.MultiPlot import RealTraj
 
 DIR = os.path.dirname(__file__)
 dirname = os.path.splitext(os.path.basename(__file__))[0]
+theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
 
 
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 9
+        self.port_number: int = 8
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -72,6 +73,7 @@ class Line:
     lane:ClassVar = None
 
     def __post_init__(self):
+        self.theta = self.theta % (2 * np.pi)
         if self.end_pt == None:
             end_pt = self.fixed_pt
             if self.check(end_pt):
@@ -132,7 +134,6 @@ class CostCalculator:
         """
         SD = self.SD
         lines = self.lines
-        theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(10))
 
         speed = cal_speed(self, current_pt, lines[-1].end_pt)
         psi = cal_psi(parent_pt, current_pt, child_pt)
@@ -212,7 +213,6 @@ class CostCalculator:
     def SD_penalty(self, pt, psi):
         SD = self.SD
         lines = self.lines
-        theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
         
         speed = cal_speed(self, pt, lines[-1].end_pt)
         r_list = []
@@ -597,7 +597,7 @@ class MakeLine:
         ax.scatter(self.df_buoy["x [m]"].values, self.df_buoy["y [m]"].values,
                     color='orange', s=20, zorder=4)
         legend_buoy = plt.Line2D([0], [0], marker="o", color="w",
-                                    markerfacecolor="orange", markersize=2, label="Buoy Point")
+                                    markerfacecolor="orange", markersize=2, label="Buoy")
         legends.append(legend_buoy)
 
         # compas
@@ -653,7 +653,7 @@ class MakeLine:
                 theta = 180
             theta = np.deg2rad(theta)
         else:
-            theta = np.deg2rad(port["psi_end"] + 10)
+            theta = np.deg2rad(port["psi_end"])
         L_berth = Line(fixed_pt=np.array((0.0, margin)), theta=theta)
         L_berth.swap()
         lines.append(L_berth)
@@ -735,23 +735,44 @@ class MakeLine:
                 L_berth.set_parent(lines[idx])
                 break
             else:
-                longest = 0.0
                 mid = (L_berth.fixed_pt + L_berth.end_pt) / 2
-                for deg_i in range(-90, 91):
-                    theta = L_berth.theta + np.deg2rad(deg_i - 180)
-                    L = Line(fixed_pt=mid, end_pt=None, theta=theta)
-                    length = np.linalg.norm(L.end_pt - L.fixed_pt)
-                    if length > longest:
-                        longest = length
-                        best_theta = theta
 
-                L_append = Line(fixed_pt=mid, theta=best_theta + np.deg2rad(5))
+                def to_xy(p_yx):
+                    return (float(p_yx[1]), float(p_yx[0]))
+                
+                if len(lines) == 2:
+                    ln = lines[0]
+                    fixed_pt = ln.fixed_pt; end_pt = ln.end_pt
+                    pts = np.linspace(end_pt, fixed_pt, 99)
+                    idx = 0
+                    while idx < 99 and Line.map_poly_prep.intersects(LineString([to_xy(pts[idx]), to_xy(mid)])):
+                        idx += 1
+                    idx_through = idx
+                    while idx < 99 and (not Line.map_poly_prep.intersects(LineString([to_xy(pts[idx]), to_xy(mid)]))):
+                        idx += 1
+                    idx_hit = idx
+                
+                else:
+                    for ln in lines[-2:0:-1]:
+                        fixed_pt = ln.fixed_pt; end_pt = ln.end_pt
+                        pts = np.linspace(end_pt, fixed_pt, 99)
+                        idx = 0
+                        while idx < 99 and Line.map_poly_prep.intersects(LineString([to_xy(pts[idx]), to_xy(mid)])):
+                            idx += 1
+                        idx_through = idx
+                        while idx < 99 and (not Line.map_poly_prep.intersects(LineString([to_xy(pts[idx]), to_xy(mid)]))):
+                            idx += 1
+                        idx_hit = idx
+
+                        if idx_hit != 99:
+                            break
+
+                ln_mid = (pts[idx_through] + pts[idx_hit]) / 2
+                theta = cal_angle(mid, ln_mid)
+                L_append = Line(fixed_pt=mid, theta=theta)
                 L_append.swap()
                 L_berth.set_parent(L_append)
                 lines.insert(base_idx, L_append)
-                if len(lines) > 10:
-                    print("too much line")
-                    break
             
         self.show_captain_line("captain's line before", last=True)
 
@@ -761,12 +782,12 @@ class MakeLine:
         berthingをstraightとturnに分割
         各航路ですること
             aproach  : 大雑把でいいのでBezier
-            straight : 着桟の前は直進したい.一旦 300 [m]としている.
+            straight : 着桟の前は直進したい.一旦 3L [m]としている.
             turn     : 着桟姿勢に応じて回頭,変針
         """
         port = self.port
         pts = self.captain_pts
-        Lpp = self.ps.L
+        margin = 3 * self.ps.L
 
         def cal_total_len(pts):
             seg_len = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
@@ -789,7 +810,9 @@ class MakeLine:
         i = np.searchsorted(s_cum, u_split, side="right") - 1
         i = int(np.clip(i, 0, len(seg_len) - 1))
         turn_start_pt = port["turn start"]
-        berth_start_pt = [turn_start_pt[0] + 3 * Lpp, turn_start_pt[1]]
+        nearest_ln = self.get_nearest_line(turn_start_pt)
+        theta = nearest_ln.theta # [rad]
+        berth_start_pt = turn_start_pt + margin * np.array([np.cos(theta - np.pi), np.sin(theta - np.pi)])
         pts_for_bezier = np.vstack([pts[1:i+1], berth_start_pt])
 
         bezier_pts, _ = Bezier.bezier(pts_for_bezier, 100)
@@ -830,7 +853,11 @@ class MakeLine:
         ## psi
         psi_list = np.append(psi_list, psi_list[-1])
         n = len(turn_pts)
-        beta = (2 * np.pi - psi_list[-1]) / (n-1)
+        if port["side"] == "port":
+            beta = (2 * np.pi - psi_list[-1]) / (n-1)
+        elif port["side"] == "starboard":
+            beta = -(psi_list[-1] - 0)  / (n-1)
+
         for i in range(n-1):
             psi = psi_list[-1] + beta
             psi_list = np.append(psi_list, psi)
@@ -850,6 +877,37 @@ class MakeLine:
 
         print(init_list)
         self.show_init_route()
+
+    def get_nearest_line(self, pt):
+        """
+        pt に最も近い線分を返す
+        if 一番近いのが fixed_pt
+        elif 一番近いのが end_pt
+        else 点と直線の距離
+        """
+        lines = self.lines
+        pt = np.asarray(pt, dtype=float)
+        longest = 1e5
+
+        for ln in lines:
+            fixed_pt = np.asarray(ln.fixed_pt, dtype=float); end_pt = np.asarray(ln.end_pt, dtype=float)
+
+            v_fe = end_pt - fixed_pt; v_ef = fixed_pt - end_pt
+            v_fp = pt - fixed_pt    ; v_ep = pt - end_pt
+            if np.dot(v_fp, v_fe) < 0:
+                dist = np.linalg.norm(v_fp)
+            elif np.dot(v_ep, v_ef) < 0:
+                dist = np.linalg.norm(v_ep)
+            else:
+                FH_norm = np.dot(v_fp, v_fe)/np.linalg.norm(v_fe) # 垂線の足
+                neighbor_point = fixed_pt + (v_fe)/np.linalg.norm(v_fe)*FH_norm
+                dist = np.linalg.norm(pt - neighbor_point)
+            
+            if longest > dist:
+                longest = dist
+                nearest_line = ln
+
+        return nearest_line
     
     # CMA-ES
 
@@ -1069,7 +1127,7 @@ class MakeLine:
         if last:
             pts = np.vstack(pts_list[::-1])
             self.way_pts = pts[1:-1]
-            legend_WP = plt.Line2D([0], [0], marker="o", color="g",
+            legend_WP = plt.Line2D([0], [0], marker="o", color="w",
                                         markerfacecolor="green", markersize=2, label="Way Point")
             self.legends.append(legend_WP)
 
@@ -1199,7 +1257,6 @@ class MakeLine:
             h_list.append(h)
 
         # ship domain
-        theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
         for pts, psi in zip(path, head):
             speed = cal_speed(self, pts, path[-1])
             r_list = []
@@ -1351,12 +1408,12 @@ class MakeLine:
                 "name": "Osaka_port1A",
                 "side": "starboard",
                 "style": "head in",
-                "start": [-1400.0, -800.0],
-                "psi_start": 40,
+                "start": [-3000.0, -1000.0],
+                "psi_start": 0,
                 "psi_end": 0,
                 "berth_type": 2,
-                "ver_range": [-1500, 500],
-                "hor_range": [-1000, 500],
+                "ver_range": [-3200, 500],
+                "hor_range": [-1500, 1500],
             },
             1: {
                 "name": "Tokyo_port2C",
@@ -1414,7 +1471,10 @@ class MakeLine:
             },
             6: {
                 "name": "Kashima",
+                "side": "starboard",
+                "style": "head out",
                 "start": [2100.0, 2400.0],
+                "turn start": [250, -150],
                 "psi_start": -135,
                 "psi_end": -90,
                 "berth_type": 2,
@@ -1423,16 +1483,21 @@ class MakeLine:
             },
             7: {
                 "name": "Aomori",
+                "side": "port",
                 "start": [350, 3400.0],
                 "psi_start": -115,
                 "psi_end": 90,
+                "turn start": [0, 200],
                 "berth_type": 2,
                 "ver_range": [-1500, 1500],
                 "hor_range": [-1000, 3500],
             },
             8: {
                 "name": "Hachinohe",
+                "side": "port",
+                "style": "head out",
                 "start": [1350, 2500.0],
+                "turn start": [200, 250],
                 "psi_start": -110,
                 "psi_end": 90,
                 "berth_type": 2,
