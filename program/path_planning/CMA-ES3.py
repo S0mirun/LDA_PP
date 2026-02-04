@@ -600,18 +600,6 @@ class MakeLine:
                                     markerfacecolor="orange", markersize=2, label="Buoy Point")
         legends.append(legend_buoy)
 
-        # captain's route
-        for df in self.df_cap:
-            traj = RealTraj()
-            traj.input_csv(df, self.port_csv)
-            ax.plot(traj.Y, traj.X, 
-                        color = 'gray', ls = '-', marker = 'D',
-                        markersize = 2, alpha = 0.8, lw = 1.0, zorder = 3)
-        legend_captain = plt.Line2D([0], [0],
-                                    color = 'gray', ls = '-', marker = 'D',
-                                    markersize = 2, alpha = 0.8, lw = 1.0, label="captain's Route")
-        legends.append(legend_captain)
-
         # compas
         img = mpimg.imread("raw_datas/compass icon2.png")
         df = pd.read_csv(self.port_csv)
@@ -645,7 +633,9 @@ class MakeLine:
 
     def make_init_line(self):
         port = self.port
+        ax = self.ax
         lines = []
+        h_list = []
 
         # for crossing algorithm
         coords_map = self.df_map[["y [m]", "x [m]"]].to_numpy(dtype=float)
@@ -668,9 +658,11 @@ class MakeLine:
         L_berth.swap()
         lines.append(L_berth)
         self.lines = lines
+        self.turn_end = np.array((0.0, margin))
 
         ## save fig
-        self.show_init_lines("init lines step.1")
+        self.add_text(ax, h_list, p_te=True)
+        self.show_init_lines(ax, "init lines step.1")
 
         # from shipping lane
         lane_polys = []
@@ -695,15 +687,21 @@ class MakeLine:
         lines[:] = lines[1:] + lines[:1]
 
         ## save fig
-        self.show_init_lines("init lines step.2")
+        self.show_init_lines(ax, "init lines step.2")
 
         # from start point
         L_start = Line(fixed_pt=port["start"], theta=np.deg2rad(port["psi_start"]))
         lines.insert(0, L_start)
+        self.aproach_start = port["start"]
 
         ## save fig
-        self.show_init_lines("init lines step.3")
+        self.add_text(ax, h_list, p_as=True)
+        self.show_init_lines(ax, "init lines step.3")
         print("\ninit lines saved\n")
+
+        for h in h_list:
+            h.remove()
+
 
     def make_captain_line(self):
         lines = self.lines
@@ -711,6 +709,7 @@ class MakeLine:
         # set parent
         for i in range(len(lines) - 2):
             lines[i+1].set_parent(lines[i])
+        self.show_captain_line("captain's line prepare")
 
         base_idx = len(lines) - 1
         while True:
@@ -754,7 +753,7 @@ class MakeLine:
                     print("too much line")
                     break
             
-        self.show_captain_line()
+        self.show_captain_line("captain's line before", last=True)
 
     def make_init_route(self):
         """
@@ -767,6 +766,7 @@ class MakeLine:
         """
         port = self.port
         pts = self.captain_pts
+        Lpp = self.ps.L
 
         def cal_total_len(pts):
             seg_len = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
@@ -789,7 +789,7 @@ class MakeLine:
         i = np.searchsorted(s_cum, u_split, side="right") - 1
         i = int(np.clip(i, 0, len(seg_len) - 1))
         turn_start_pt = port["turn start"]
-        berth_start_pt = [turn_start_pt[0] + 300, turn_start_pt[1]]
+        berth_start_pt = [turn_start_pt[0] + 3 * Lpp, turn_start_pt[1]]
         pts_for_bezier = np.vstack([pts[1:i+1], berth_start_pt])
 
         bezier_pts, _ = Bezier.bezier(pts_for_bezier, 100)
@@ -845,10 +845,8 @@ class MakeLine:
         self.turn_list = init_list[(len(init_list) - n):]
         self.target_list = self.turn_list[1:-1]
 
-        self.aproach_start = aproach_pts[0]
         self.berth_start = berth_start_pt
         self.turn_start = turn_start_pt
-        self.turn_end = turn_pts[-1]
 
         print(init_list)
         self.show_init_route()
@@ -1040,28 +1038,24 @@ class MakeLine:
         return out if X.ndim == 2 else out[0]
      
     # show map
-    def show_init_lines(self, name):
-        ax = self.ax
+    def show_init_lines(self, ax, name):
         lines = self.lines
 
         handles = []
         for ln in lines:
             pts = np.vstack([ln.fixed_pt, ln.end_pt])
             h, = ax.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
-            h_fixed, = ax.plot(ln.fixed_pt[1], ln.fixed_pt[0], marker='o', linestyle='None', color='k')
-            h_end, = ax.plot(ln.end_pt[1], ln.end_pt[0], marker='o', linestyle='None', color='g')
-            handles.extend([h, h_fixed, h_end])
+            handles.append(h)
         plt.savefig(os.path.join(self.SAVE_DIR, f"{name}.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         
         for h in handles:
             h.remove()
-        print(f"{name} saved")
 
-    def show_captain_line(self):
+    def show_captain_line(self, name, last=False):
         ax = self.ax
         lines = self.lines
-
+        h_list = []
 
         ln = lines[-1]
         pts_list = [np.asarray(ln.end_pt), np.asarray(ln.fixed_pt)]
@@ -1069,16 +1063,27 @@ class MakeLine:
             ln = ln.parent
             pts_list.append(np.asarray(ln.fixed_pt))
         
-        self.show_init_lines("captain's line before")
+        self.add_text(ax, h_list, p_as=True, p_te=True)
+        self.show_init_lines(ax, name)
 
-        pts = np.vstack(pts_list[::-1])
-        h, =ax.plot(pts[:, 1], pts[:, 0], color="blue", linestyle='-')
-        plt.savefig(os.path.join(self.SAVE_DIR, "captain's line.png"),
-                    dpi=400, bbox_inches="tight", pad_inches=0.05)
-        print("captain's line saved\n")
+        if last:
+            pts = np.vstack(pts_list[::-1])
+            self.way_pts = pts[1:-1]
+            legend_WP = plt.Line2D([0], [0], marker="o", color="g",
+                                        markerfacecolor="green", markersize=2, label="Way Point")
+            self.legends.append(legend_WP)
 
-        h.remove()
-        self.captain_pts = pts
+            h, =ax.plot(pts[:, 1], pts[:, 0], color="blue", linestyle='-')
+            self.add_text(ax, h_list, p_as=True, p_te=True, wp=True)
+            plt.savefig(os.path.join(self.SAVE_DIR, "captain's line.png"),
+                        dpi=400, bbox_inches="tight", pad_inches=0.05)
+            h_list.append(h)
+            print("captain's line saved\n")
+            self.captain_pts = pts
+
+        for h in h_list:
+            h.remove()
+
 
     def show_init_route(self):
         ax = self.ax
@@ -1099,7 +1104,7 @@ class MakeLine:
             ax.add_patch(shipshape)
         
         # text
-        self.add_text(ax, h_list)
+        self.add_text(ax, h_list, all=True)
 
         # setting
         legend_init_path = plt.Line2D([0], [0],
@@ -1122,32 +1127,47 @@ class MakeLine:
             h.remove()
 
 
-    def add_text(self, ax, h_list):
-        x_as, y_as = self.aproach_start
-        p1 = ax.scatter(y_as, x_as, c="black", s=20, zorder=10)
-        t1 = ax.annotate("aproach start", xy=(y_as, x_as),
-                        xytext=(0, 0), textcoords="offset points",
-                        ha="center", va="bottom", fontsize=15, zorder=10)
+    def add_text(self, ax, h_list,
+                 p_as=False, p_bs=False, p_ts=False, p_te=False, wp=False, all=False):
+        if all:
+            p_as=True; p_bs=True; p_ts=True; p_te=True; wp=True
 
-        x_bs, y_bs = self.berth_start
-        p2 = ax.scatter(y_bs, x_bs, c="black", s=20, zorder=10)
-        t2 = ax.annotate("aproach end / berthing start", xy=(y_bs, x_bs),
-                        xytext=(0, 0), textcoords="offset points",
-                        ha="center", va="bottom", fontsize=15, zorder=10)
+        if p_as:
+            x_as, y_as = self.aproach_start
+            p = ax.scatter(y_as, x_as, c="black", s=20, zorder=10)
+            t = ax.annotate("aproach start", xy=(y_as, x_as),
+                            xytext=(0, 0), textcoords="offset points",
+                            ha="center", va="bottom", fontsize=15, zorder=10)
+            h_list.extend([t, p])
 
-        x_ts, y_ts = self.turn_start
-        p3 = ax.scatter(y_ts, x_ts, c="black", s=20, zorder=10)
-        t3 = ax.annotate("turn start", xy=(y_ts, x_ts),
-                        xytext=(+10, 0), textcoords="offset points",
-                        ha="left", va="center", fontsize=15, zorder=10)
+        if p_bs:
+            x_bs, y_bs = self.berth_start
+            p = ax.scatter(y_bs, x_bs, c="black", s=20, zorder=10)
+            t = ax.annotate("aproach end / berthing start", xy=(y_bs, x_bs),
+                            xytext=(0, 0), textcoords="offset points",
+                            ha="center", va="bottom", fontsize=15, zorder=10)
+            h_list.extend([t, p])
 
-        x_te, y_te = self.turn_end
-        p4 = ax.scatter(y_te, x_te, c="black", s=20, zorder=10)
-        t4 = ax.annotate("berthing end", xy=(y_te, x_te),
-                        xytext=(+10, 0), textcoords="offset points",
-                        ha="left", va="center", fontsize=15, zorder=10)
+        if p_ts:
+            x_ts, y_ts = self.turn_start
+            p = ax.scatter(y_ts, x_ts, c="black", s=20, zorder=10)
+            t = ax.annotate("turn start", xy=(y_ts, x_ts),
+                            xytext=(+10, 0), textcoords="offset points",
+                            ha="left", va="center", fontsize=15, zorder=10)
+            h_list.extend([p, t])
 
-        h_list.extend([t1, p1, t2, p2, p3, t3, t4, p4])
+        if p_te:
+            x_te, y_te = self.turn_end
+            p = ax.scatter(y_te, x_te, c="black", s=20, zorder=10)
+            t = ax.annotate("berthing end", xy=(y_te, x_te),
+                            xytext=(+10, 0), textcoords="offset points",
+                            ha="left", va="center", fontsize=15, zorder=10)
+            h_list.extend([t, p])
+
+        if wp:
+            pts = self.way_pts
+            p = ax.scatter(pts[:, 1], pts[:, 0], c="green", s=20, zorder=10)
+            h_list.append(p)
 
     def show_CMA_path(self, best_mean, restart):
         ax = self.ax
@@ -1255,7 +1275,20 @@ class MakeLine:
     def show_best_result(self, best_dict):
         ax = self.ax
         port = self.port
+        legends = self.legends
         h_list = []
+
+        # captain's route
+        for df in self.df_cap:
+            traj = RealTraj()
+            traj.input_csv(df, self.port_csv)
+            ax.plot(traj.Y, traj.X, 
+                        color = 'gray', ls = '-', marker = 'D',
+                        markersize = 2, alpha = 0.8, lw = 1.0, zorder = 3)
+        legend_captain = plt.Line2D([0], [0],
+                                    color = 'gray', ls = '-', marker = 'D',
+                                    markersize = 2, alpha = 0.8, lw = 1.0, label="captain's Route")
+        legends.append(legend_captain)
 
         # best path
         opt_list = best_dict[self.smallest_evaluation_key]["best_mean_sofar"].reshape(-1, 3)
@@ -1277,12 +1310,12 @@ class MakeLine:
             ax.add_patch(shipshape)
 
         # text
-        self.add_text(ax, h_list)
+        self.add_text(ax, h_list, all=True)
         
         ## save
         ax.set_xlim(port["hor_range"])
         ax.set_ylim(port["ver_range"])
-        ax.legend(handles=self.legends)
+        ax.legend(handles=legends)
         plt.savefig(os.path.join(self.SAVE_DIR, f"CMA Result.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         
