@@ -32,7 +32,7 @@ theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 8
+        self.port_number: int = 6
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -520,7 +520,8 @@ class MakeLine:
         self.port = self.dict_of_port(self.ps.port_number)
         SAVE_DIR = f"{DIR}/../../outputs/{dirname}/{self.port["name"]}"
         os.makedirs(SAVE_DIR, exist_ok=True)
-        print(f"target : {self.port["name"]}")
+        os.makedirs(f"{SAVE_DIR}/卒論", exist_ok=True)
+        print(f"\ntarget : {self.port["name"]}")
 
         # Map
         ## port
@@ -565,7 +566,7 @@ class MakeLine:
         Line.hor_range = self.port["hor_range"]
         Line.ver_range = self.port["ver_range"]
 
-        print("all csv read\n")
+        print("\nall csv read")
 
     def init_fig(self):
         self.fig, self.ax = plt.subplots(figsize=(7, 7))
@@ -626,6 +627,8 @@ class MakeLine:
         h = ax.legend(handles=legends)
         fig.savefig(os.path.join(self.SAVE_DIR, "base_map.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
+        fig.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", "base_map.pdf"),
+                    bbox_inches="tight", pad_inches=0.05)
         print("base map saved\n")
 
         h.remove()
@@ -751,6 +754,7 @@ class MakeLine:
                     while idx < 99 and (not Line.map_poly_prep.intersects(LineString([to_xy(pts[idx]), to_xy(mid)]))):
                         idx += 1
                     idx_hit = idx
+                    idx_hit = np.clip(idx_hit, 0, len(pts)-1)
                 
                 else:
                     for ln in lines[-2:0:-1]:
@@ -787,7 +791,7 @@ class MakeLine:
         """
         port = self.port
         pts = self.captain_pts
-        margin = 3 * self.ps.L
+        margin = 2 * self.ps.L
 
         def cal_total_len(pts):
             seg_len = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
@@ -1106,6 +1110,8 @@ class MakeLine:
             handles.append(h)
         plt.savefig(os.path.join(self.SAVE_DIR, f"{name}.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
+        plt.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", f"{name}.pdf"),
+                    bbox_inches="tight", pad_inches=0.05)
         
         for h in handles:
             h.remove()
@@ -1135,6 +1141,8 @@ class MakeLine:
             self.add_text(ax, h_list, p_as=True, p_te=True, wp=True)
             plt.savefig(os.path.join(self.SAVE_DIR, "captain's line.png"),
                         dpi=400, bbox_inches="tight", pad_inches=0.05)
+            plt.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", "captain's line.pdf"),
+                        bbox_inches="tight", pad_inches=0.05)
             h_list.append(h)
             print("captain's line saved\n")
             self.captain_pts = pts
@@ -1174,11 +1182,15 @@ class MakeLine:
 
         plt.savefig(os.path.join(self.SAVE_DIR, "init path.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
+        plt.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", "init path.pdf"),
+                    bbox_inches="tight", pad_inches=0.05)
         # zoom
         ax.set_xlim([-750, 750])
         ax.set_ylim([-750, 750])
         plt.savefig(os.path.join(self.SAVE_DIR, "init path zoom.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
+        plt.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", "init path zoom.pdf"),
+                    bbox_inches="tight", pad_inches=0.05)
         print("init path saved\n")
 
         for h in h_list:
@@ -1281,6 +1293,8 @@ class MakeLine:
         h_list.append(h3)
         plt.savefig(os.path.join(self.SAVE_DIR, f"CMA route ver {restart}.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
+        plt.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", f"CMA route ver {restart}.pdf"),
+                    bbox_inches="tight", pad_inches=0.05)
         print(f"CMA route ver {restart} saved")
 
         for h in h_list:
@@ -1373,8 +1387,10 @@ class MakeLine:
         ax.set_xlim(port["hor_range"])
         ax.set_ylim(port["ver_range"])
         ax.legend(handles=legends)
-        plt.savefig(os.path.join(self.SAVE_DIR, f"CMA Result.png"),
+        plt.savefig(os.path.join(self.SAVE_DIR, "CMA Result.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
+        plt.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", "CMA Result.pdf"),
+                    bbox_inches="tight", pad_inches=0.05)
         
         # init path
         for pose in self.init_list:
@@ -1388,16 +1404,20 @@ class MakeLine:
             )
             ax.add_patch(shipshape)
 
-        plt.savefig(os.path.join(self.SAVE_DIR, f"CMA Result with init.png"),
+        plt.savefig(os.path.join(self.SAVE_DIR, "CMA Result with init.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
+        plt.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", "CMA Result with init.pdf"),
+                    bbox_inches="tight", pad_inches=0.05)
         
         # zoom
         for h in h_list:
             h.remove()
         ax.set_xlim([-750, 750])
         ax.set_ylim([-750, 750])
-        plt.savefig(os.path.join(self.SAVE_DIR, f"CMA Result zoom.png"),
+        plt.savefig(os.path.join(self.SAVE_DIR, "CMA Result zoom.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
+        plt.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", "CMA Result zoom.pdf"),
+                    bbox_inches="tight", pad_inches=0.05)
         print(f"Result fig saved\n")
         print(f"{port["name"]} end\n")
     
@@ -1473,10 +1493,10 @@ class MakeLine:
                 "name": "Kashima",
                 "side": "starboard",
                 "style": "head out",
-                "start": [2100.0, 2400.0],
-                "turn start": [250, -150],
-                "psi_start": -135,
-                "psi_end": -90,
+                "start": [2000.0, 2400.0],
+                "turn start": [100, -150],
+                "psi_start": -130,
+                "psi_end": 0,
                 "berth_type": 2,
                 "ver_range": [-500, 2500],
                 "hor_range": [-1000, 2500],
@@ -1486,7 +1506,7 @@ class MakeLine:
                 "side": "port",
                 "start": [350, 3400.0],
                 "psi_start": -115,
-                "psi_end": 90,
+                "psi_end": 100,
                 "turn start": [0, 200],
                 "berth_type": 2,
                 "ver_range": [-1500, 1500],
@@ -1496,10 +1516,10 @@ class MakeLine:
                 "name": "Hachinohe",
                 "side": "port",
                 "style": "head out",
-                "start": [1350, 2500.0],
-                "turn start": [200, 250],
-                "psi_start": -110,
-                "psi_end": 90,
+                "start": [1300, 2400.0],
+                "turn start": [200, 300],
+                "psi_start": -105,
+                "psi_end": 0,
                 "berth_type": 2,
                 "ver_range": [-1000, 2500],
                 "hor_range": [-1000, 3000],

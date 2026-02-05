@@ -13,14 +13,14 @@ from utils.PP.stay_ports import Hokkaido, Honsyu
 
 DIR = os.path.dirname(__file__)
 RAW_DATAS = f"{DIR}/../../raw_datas"
-PORT = Honsyu.Pasific.ise_bay
+PORT = Honsyu.Pasific.ibaragi
 coast_file = f"{RAW_DATAS}/国土交通省/C23-06_{PORT.num}_GML/C23-06_{PORT.num}-g.csv"
 port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/_{PORT.name}.csv"
 SAVE_DIR = f"{DIR}/../../outputs/data/detail_map"
 
 SORT = False
-SAVE = False
-SHOW = True
+SAVE = True
+SHOW = False
 R_MAX = 3000
 
 # ---- 原点と向き ----
