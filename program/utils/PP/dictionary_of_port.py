@@ -57,7 +57,7 @@ def dictionary():
                     "turn_end": {
                         "text": "berthing end",
                         "xytext": (0, -5),
-                        "ha": "center",
+                        "ha": "left",
                         "va": "top",
                     },
                 },
