@@ -21,6 +21,7 @@ from tqdm.auto import tqdm
 from utils.LDA.ship_geometry import *
 from utils.PP import Bezier_curve as Bezier
 from utils.PP.E_ddCMA import DdCma, Checker, Logger
+from utils.PP.dictionary_of_port import dictionary
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
 from utils.PP.MultiPlot import RealTraj
 
@@ -517,7 +518,7 @@ class MakeLine:
         self.best_dict = best_dict
 
     def read_csv(self):
-        self.port = self.dict_of_port(self.ps.port_number)
+        self.port = dictionary()[self.ps.port_number]
         SAVE_DIR = f"{DIR}/../../outputs/{dirname}/{self.port["name"]}"
         os.makedirs(SAVE_DIR, exist_ok=True)
         os.makedirs(f"{SAVE_DIR}/卒論", exist_ok=True)
@@ -695,7 +696,7 @@ class MakeLine:
         # from start point
         L_start = Line(fixed_pt=port["start"], theta=np.deg2rad(port["psi_start"]))
         lines.insert(0, L_start)
-        self.aproach_start = port["start"]
+        self.approach_start = port["start"]
 
         ## save fig
         self.add_text(ax, h_list, p_as=True)
@@ -782,10 +783,10 @@ class MakeLine:
 
     def make_init_route(self):
         """
-        航路をaproachとbarthingに分割
+        航路をapproachとbarthingに分割
         berthingをstraightとturnに分割
         各航路ですること
-            aproach  : 大雑把でいいのでBezier
+            approach  : 大雑把でいいのでBezier
             straight : 着桟の前は直進したい.一旦 3L [m]としている.
             turn     : 着桟姿勢に応じて回頭,変針
         """
@@ -813,7 +814,7 @@ class MakeLine:
         u_split = np.clip(total_len - 500, 0.0, total_len)
         i = np.searchsorted(s_cum, u_split, side="right") - 1
         i = int(np.clip(i, 0, len(seg_len) - 1))
-        turn_start_pt = port["turn start"]
+        turn_start_pt = port["turn_start"]
         nearest_ln = self.get_nearest_line(turn_start_pt)
         theta = nearest_ln.theta # [rad]
         berth_start_pt = turn_start_pt + margin * np.array([np.cos(theta - np.pi), np.sin(theta - np.pi)])
@@ -823,25 +824,25 @@ class MakeLine:
         straight_pts = np.vstack([berth_start_pt, turn_start_pt])
         curve_pts = np.vstack([turn_start_pt, pts[-1]])
 
-        # aproach, straight
+        # approach, straight
         ## besier pts spread by speed
         ap_and_st_pts = np.vstack([pts[0], bezier_pts, turn_start_pt])
         seg_len, s_cum, total_len = cal_total_len(ap_and_st_pts)
-        aproach_pts = [pts[0].copy()]
+        approach_pts = [pts[0].copy()]
         u = 0.0
         while u < total_len:
             curent_pt = interp(u, ap_and_st_pts)
             speed_kt = cal_speed(self, curent_pt, pts[-1])
             speed = speed_kt *1852 / 60 # [m/min]
             u = min(u + speed, total_len)
-            aproach_pts.append(interp(u, ap_and_st_pts) if u < total_len else ap_and_st_pts[-1].copy())
+            approach_pts.append(interp(u, ap_and_st_pts) if u < total_len else ap_and_st_pts[-1].copy())
         
         ## psi
         psi_list = np.array([
-            cal_angle(aproach_pts[i], aproach_pts[i+1]) % (2*np.pi)
-            for i in range(len(aproach_pts) - 1)
+            cal_angle(approach_pts[i], approach_pts[i+1]) % (2*np.pi)
+            for i in range(len(approach_pts) - 1)
         ])
-        aproach_pts.pop()
+        approach_pts.pop()
 
         # turn
         seg_len, s_cum, total_len = cal_total_len(curve_pts)
@@ -867,12 +868,12 @@ class MakeLine:
             psi_list = np.append(psi_list, psi)
 
         # init list
-        init_path = np.vstack([aproach_pts, turn_pts])
+        init_path = np.vstack([approach_pts, turn_pts])
         init_list = np.hstack([init_path, psi_list.reshape(-1, 1)])
         
 
         self.init_list = init_list
-        self.aproach_list = init_list[:(len(init_list) - n)]
+        self.approach_list = init_list[:(len(init_list) - n)]
         self.turn_list = init_list[(len(init_list) - n):]
         self.target_list = self.turn_list[1:-1]
 
@@ -1199,45 +1200,43 @@ class MakeLine:
 
     def add_text(self, ax, h_list,
                  p_as=False, p_bs=False, p_ts=False, p_te=False, wp=False, all=False):
+        port = self.port
+
         if all:
             p_as=True; p_bs=True; p_ts=True; p_te=True; wp=True
-
-        if p_as:
-            x_as, y_as = self.aproach_start
-            p = ax.scatter(y_as, x_as, c="black", s=20, zorder=10)
-            t = ax.annotate("aproach start", xy=(y_as, x_as),
-                            xytext=(0, 0), textcoords="offset points",
-                            ha="center", va="bottom", fontsize=15, zorder=10)
-            h_list.extend([t, p])
-
-        if p_bs:
-            x_bs, y_bs = self.berth_start
-            p = ax.scatter(y_bs, x_bs, c="black", s=20, zorder=10)
-            t = ax.annotate("aproach end / berthing start", xy=(y_bs, x_bs),
-                            xytext=(0, 0), textcoords="offset points",
-                            ha="center", va="bottom", fontsize=15, zorder=10)
-            h_list.extend([t, p])
-
-        if p_ts:
-            x_ts, y_ts = self.turn_start
-            p = ax.scatter(y_ts, x_ts, c="black", s=20, zorder=10)
-            t = ax.annotate("turn start", xy=(y_ts, x_ts),
-                            xytext=(+10, 0), textcoords="offset points",
-                            ha="left", va="center", fontsize=15, zorder=10)
-            h_list.extend([p, t])
-
-        if p_te:
-            x_te, y_te = self.turn_end
-            p = ax.scatter(y_te, x_te, c="black", s=20, zorder=10)
-            t = ax.annotate("berthing end", xy=(y_te, x_te),
-                            xytext=(+10, 0), textcoords="offset points",
-                            ha="left", va="center", fontsize=15, zorder=10)
-            h_list.extend([t, p])
 
         if wp:
             pts = self.way_pts
             p = ax.scatter(pts[:, 1], pts[:, 0], c="green", s=20, zorder=10)
             h_list.append(p)
+
+        port_ann = port["annotations"]
+        items = [
+            ("approach_start", p_as),
+            ("berth_start",    p_bs),
+            ("turn_start",     p_ts),
+            ("turn_end",       p_te),
+        ]
+
+        for key, flag in items:
+            if not flag:
+                continue
+            
+            x, y = getattr(self, key)
+            p = ax.scatter(y, x, c="black", s=20, zorder=10)
+            ann = port_ann[key]
+            t = ax.annotate(
+                ann["text"],
+                xy=(y, x),
+                xytext=ann["xytext"],
+                textcoords=ann.get("textcoords", "offset points"),
+                ha=ann["ha"],
+                va=ann["va"],
+                fontsize=20,
+                zorder=10,
+            )
+
+            h_list.extend([t, p])
 
     def show_CMA_path(self, best_mean, restart):
         ax = self.ax
@@ -1290,9 +1289,11 @@ class MakeLine:
             self.legends.append(legend_path)
 
         h3 = ax.legend(handles=self.legends)
-        h_list.append(h3)
+        ax.set_xlim([-750, 750]); ax.set_ylim([-750, 750])
         plt.savefig(os.path.join(self.SAVE_DIR, f"CMA route ver {restart}.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
+        ax.set_xlim([-400, 400]); ax.set_ylim([-400, 400])
+        h3.remove()
         plt.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", f"CMA route ver {restart}.pdf"),
                     bbox_inches="tight", pad_inches=0.05)
         print(f"CMA route ver {restart} saved")
@@ -1358,7 +1359,7 @@ class MakeLine:
                         markersize = 2, alpha = 0.8, lw = 1.0, zorder = 3)
         legend_captain = plt.Line2D([0], [0],
                                     color = 'gray', ls = '-', marker = 'D',
-                                    markersize = 2, alpha = 0.8, lw = 1.0, label="captain's Route")
+                                    markersize = 2, alpha = 0.8, lw = 1.0, label="Captain's Route")
         legends.append(legend_captain)
 
         # best path
