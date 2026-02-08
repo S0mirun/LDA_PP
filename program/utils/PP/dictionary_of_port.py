@@ -26,6 +26,7 @@ def dictionary():
             },
             2: {
                 "name": "Yokkaichi_port2B",
+                "legend": "Yokkaichi",
                 "side": "port",
                 "style": "head out",
                 "start": [2450.0, 2300.0],
@@ -95,6 +96,7 @@ def dictionary():
             },
             6: {
                 "name": "Kashima",
+                "legend": "Kashima",
                 "side": "starboard",
                 "style": "head out",
                 "start": [2000.0, 2400.0],
@@ -133,6 +135,7 @@ def dictionary():
             },
             7: {
                 "name": "Aomori",
+                "legend": "Aomori",
                 "side": "port",
                 "start": [350, 3400.0],
                 "psi_start": -115,
@@ -182,6 +185,7 @@ def dictionary():
             },
             9: {
                 "name": "Shimizu",
+                "legend": "Shimizu",
                 "side": "port",
                 "style": "head out",
                 "start": [1700, -2800],
