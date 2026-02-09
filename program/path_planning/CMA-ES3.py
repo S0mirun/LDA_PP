@@ -33,7 +33,7 @@ theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 9
+        self.port_number: int = 7
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -1292,7 +1292,7 @@ class MakeLine:
         ax.set_xlim([-750, 750]); ax.set_ylim([-750, 750])
         plt.savefig(os.path.join(self.SAVE_DIR, f"CMA route ver {restart}.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
-        ax.set_xlim([-400, 400]); ax.set_ylim([-400, 400])
+        ax.set_xlim([-300, 300]); ax.set_ylim([-400, 400])
         h3.remove()
         plt.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", f"CMA route ver {restart}.pdf"),
                     bbox_inches="tight", pad_inches=0.05)
