@@ -33,7 +33,7 @@ theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 7
+        self.port_number: int = 9
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -576,6 +576,7 @@ class MakeLine:
         port = self.port
         fig, ax = self.fig, self.ax
         legends = []
+        h_list = []
 
         # map
         map_X, map_Y = self.df_map["x [m]"].values, self.df_map["y [m]"].values
@@ -626,13 +627,15 @@ class MakeLine:
         ax.set_xlabel(r"$Y\,\rm{[m]}$")
         ax.set_ylabel(r"$X\,\rm{[m]}$")
         h = ax.legend(handles=legends)
+        h_list.append(h)
         fig.savefig(os.path.join(self.SAVE_DIR, "base_map.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         fig.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", "base_map.pdf"),
                     bbox_inches="tight", pad_inches=0.05)
         print("base map saved\n")
 
-        h.remove()
+        for h in h_list:
+            h.remove()
         self.legends = legends
 
     def make_init_line(self):
@@ -870,7 +873,6 @@ class MakeLine:
         # init list
         init_path = np.vstack([approach_pts, turn_pts])
         init_list = np.hstack([init_path, psi_list.reshape(-1, 1)])
-        
 
         self.init_list = init_list
         self.approach_list = init_list[:(len(init_list) - n)]
@@ -1154,9 +1156,31 @@ class MakeLine:
 
     def show_init_route(self):
         ax = self.ax
+        list = self.init_list
+        legends = self.legends
+        port = self.port
         h_list = []
 
-        list = self.init_list
+        # captain's route
+        for df in self.df_cap:
+            traj = RealTraj()
+            traj.input_csv(df, self.port_csv)
+            h, = ax.plot(traj.Y, traj.X, 
+                        color = 'gray', ls = '-', marker = 'D',
+                        markersize = 2, alpha = 0.8, lw = 1.0, zorder = 3)
+            h_list.append(h)
+        legend_captain = plt.Line2D([0], [0],
+                                    color = 'gray', ls = '-', marker = 'D',
+                                    markersize = 2, alpha = 0.8, lw = 1.0, label=f"Berthing Path\n({port["legend"]}-port)")
+        legends.append(legend_captain)
+
+        # text
+        self.add_text(ax, h_list, p_as=True, p_bs=True, p_te=True, p_ts=True)
+
+        plt.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", "phase change.pdf"),
+                    bbox_inches="tight", pad_inches=0.05)
+        
+        self.add_text(ax, h_list, wp=True)
 
         # ship shape
         for pose in list:
@@ -1169,16 +1193,13 @@ class MakeLine:
                 alpha=0.7, zorder=6
             )
             ax.add_patch(shipshape)
-        
-        # text
-        self.add_text(ax, h_list, all=True)
 
         # setting
         legend_init_path = plt.Line2D([0], [0],
                                     color = 'blue', ls = '-', marker = 'D',
                                     markersize = 2, lw = 1.0, label="Initial Path")
-        self.legends.append(legend_init_path)
-        h = ax.legend(handles=self.legends)
+        legends.insert(-1, legend_init_path)
+        h = ax.legend(handles=legends)
         h_list.append(h)
 
         plt.savefig(os.path.join(self.SAVE_DIR, "init path.png"),
@@ -1286,7 +1307,7 @@ class MakeLine:
             legend_path = plt.Line2D([0], [0],
                                         color = 'red', ls = '-', marker = 'D',
                                         markersize = 2, lw = 1.0, label="CMA result")
-            self.legends.append(legend_path)
+            self.legends.insert(-1, legend_path)
 
         h3 = ax.legend(handles=self.legends)
         ax.set_xlim([-750, 750]); ax.set_ylim([-750, 750])
@@ -1357,10 +1378,10 @@ class MakeLine:
             ax.plot(traj.Y, traj.X, 
                         color = 'gray', ls = '-', marker = 'D',
                         markersize = 2, alpha = 0.8, lw = 1.0, zorder = 3)
-        legend_captain = plt.Line2D([0], [0],
-                                    color = 'gray', ls = '-', marker = 'D',
-                                    markersize = 2, alpha = 0.8, lw = 1.0, label=f"Berthing Path\n({port["legend"]}-port)")
-        legends.append(legend_captain)
+        # legend_captain = plt.Line2D([0], [0],
+        #                             color = 'gray', ls = '-', marker = 'D',
+        #                             markersize = 2, alpha = 0.8, lw = 1.0, label=f"Berthing Path\n({port["legend"]}-port)")
+        # legends.append(legend_captain)
 
         # best path
         opt_list = best_dict[self.smallest_evaluation_key]["best_mean_sofar"].reshape(-1, 3)
@@ -1421,146 +1442,6 @@ class MakeLine:
                     bbox_inches="tight", pad_inches=0.05)
         print(f"Result fig saved\n")
         print(f"{port["name"]} end\n")
-    
-
-    def dict_of_port(self, num):
-        dictionary_of_port = {
-            0: {
-                "name": "Osaka_port1A",
-                "side": "starboard",
-                "style": "head in",
-                "start": [-3000.0, -1000.0],
-                "psi_start": 0,
-                "psi_end": 0,
-                "berth_type": 2,
-                "ver_range": [-3200, 500],
-                "hor_range": [-1500, 1500],
-            },
-            1: {
-                "name": "Tokyo_port2C",
-                "buoy": "千葉",
-                "start": [-2400.0, -1600.0],
-                "end": [0.0, 0.0],
-                "psi_start": 25,
-                "psi_end": 10,
-                "berth_type": 2,
-                "ver_range": [-2500, 500],
-                "hor_range": [-2500, 500],
-            },
-            2: {
-                "name": "Yokkaichi_port2B",
-                "side": "port",
-                "style": "head out",
-                "start": [2450.0, 2300.0],
-                "turn start": [200, 100],
-                "psi_start": -145,
-                "psi_end": 0,
-                "berth_type": 1,
-                "ver_range": [-750, 2700],
-                "hor_range": [-750, 2700],
-            },
-            3: {
-                "name": "Else_port1",
-                "start": [2500.0, 0.0],
-                "psi_start": -120,
-                "psi_end": 90,
-                "berth_type": 1,
-                "ver_range": [-500, 3000],
-                "hor_range": [-1000, 1500],
-            },
-            4: {
-                "name": "Osaka_port1B",
-                "side": "port",
-                "style": "head in",
-                "start": [-3000.0, -1080.0],
-                "psi_start": 0,
-                "psi_end": 0,
-                "berth_type": 2,
-                "ver_range": [-3200, 500],
-                "hor_range": [-1500, 1500],
-            },
-            5: {
-                "name": "Else_port2",
-                "buoy": "5-函館",
-                "start": [-1900.0, 0.0],
-                "end": [0.0, 0.0],
-                "psi_start": 50,
-                "psi_end": -30,
-                "berth_type": 2,
-                "ver_range": [-1900, 300],
-                "hor_range": [-1000, 1200],
-            },
-            6: {
-                "name": "Kashima",
-                "side": "starboard",
-                "style": "head out",
-                "start": [2000.0, 2400.0],
-                "turn start": [100, -150],
-                "psi_start": -130,
-                "psi_end": 0,
-                "berth_type": 2,
-                "ver_range": [-500, 2500],
-                "hor_range": [-1000, 2500],
-            },
-            7: {
-                "name": "Aomori",
-                "side": "port",
-                "start": [350, 3400.0],
-                "psi_start": -115,
-                "psi_end": 100,
-                "turn start": [0, 200],
-                "berth_type": 2,
-                "ver_range": [-1500, 1500],
-                "hor_range": [-1000, 3500],
-            },
-            8: {
-                "name": "Hachinohe",
-                "side": "port",
-                "style": "head out",
-                "start": [1300, 2400.0],
-                "turn start": [200, 300],
-                "psi_start": -105,
-                "psi_end": 0,
-                "berth_type": 2,
-                "ver_range": [-1000, 2500],
-                "hor_range": [-1000, 3000],
-            },
-            9: {
-                "name": "Shimizu",
-                "side": "port",
-                "style": "head out",
-                "start": [1700, -2800],
-                "turn start": [200, 100],
-                "psi_start": 120,
-                "psi_end": 0,
-                "berth_type": 2,
-                "ver_range": [-1000, 2000],
-                "hor_range": [-3000, 1000],
-            },
-            10: {
-                "name": "Tomakomai",
-                "buoy": "11-苫小牧",
-                "start": [-1300, 1500],
-                "end": [-200.0, -80.0],
-                "psi_start": -70,
-                "psi_end": 0,
-                "berth_type": 2,
-                "ver_range": [-2000, 500],
-                "hor_range": [-1000, 2000],
-            },
-            11: {
-                "name": "KIX",
-                "buoy": "大阪港",
-                "start": [-2500, 800],
-                "end": [-300, 250],
-                "psi_start": -10,
-                "psi_end": -30,
-                "berth_type": 2,
-                "ver_range": [-3000, 500],
-                "hor_range": [-2000, 2000],
-            },
-        }
-        return dictionary_of_port[num]
 
 if __name__ == "__main__":
     ps = Setting()
