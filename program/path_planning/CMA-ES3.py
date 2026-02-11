@@ -52,9 +52,9 @@ class Setting:
         self.angle_interval: float = 5
 
         # weight
-        self.SD = 1.5
+        self.SD = 1.0
         self.angle = 1.0
-        self.xy = 0.1
+        self.xy = 1.0
 
         # restart
         self.restarts: int = 3
@@ -1116,7 +1116,6 @@ class MakeLine:
         for h in h_list:
             h.remove()
 
-
     def show_init_route(self):
         ax = self.ax
         list = self.init_list
@@ -1130,11 +1129,11 @@ class MakeLine:
             traj.input_csv(df, self.port_csv)
             h, = ax.plot(traj.Y, traj.X, 
                         color = 'gray', ls = '-', marker = 'D',
-                        markersize = 2, alpha = 0.8, lw = 1.0, zorder = 3)
+                        markersize = 2, alpha = 0.5, lw = 1.0, zorder = 3)
             h_list.append(h)
         legend_captain = plt.Line2D([0], [0],
                                     color = 'gray', ls = '-', marker = 'D',
-                                    markersize = 2, alpha = 0.8, lw = 1.0, label=f"Berthing Path\n({port["legend"]}-port)")
+                                    markersize = 2, alpha = 0.5, lw = 1.0, label=f"Berthing Path\n({port["legend"]}-port)")
         legends.append(legend_captain)
 
         # text
@@ -1180,7 +1179,6 @@ class MakeLine:
 
         for h in h_list:
             h.remove()
-
 
     def add_text(self, ax, h_list,
                  p_as=False, p_bs=False, p_ts=False, p_te=False, wp=False, all=False):
@@ -1267,6 +1265,14 @@ class MakeLine:
             h_list.append(h3)
 
         if restart == 0:
+            # captain's route
+            for df in self.df_cap:
+                traj = RealTraj()
+                traj.input_csv(df, self.port_csv)
+                ax.plot(traj.Y, traj.X, 
+                            color = 'gray', ls = '-', marker = 'D',
+                            markersize = 2, alpha = 0.5, lw = 1.0, zorder = 3)
+            # legend
             legend_path = plt.Line2D([0], [0],
                                         color = 'red', ls = '-', marker = 'D',
                                         markersize = 2, lw = 1.0, label="CMA result")
@@ -1333,18 +1339,6 @@ class MakeLine:
         port = self.port
         legends = self.legends
         h_list = []
-
-        # captain's route
-        for df in self.df_cap:
-            traj = RealTraj()
-            traj.input_csv(df, self.port_csv)
-            ax.plot(traj.Y, traj.X, 
-                        color = 'gray', ls = '-', marker = 'D',
-                        markersize = 2, alpha = 0.8, lw = 1.0, zorder = 3)
-        # legend_captain = plt.Line2D([0], [0],
-        #                             color = 'gray', ls = '-', marker = 'D',
-        #                             markersize = 2, alpha = 0.8, lw = 1.0, label=f"Berthing Path\n({port["legend"]}-port)")
-        # legends.append(legend_captain)
 
         # best path
         opt_list = best_dict[self.smallest_evaluation_key]["best_mean_sofar"].reshape(-1, 3)
