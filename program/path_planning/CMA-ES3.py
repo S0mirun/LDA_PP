@@ -33,7 +33,7 @@ theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 9
+        self.port_number: int = 7
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -43,7 +43,6 @@ class Setting:
         self.B = 16.0
 
         # CMA-ES
-        self.target = "beta"
         self.seed: int = 42
         self.MAX_SPEED_KTS: float = 9.5  # [knots]
         self.MIN_SPEED_KTS: float = 1.5  # [knots]
@@ -51,6 +50,11 @@ class Setting:
         self.MAX_ANGLE_DEG: float = 60  # [deg]
         self.MIN_ANGLE_DEG: float = 0  # [deg]
         self.angle_interval: float = 5
+
+        # weight
+        self.SD = 1.5
+        self.angle = 1.0
+        self.xy = 0.1
 
         # restart
         self.restarts: int = 3
@@ -227,15 +231,11 @@ class CostCalculator:
         ])
         sd_poly = Polygon(domain_xy)
 
-        # count
-        # hit = Line.map_poly_prep.intersects(sd_poly)
-        # n_hit = int(np.count_nonzero(hit))
-
-        # return n_hit
-
         # area
+        sd_area = sd_poly.area
         if Line.map_poly_prep.intersects(sd_poly):
-            pen = sd_poly.intersection(Line.map_poly).area
+            inter_area = sd_poly.intersection(Line.map_poly).area
+            pen = (inter_area / sd_area ) * 100 # [%]
         else:
             pen = 0.0
 
@@ -377,6 +377,7 @@ class MakeLine:
         self.make_init_route()
 
     def prepare_for_CMAES(self):
+        # cost
         cal = CostCalculator()
         cal.SD = self.SD
         cal.lines = self.lines
@@ -971,9 +972,10 @@ class MakeLine:
             # xy_cost += np.linalg.norm(pts[j+1] - pts[j]) ** 2 # 1次差分
             xy_cost += np.linalg.norm(pts[j-1] - 2*pts[j] + pts[j+1]) ** 2 # 2次差分
 
-        self.sd_coeff = 100 / SD_cost
-        self.angle_coeff = 100 / angle_cost
-        self.xy_coeff = 100 / xy_cost
+        # xy/cost がでかいから合わせる
+        self.sd_coeff = xy_cost / SD_cost
+        self.angle_coeff = xy_cost / angle_cost
+        self.xy_coeff = 0.1
         
 
     def path_evaluate(self, X):
@@ -987,76 +989,37 @@ class MakeLine:
         start = self.turn_list[0]
         end = self.turn_list[-1]
 
-        # prepare for cost calculation
-        straight_length = np.linalg.norm(start - end)
+        # weight
+        w_SD = self.ps.SD
+        w_angle = self.ps.angle
+        w_xy = self.ps.xy
 
         costs = np.zeros(arr.shape[0], dtype=float)
         for i in range(arr.shape[0]):
-            if self.ps.target == "point":
-                pts = arr[i].reshape(-1, 2)
-                poly = np.vstack([start, pts, end])
-                # length
-                # 航路長の基準を作る
-                d = np.linalg.norm(poly[1:] - poly[:-1], axis=1)
-                total_length = d.sum()
-                ratio = (total_length / straight_length) * 100 - 100  # [%]
+            arr_i = arr[i].reshape(-1, 3)
+            poly = np.vstack([start, arr_i, end])
+            pts = poly[:, :2]; head = poly[:, 2]
 
-                # Ship Domain Penalty
-                # 衝突している点の数を数える
-                SD_cost = 0.0
-                idx = np.where(~cal.inside0)[0]
-                idx = idx[(idx >= 1) & (idx <= len(poly) - 2)]
-
-                ## check point
-                for j in idx:
-                    SD_cost += cal.ShipDomain_penalty(poly[j - 1], poly[j], poly[j + 1])
-
-                ## mid point
-                for j in idx:
-                    mid = (poly[j] + poly[j + 1]) / 2
-                    parent = poly[j - 1] if j - 1 >= 0 else poly[j]
-                    child  = poly[j + 2] if j + 2 < len(poly) else poly[j+1]
-                    SD_cost += cal.ShipDomain_penalty(parent, mid, child)
-
-                # Space Penalty
-                space_cost = 0.0
-                for j in range(len(poly) - 1):
-                    space_cost += cal.spacing_penalty(poly[j], poly[j+1])
-
-                # Shippping lane
-                lane_reward = cal.ShippingLane(poly)
-
-                total = (self.length_coeff * ratio
-                        + self.SD_coeff * SD_cost
-                        + self.space_coeff * space_cost
-                        + self.lane_coeff * lane_reward)
-                costs[i] = total
+            # ship domain
+            SD_cost = 0.0
+            for j in range(len(poly)):
+                SD_cost += cal.SD_penalty(pts[j], head[j])
             
-            elif self.ps.target == "beta":
-                arr_i = arr[i].reshape(-1, 3)
-                poly = np.vstack([start, arr_i, end])
-                pts = poly[:, :2]; head = poly[:, 2]
+            # psi smooth
+            angle_cost = 0.0
+            for j in range(len(head)-1):
+                angle_cost += (head[j+1] - head[j]) ** 2 # 1次差分
 
-                # ship domain
-                SD_cost = 0.0
-                for j in range(len(poly)):
-                    SD_cost += cal.SD_penalty(pts[j], head[j])
-                
-                # psi smooth
-                angle_cost = 0.0
-                for j in range(len(head)-1):
-                    angle_cost += (head[j+1] - head[j]) ** 2 # 1次差分
+            # (x, y) smooth
+            xy_cost = 0.0
+            for j in range(1, len(pts)-1):
+                # xy_cost += np.linalg.norm(pts[j+1] - pts[j]) ** 2 # 1次差分
+                xy_cost += np.linalg.norm(pts[j-1] - 2*pts[j] + pts[j+1]) ** 2 # 2次差分
 
-                # (x, y) smooth
-                xy_cost = 0.0
-                for j in range(1, len(pts)-1):
-                    # xy_cost += np.linalg.norm(pts[j+1] - pts[j]) ** 2 # 1次差分
-                    xy_cost += np.linalg.norm(pts[j-1] - 2*pts[j] + pts[j+1]) ** 2 # 2次差分
-
-                total = (self.sd_coeff * SD_cost 
-                         + self.angle_coeff * angle_cost 
-                         + self.xy_coeff * xy_cost)
-                costs[i] = total
+            total = (w_SD * (self.sd_coeff * SD_cost)
+                        + w_angle * (self.angle_coeff * angle_cost) 
+                        + w_xy * (self.xy_coeff * xy_cost))
+            costs[i] = total
 
         return float(costs[0]) if not batched else costs
 

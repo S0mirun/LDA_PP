@@ -142,7 +142,7 @@ def dictionary():
                 "psi_end": 100,
                 "turn_start": [0, 200],
                 "berth_type": 2,
-                "ver_range": [-1500, 1500],
+                "ver_range": [-2000, 1000],
                 "hor_range": [-1000, 3500],
                 "annotations": {
                     "approach_start": {
