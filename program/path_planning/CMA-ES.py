@@ -73,7 +73,7 @@ class SD_contact_judge(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 9
+        self.port_number: int = 2
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -84,7 +84,7 @@ class Settings:
         self.start_end_mode: ParamMode = ParamMode.AUTO
         self.psi_mode: ParamMode = ParamMode.AUTO
         self.steady_course_coeff_mode: ParamMode = ParamMode.AUTO
-        self.init_path_algo: InitPathAlgo = InitPathAlgo.BEZIER
+        self.init_path_algo: InitPathAlgo = InitPathAlgo.ASTAR
         self.SD_contact_judge: SD_contact_judge = SD_contact_judge.NEW
         self.enable_pre_berthing_straight_segment: bool = True
 
@@ -1433,7 +1433,7 @@ class PathPlanning:
                 "name": "Yokkaichi_port2B",
                 "buoy": "四日市",
                 "start": [2000.0, 2000.0],
-                "end": [100.0, 80.0], # 300, 80
+                "end": [500.0, 80.0], # 300, 80
                 "psi_start": -125,
                 "psi_end": 175,
                 "berth_type": 1,
@@ -1477,7 +1477,7 @@ class PathPlanning:
                 "name": "Kashima",
                 "buoy": "4-鹿島",
                 "start": [1750.0, 1900.0],
-                "end": [250.0, -150.0],
+                "end": [150.0, 0.0],
                 "psi_start": -120,
                 "psi_end": -170,
                 "berth_type": 2,
@@ -1510,7 +1510,7 @@ class PathPlanning:
                 "name": "Shimizu",
                 "buoy": "8-清水",
                 "start": [1400, -2000],
-                "end": [150, 100],
+                "end": [100, 50],
                 "psi_start": 100,
                 "psi_end": 175,
                 "berth_type": 2,
