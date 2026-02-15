@@ -1125,17 +1125,17 @@ class MakeLine:
         h_list = []
 
         # captain's route
-        for df in self.df_cap:
-            traj = RealTraj()
-            traj.input_csv(df, self.port_csv)
-            h, = ax.plot(traj.Y, traj.X, 
-                        color = 'gray', ls = '-', marker = 'D',
-                        markersize = 2, alpha = 0.5, lw = 1.0, zorder = 3)
-            h_list.append(h)
-        legend_captain = plt.Line2D([0], [0],
-                                    color = 'gray', ls = '-', marker = 'D',
-                                    markersize = 2, alpha = 0.5, lw = 1.0, label=f"Berthing Path\n({port["legend"]}-port)")
-        legends.append(legend_captain)
+        # for df in self.df_cap:
+        #     traj = RealTraj()
+        #     traj.input_csv(df, self.port_csv)
+        #     h, = ax.plot(traj.Y, traj.X, 
+        #                 color = 'gray', ls = '-', marker = 'D',
+        #                 markersize = 2, alpha = 0.5, lw = 1.0, zorder = 3)
+        #     h_list.append(h)
+        # legend_captain = plt.Line2D([0], [0],
+        #                             color = 'gray', ls = '-', marker = 'D',
+        #                             markersize = 2, alpha = 0.8, lw = 1.0, label=f"Berthing Path\n({port["legend"]}-port)")
+        # legends.append(legend_captain)
 
         # text
         self.add_text(ax, h_list, p_as=True, p_bs=True, p_te=True, p_ts=True)
@@ -1161,7 +1161,7 @@ class MakeLine:
         legend_init_path = plt.Line2D([0], [0],
                                     color = 'blue', ls = '-', marker = 'D',
                                     markersize = 2, lw = 1.0, label="Initial Path")
-        legends.insert(-1, legend_init_path)
+        legends.append(legend_init_path)
         h = ax.legend(handles=legends)
         h_list.append(h)
 
@@ -1272,19 +1272,29 @@ class MakeLine:
                 traj.input_csv(df, self.port_csv)
                 ax.plot(traj.Y, traj.X, 
                             color = 'gray', ls = '-', marker = 'D',
-                            markersize = 2, alpha = 0.5, lw = 1.0, zorder = 3)
+                            markersize = 2, alpha = 0.2, lw = 1.0, zorder = 3)
+            legend_captain = plt.Line2D([0], [0],
+                                        color = 'gray', ls = '-', marker = 'D',
+                                        markersize = 2, alpha = 0.8, lw = 1.0, label=f"Berthing Path\n({self.port["legend"]}-port)")
+            self.legends.append(legend_captain)
             # legend
             legend_path = plt.Line2D([0], [0],
                                         color = 'red', ls = '-', marker = 'D',
                                         markersize = 2, lw = 1.0, label="CMA result")
             self.legends.insert(-1, legend_path)
+            # legend
+            legend_SD = plt.Line2D([0], [0],
+                                        color = 'red', ls = '--',
+                                        markersize = 2, lw = 1.0, label="Ship Domain")
+            self.legends.append(legend_SD)
 
-        h3 = ax.legend(handles=self.legends)
+        h3 = ax.legend(handles=self.legends[2:], fontsize="large",loc="lower right")
+        h_list.append(h3)
         ax.set_xlim([-750, 750]); ax.set_ylim([-750, 750])
         plt.savefig(os.path.join(self.SAVE_DIR, f"CMA route ver {restart}.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         ax.set_xlim([-300, 300]); ax.set_ylim([-400, 400])
-        h3.remove()
+
         plt.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", f"CMA route ver {restart}.pdf"),
                     bbox_inches="tight", pad_inches=0.05)
         print(f"CMA route ver {restart} saved")
@@ -1356,7 +1366,7 @@ class MakeLine:
                 L=self.ps.L, B=self.ps.B,
                 ),
                 facecolor='red',
-                alpha=0.7, zorder=7,
+                alpha=1, zorder=7,
             )
             ax.add_patch(shipshape)
 
@@ -1366,6 +1376,7 @@ class MakeLine:
         ## save
         ax.set_xlim(port["hor_range"])
         ax.set_ylim(port["ver_range"])
+        legends.pop()
         ax.legend(handles=legends)
         plt.savefig(os.path.join(self.SAVE_DIR, "CMA Result.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
