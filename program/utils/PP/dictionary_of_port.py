@@ -4,14 +4,42 @@ def dictionary():
         {
             0: {
                 "name": "Osaka_port1A",
+                "legend": "Sakai",
                 "side": "starboard",
                 "style": "head in",
                 "start": [-3000.0, -1000.0],
+                "turn_start": [-200, -50],
                 "psi_start": 0,
                 "psi_end": 0,
                 "berth_type": 2,
                 "ver_range": [-3200, 500],
                 "hor_range": [-1500, 1500],
+                "annotations": {
+                    "approach_start": {
+                        "text": "approach start",
+                        "xytext": (-15, 0),
+                        "ha": "right",
+                        "va": "center",
+                    },
+                    "berth_start": {
+                        "text": "phase change",
+                        "xytext": (5, 0),
+                        "ha": "left",
+                        "va": "center",
+                    },
+                    "turn_start": {
+                        "text": "turning start",
+                        "xytext": (5, 0),
+                        "ha": "left",
+                        "va": "center",
+                    },
+                    "turn_end": {
+                        "text": "berthing end",
+                        "xytext": (0, -5),
+                        "ha": "left",
+                        "va": "top",
+                    },
+                },
             },
             1: {
                 "name": "Tokyo_port2C",
@@ -74,14 +102,42 @@ def dictionary():
             },
             4: {
                 "name": "Osaka_port1B",
+                "legend": "Sakai",
                 "side": "port",
                 "style": "head in",
                 "start": [-3000.0, -1080.0],
+                "turn_start": [-200, 50],
                 "psi_start": 0,
                 "psi_end": 0,
                 "berth_type": 2,
                 "ver_range": [-3200, 500],
                 "hor_range": [-1500, 1500],
+                "annotations": {
+                    "approach_start": {
+                        "text": "approach start",
+                        "xytext": (-15, 0),
+                        "ha": "right",
+                        "va": "center",
+                    },
+                    "berth_start": {
+                        "text": "phase change",
+                        "xytext": (5, 0),
+                        "ha": "left",
+                        "va": "center",
+                    },
+                    "turn_start": {
+                        "text": "turning start",
+                        "xytext": (5, 0),
+                        "ha": "left",
+                        "va": "center",
+                    },
+                    "turn_end": {
+                        "text": "berthing end",
+                        "xytext": (0, -5),
+                        "ha": "left",
+                        "va": "top",
+                    },
+                },
             },
             5: {
                 "name": "Else_port2",

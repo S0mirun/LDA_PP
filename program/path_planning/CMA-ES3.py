@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from scipy import ndimage
 import shapely
-from shapely import contains_xy, intersects_xy, prepare
+from shapely import intersects_xy
 from shapely.geometry import Polygon, Point, LineString
 from shapely.prepared import prep
 from shapely.validation import make_valid
@@ -33,7 +33,7 @@ theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 9
+        self.port_number: int = 6
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -656,10 +656,14 @@ class MakeLine:
         theta = 0
         margin = 2*self.ps.B
         if port["psi_end"] == 0:
-            if port["side"] == "starboard":
-                margin = -self.ps.B
-            if port["style"] == "head in":
-                theta = 180
+            if port["style"] == "head out" and port["side"]== "starboard":
+                theta = 0;    margin = -margin
+            elif port["style"] == "head out" and port["side"]== "port":
+                theta = 0;    margin = margin
+            elif port["style"] == "head in" and port["side"] == "starboard":
+                theta = -170;  margin = -margin
+            elif port["style"] == "head in" and port["side"] == "port":
+                theta = 180; margin = margin
             theta = np.deg2rad(theta)
         else:
             theta = np.deg2rad(port["psi_end"])
@@ -1121,21 +1125,7 @@ class MakeLine:
         ax = self.ax
         list = self.init_list
         legends = self.legends
-        port = self.port
         h_list = []
-
-        # captain's route
-        # for df in self.df_cap:
-        #     traj = RealTraj()
-        #     traj.input_csv(df, self.port_csv)
-        #     h, = ax.plot(traj.Y, traj.X, 
-        #                 color = 'gray', ls = '-', marker = 'D',
-        #                 markersize = 2, alpha = 0.5, lw = 1.0, zorder = 3)
-        #     h_list.append(h)
-        # legend_captain = plt.Line2D([0], [0],
-        #                             color = 'gray', ls = '-', marker = 'D',
-        #                             markersize = 2, alpha = 0.8, lw = 1.0, label=f"Berthing Path\n({port["legend"]}-port)")
-        # legends.append(legend_captain)
 
         # text
         self.add_text(ax, h_list, p_as=True, p_bs=True, p_te=True, p_ts=True)
