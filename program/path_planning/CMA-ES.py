@@ -1698,19 +1698,19 @@ class PathPlanning:
         ax1.set_ylim(*ver_lim)
 
         tick_int = 500
-        x_start = int(np.floor(hor_lim[0] / tick_int) * tick_int)
-        x_end = int(np.ceil(hor_lim[1] / tick_int) * tick_int)
-        y_start = int(np.floor(ver_lim[0] / tick_int) * tick_int)
-        y_end = int(np.ceil(ver_lim[1] / tick_int) * tick_int)
-        ax1.set_xticks(np.arange(x_start, x_end + tick_int, tick_int))
-        ax1.set_yticks(np.arange(y_start, y_end + tick_int, tick_int))
-        ax1.set_xticklabels(np.arange(x_start, x_end + tick_int, tick_int).astype(int), rotation=90)
-        ax1.set_yticklabels(np.arange(y_start, y_end + tick_int, tick_int).astype(int))
+        # x_start = int(np.floor(hor_lim[0] / tick_int) * tick_int)
+        # x_end = int(np.ceil(hor_lim[1] / tick_int) * tick_int)
+        # y_start = int(np.floor(ver_lim[0] / tick_int) * tick_int)
+        # y_end = int(np.ceil(ver_lim[1] / tick_int) * tick_int)
+        # # ax1.set_xticks(np.arange(x_start, x_end + tick_int, tick_int))
+        # # ax1.set_yticks(np.arange(y_start, y_end + tick_int, tick_int))
+        # # ax1.set_xticklabels(np.arange(x_start, x_end + tick_int, tick_int).astype(int), rotation=90)
+        # # ax1.set_yticklabels(np.arange(y_start, y_end + tick_int, tick_int).astype(int))
 
         ax1.set_aspect("equal")
-        ax1.grid()
-        ax1.set_xlabel(r"$Y\,\rm{[m]}$")
-        ax1.set_ylabel(r"$X\,\rm{[m]}$")
+        ax1.grid(True)
+        # ax1.set_xlabel(r"$Y\,\rm{[m]}$")
+        # ax1.set_ylabel(r"$X\,\rm{[m]}$")
         ax1.legend(handles=[legend_initial, legend_way, legend_fixed, legend_buoy, legend_captain, legend_SD])
 
         fig.savefig(f"{folder_path}/Multiplot_{port['name']}_{self.ps.init_path_algo.name}.png",

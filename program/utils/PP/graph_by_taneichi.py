@@ -400,10 +400,8 @@ class Map():
         ax.set_xticklabels(np.arange(x_start, x_end + 200, 200), rotation=90)
         ax.set_yticklabels(np.arange(y_start, y_end + 200, 200), rotation=0)
 
-        ax.set_xlabel(r'$Y\,\rm{[m]}$')
-        ax.set_ylabel(r'$X\,\rm{[m]}$')
-
-        plt.grid(which='major', color='k', linestyle='--', linewidth=0.4, alpha=0.5)
+        # plt.grid(which='major', color='k', linestyle='--', linewidth=0.4, alpha=0.5)
+        ax.grid(True)
         plt.gca().set_aspect('equal', adjustable='box')
 
         # legend
