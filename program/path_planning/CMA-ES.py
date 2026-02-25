@@ -73,7 +73,7 @@ class SD_contact_judge(StrEnum):
 class Settings:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 0
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Else_1, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -1410,9 +1410,9 @@ class PathPlanning:
             0: {
                 "name": "Osaka_port1A",
                 "buoy": "1-堺",
-                "start": [-1400.0, -800.0],
+                "start": [-3000.0, -1000.0],
                 "end": [0.0, -10.0],
-                "psi_start": 40,
+                "psi_start": 0,
                 "psi_end": 10,
                 "berth_type": 2,
                 "ver_range": [-1500, 500],
