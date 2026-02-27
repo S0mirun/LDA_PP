@@ -13,15 +13,18 @@ from utils.PP.stay_ports import Hokkaido, Honsyu
 
 DIR = os.path.dirname(__file__)
 RAW_DATAS = f"{DIR}/../../raw_datas"
-PORT = Honsyu.Pasific.ibaragi
+PORT = Honsyu.Pasific.osaka_bay2
 coast_file = f"{RAW_DATAS}/国土交通省/C23-06_{PORT.num}_GML/C23-06_{PORT.num}-g.csv"
+port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/_{PORT.name}.csv"
 port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/_{PORT.name}.csv"
 SAVE_DIR = f"{DIR}/../../outputs/data/detail_map"
 
 SORT = False
-SAVE = True
-SHOW = False
-R_MAX = 3000
+SAVE = False
+SHOW = True
+R_MAX = 2000
+
+CHECK = False
 
 # ---- 原点と向き ----
 df_coord = pd.read_csv(port_file)
@@ -118,4 +121,13 @@ if SAVE:
     print("\nSAVED\n")
 
 if SHOW:
+    plt.show()
+
+if CHECK:
+    plt.cla()
+    file = f"{DIR}/../../outputs/data/detail_map/{PORT.name}.csv"
+    df = pd.read_csv(file)
+    plt.plot(df["y [m]"], df["x [m]"])
+    plt.grid()
+    plt.axis("equal")
     plt.show()

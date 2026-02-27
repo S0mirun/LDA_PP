@@ -204,6 +204,7 @@ class Honsyu:
             minY_long = 133.828336
             maxY_long = 133.854798
             name = 'Sakaide'
+            num = "37"
 
         class setouchi2:
             minY_lat = 34.216552
