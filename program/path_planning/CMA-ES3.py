@@ -20,8 +20,9 @@ from tqdm.auto import tqdm
 
 from utils.LDA.ship_geometry import *
 from utils.PP import Bezier_curve as Bezier
-from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.dictionary_of_port import dictionary
+from utils.PP.E_ddCMA import DdCma, Checker, Logger
+from utils.PP.fillet import fillet
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
 from utils.PP.MultiPlot import RealTraj
 
@@ -33,7 +34,7 @@ theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 8
+        self.port_number: int = 4
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Sakaide, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -41,6 +42,10 @@ class Setting:
         # ship
         self.L = 103.8
         self.B = 16.0
+
+        # approach
+        self.approach_algo = "BEZIER"
+        # self.approach_algo = "CIRCLE"
 
         # CMA-ES
         self.seed: int = 42
@@ -267,6 +272,10 @@ def cal_cross(u, v):
 def sigmoid(x, a, b, c):
     return a / (b + np.exp(c * x))
 
+def unit(v):
+    nv = np.linalg.norm(v)
+    return v / nv
+
 def cal_angle(from_pt, to_pt):
     """
     符号付きの角度
@@ -349,6 +358,8 @@ class MakeLine:
 
     def prepare(self):
         self.read_csv()
+        self.cal = CostCalculator()
+        self.cal.ps= ps
         self.prepare_for_SD()
         self.prepare_for_init_route()
         self.prepare_for_CMAES()
@@ -367,6 +378,7 @@ class MakeLine:
         SD.b_SD = self.df_debug["b_SD"].values[0]
 
         self.SD = SD
+        self.cal.SD = self.SD
         print("\nShip Domain set up complete\n")
 
     def prepare_for_init_route(self):
@@ -377,13 +389,6 @@ class MakeLine:
         self.make_init_route()
 
     def prepare_for_CMAES(self):
-        # cost
-        cal = CostCalculator()
-        cal.SD = self.SD
-        cal.lines = self.lines
-        cal.ps= ps
-        self.cal = cal
-
         print("initial point calculated\n")
         self.initial_D = self.cal_sigma_for_ddCMA(points=self.target_list,
                                                   last_point=self.init_list[-1]
@@ -450,7 +455,6 @@ class MakeLine:
                 )
 
             while not is_satisfied:
-                # ddcma.onestep(func=self.path_evaluate, check=self.enforce_max_turn_angle)
                 ddcma.onestep(func=self.path_evaluate, check=None)
 
                 best_cost = float(np.min(ddcma.arf))
@@ -670,6 +674,7 @@ class MakeLine:
         L_berth = Line(fixed_pt=np.array((0.0, margin)), theta=theta)
         L_berth.swap()
         lines.append(L_berth)
+
         self.lines = lines
         self.turn_end = np.array((0.0, margin))
 
@@ -787,7 +792,8 @@ class MakeLine:
                 L_append.swap()
                 L_berth.set_parent(L_append)
                 lines.insert(base_idx, L_append)
-            
+
+        self.cal.lines = self.lines       
         self.show_captain_line("captain's line before", last=True)
 
     def make_init_route(self):
@@ -796,11 +802,11 @@ class MakeLine:
         berthingをstraightとturnに分割
         各航路ですること
             approach  : 大雑把でいいのでBezier
-            straight : 着桟の前は直進したい.一旦 3L [m]としている.
+            straight : 着桟の前は直進したい.一旦 2L [m]としている.
             turn     : 着桟姿勢に応じて回頭,変針
         """
         port = self.port
-        pts = self.captain_pts
+        WP = self.way_pts
         margin = 2 * self.ps.L
 
         def cal_total_len(pts):
@@ -819,7 +825,7 @@ class MakeLine:
             return pts[i] + (pts[i + 1] - pts[i]) * a
         
         # separate phase
-        seg_len, s_cum, total_len = cal_total_len(pts)
+        seg_len, s_cum, total_len = cal_total_len(WP)
         u_split = np.clip(total_len - 500, 0.0, total_len)
         i = np.searchsorted(s_cum, u_split, side="right") - 1
         i = int(np.clip(i, 0, len(seg_len) - 1))
@@ -827,69 +833,107 @@ class MakeLine:
         nearest_ln = self.get_nearest_line(turn_start_pt)
         theta = nearest_ln.theta # [rad]
         berth_start_pt = turn_start_pt + margin * np.array([np.cos(theta - np.pi), np.sin(theta - np.pi)])
-        pts_for_bezier = np.vstack([pts[1:i+1], berth_start_pt])
-
-        bezier_pts, _ = Bezier.bezier(pts_for_bezier, 100)
+        pts_for_bezier = np.vstack([WP[1:i+1], berth_start_pt])
         straight_pts = np.vstack([berth_start_pt, turn_start_pt])
-        curve_pts = np.vstack([turn_start_pt, pts[-1]])
+        curve_pts = np.vstack([turn_start_pt, WP[-1]])
 
-        # approach, straight
-        ## besier pts spread by speed
-        ap_and_st_pts = np.vstack([pts[0], bezier_pts, turn_start_pt])
-        seg_len, s_cum, total_len = cal_total_len(ap_and_st_pts)
-        approach_pts = [pts[0].copy()]
-        u = 0.0
-        while u < total_len:
-            curent_pt = interp(u, ap_and_st_pts)
-            speed_kt = cal_speed(self, curent_pt, pts[-1])
-            speed = speed_kt *1852 / 60 # [m/min]
-            u = min(u + speed, total_len)
-            approach_pts.append(interp(u, ap_and_st_pts) if u < total_len else ap_and_st_pts[-1].copy())
-        
-        ## psi
-        psi_list = np.array([
-            cal_angle(approach_pts[i], approach_pts[i+1]) % (2*np.pi)
-            for i in range(len(approach_pts) - 1)
-        ])
-        approach_pts.pop()
+        if self.ps.approach_algo == "BEZIER":
+            # approach, straight
+            ## besier pts spread by speed
+            bezier_pts, _ = Bezier.bezier(pts_for_bezier, 100)
+            ap_and_st_pts = np.vstack([WP[0], bezier_pts, turn_start_pt])
+            seg_len, s_cum, total_len = cal_total_len(ap_and_st_pts)
+            approach_pts = [WP[0].copy()]
+            u = 0.0
+            while u < total_len:
+                curent_pt = interp(u, ap_and_st_pts)
+                speed_kt = cal_speed(self, curent_pt, WP[-1])
+                speed = speed_kt *1852 / 60 # [m/min]
+                u = min(u + speed, total_len)
+                approach_pts.append(interp(u, ap_and_st_pts) if u < total_len else ap_and_st_pts[-1].copy())
 
-        # turn
-        seg_len, s_cum, total_len = cal_total_len(curve_pts)
-        turn_pts = [curve_pts[0].copy()]
-        u = 0.0
-        while u < total_len:
-            curent_pt = interp(u, curve_pts)
-            speed_kt = cal_speed(self, curent_pt, pts[-1])
-            speed = speed_kt *1852 / 60 # [m/min]
-            u = min(u + speed, total_len)
-            turn_pts.append(interp(u, curve_pts) if u < total_len else curve_pts[-1].copy())
+            ## psi
+            psi_list = np.array([
+                cal_angle(approach_pts[i], approach_pts[i+1]) % (2*np.pi)
+                for i in range(len(approach_pts) - 1)
+            ])
+            approach_pts.pop()
 
-        ## psi
-        psi_list = np.append(psi_list, psi_list[-1])
-        n = len(turn_pts)
-        if port["side"] == "port":
-            beta = (2 * np.pi - psi_list[-1]) / (n-1)
-        elif port["side"] == "starboard":
-            beta = -(psi_list[-1] - 0)  / (n-1)
+            # turn
+            seg_len, s_cum, total_len = cal_total_len(curve_pts)
+            turn_pts = [curve_pts[0].copy()]
+            u = 0.0
+            while u < total_len:
+                curent_pt = interp(u, curve_pts)
+                speed_kt = cal_speed(self, curent_pt, WP[-1])
+                speed = speed_kt *1852 / 60 # [m/min]
+                u = min(u + speed, total_len)
+                turn_pts.append(interp(u, curve_pts) if u < total_len else curve_pts[-1].copy())
 
-        for i in range(n-1):
-            psi = psi_list[-1] + beta
-            psi_list = np.append(psi_list, psi)
+            ## psi
+            psi_list = np.append(psi_list, psi_list[-1])
+            n = len(turn_pts)
+            if port["side"] == "port":
+                beta = (2 * np.pi - psi_list[-1]) / (n-1)
+            elif port["side"] == "starboard":
+                beta = -(psi_list[-1] - 0)  / (n-1)
 
-        # init list
-        init_path = np.vstack([approach_pts, turn_pts])
-        init_list = np.hstack([init_path, psi_list.reshape(-1, 1)])
+            for i in range(n-1):
+                psi = psi_list[-1] + beta
+                psi_list = np.append(psi_list, psi)
 
-        self.init_list = init_list
-        self.approach_list = init_list[:(len(init_list) - n)]
-        self.turn_list = init_list[(len(init_list) - n):]
-        self.target_list = self.turn_list[1:-1]
+            # init list
+            init_path = np.vstack([approach_pts, turn_pts])
+            init_list = np.hstack([init_path, psi_list.reshape(-1, 1)])
 
-        self.berth_start = berth_start_pt
-        self.turn_start = turn_start_pt
+            self.init_list = init_list
+            self.approach_list = init_list[:(len(init_list) - n)]
+            self.turn_list = init_list[(len(init_list) - n):]
+            self.target_list = self.turn_list[1:-1]
 
-        print(init_list)
-        self.show_init_route()
+            self.berth_start = berth_start_pt
+            self.turn_start = turn_start_pt
+
+            print(init_list)
+            self.show_init_route()
+
+        elif self.ps.approach_algo == "CIRCLE":
+            cal = self.cal
+            print(WP)
+
+            arc_list = []
+            for i in range(len(WP) -2):
+                SD_least = np.inf
+                L1 = np.linalg.norm(WP[i] - WP[i+1])
+                L2 = np.linalg.norm(WP[i+1] - WP[i+2])
+                alpha = np.arccos(np.clip(np.dot(unit(WP[i]-WP[i+1]), unit(WP[i+2]-WP[i+1])), -1, 1))
+                r_max = min(L1, L2) * np.tan(alpha/2)
+                R_list = np.linspace(0.1, r_max, 51)
+
+                for r in R_list:
+                    _, _, arc, psi, _ = fillet(WP[i], WP[i+1], WP[i+2], r, n=20)
+                    # ship domain
+                    SD_cost = 0.0
+                    for j in range(len(arc)):
+                        SD_cost += cal.SD_penalty(arc[j], psi[j])
+
+                    if SD_least > SD_cost:
+                        arc_best = arc
+                        SD_least = SD_cost
+
+                arc_list.append(arc_best)
+
+            arcs = np.concatenate(arc_list, axis=0)
+            pts = np.vstack([WP[0], arcs, WP[-1]])
+            dy = pts[1:,0] - pts[:-1,0]
+            dx = pts[1:,1] - pts[:-1,1]
+            psi = np.arctan2(dx, dy)
+            psi = np.r_[psi, psi[-1]]
+
+            init_list = np.column_stack([pts, psi])
+            print(init_list)
+            self.init_list = init_list
+            self.show_init_route()
 
     def get_nearest_line(self, pt):
         """
@@ -1027,48 +1071,7 @@ class MakeLine:
             costs[i] = total
 
         return float(costs[0]) if not batched else costs
-
     
-    def enforce_max_turn_angle(self, X: np.ndarray) -> np.ndarray:
-
-        def selective_laplacian_smoothing(poly, max_deg=60.0, n_iter=10, alpha=0.7):
-            poly = np.asarray(poly, float).copy()
-            for _ in range(n_iter):
-                v1 = poly[1:-1] - poly[:-2]
-                v2 = poly[2:]   - poly[1:-1]
-                a1 = np.arctan2(v1[:,1], v1[:,0])
-                a2 = np.arctan2(v2[:,1], v2[:,0])
-                deg  = (a2 - a1 + np.pi) % (2*np.pi) - np.pi
-                ang = np.degrees(np.abs(deg))
-
-                bad = np.where(ang > max_deg)[0] + 1  # 折れ点の index（1..M-2）
-                for i in bad:
-                    mid = (poly[i-1] + poly[i+1]) / 2
-                    poly[i] = (1 - alpha) * poly[i] + alpha * mid
-            return poly
-        
-        arr = np.asarray(X, float)
-        if arr.ndim == 1:
-            arr = arr[None, :]
-
-        out = arr.copy()
-        start = self.init_pts[0]; end = self.init_pts[-1]
-
-        for k in range(out.shape[0]):
-            pts = out[k].reshape(-1, 2)
-            poly = np.vstack([start, pts, end])
-
-            poly2 = selective_laplacian_smoothing(
-                poly,
-                max_deg=self.ps.MAX_ANGLE_DEG,
-                n_iter=10,
-                alpha=0.7
-            )
-
-            pts[:] = poly2[1:-1]
-            out[k] = pts.reshape(-1)
-
-        return out if X.ndim == 2 else out[0]
      
     # show map
     def show_init_lines(self, ax, name):
@@ -1116,26 +1119,23 @@ class MakeLine:
                         bbox_inches="tight", pad_inches=0.05)
             h_list.append(h)
             print("captain's line saved\n")
-            self.captain_pts = pts
+            self.way_pts = pts
 
         for h in h_list:
             h.remove()
 
     def show_init_route(self):
         ax = self.ax
+        WP = self.way_pts
         list = self.init_list
         legends = self.legends
         h_list = []
 
         # text
-        self.add_text(ax, h_list, p_as=True, p_bs=True, p_te=True, p_ts=True)
-
-        plt.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", "phase change.pdf"),
-                    bbox_inches="tight", pad_inches=0.05)
-        
         self.add_text(ax, h_list, wp=True)
 
         # ship shape
+        ax.plot(WP[:, 1], WP[:, 0], color="blue", alpha=0.5)
         for pose in list:
             shipshape = MplPolygon(
                 ship_shape_poly(

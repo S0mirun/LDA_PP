@@ -19,11 +19,9 @@ port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/_{PORT.name}.csv"
 port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/_{PORT.name}.csv"
 SAVE_DIR = f"{DIR}/../../outputs/data/detail_map"
 
-SORT = False
-SAVE = False
-SHOW = True
 R_MAX = 2000
-
+SHOW = True
+SAVE = False
 CHECK = False
 
 # ---- 原点と向き ----
@@ -104,24 +102,16 @@ ax.set_xlim(-R_MAX, R_MAX)
 ax.set_ylim(-R_MAX, R_MAX)
 all_pts = np.vstack(pts_list)
 
-if SAVE:
-    if SORT:
-        # all_pts = np.vstack([all_pts, ADD])
-        sorted_pts = sort_points(all_pts)
-        df = pd.DataFrame({
-            "x [m]": sorted_pts[:, 1],
-            "y [m]": sorted_pts[:, 0],
-        })
-    else:
-        df = pd.DataFrame({
-            "x [m]": all_pts[:, 1],
-            "y [m]": all_pts[:, 0],
-        })
-    df.to_csv(os.path.join(SAVE_DIR, f"{PORT.name}.csv"))
-    print("\nSAVED\n")
-
 if SHOW:
     plt.show()
+
+if SAVE:
+    df = pd.DataFrame({
+        "x [m]": all_pts[:, 1],
+        "y [m]": all_pts[:, 0],
+    })
+    df.to_csv(os.path.join(SAVE_DIR, f"{PORT.name}.csv"))
+    print("\nSAVED\n")
 
 if CHECK:
     plt.cla()
