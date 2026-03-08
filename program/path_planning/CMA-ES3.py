@@ -34,7 +34,7 @@ theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 4
+        self.port_number: int = 9
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Sakaide, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -44,8 +44,9 @@ class Setting:
         self.B = 16.0
 
         # approach
-        self.approach_algo = "BEZIER"
-        # self.approach_algo = "CIRCLE"
+        # self.approach_algo = "BEZIER"
+        self.approach_algo = "CIRCLE"
+        self.straight = self.L
 
         # CMA-ES
         self.seed: int = 42
@@ -807,7 +808,7 @@ class MakeLine:
         """
         port = self.port
         WP = self.way_pts
-        margin = 2 * self.ps.L
+        margin = self.ps.straight
 
         def cal_total_len(pts):
             seg_len = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
@@ -899,6 +900,9 @@ class MakeLine:
 
         elif self.ps.approach_algo == "CIRCLE":
             cal = self.cal
+            # WP2 = WP[:-1]
+            # WP = WP2
+            WP[-1] = berth_start_pt
             print(WP)
 
             arc_list = []
@@ -929,10 +933,20 @@ class MakeLine:
             dx = pts[1:,1] - pts[:-1,1]
             psi = np.arctan2(dx, dy)
             psi = np.r_[psi, psi[-1]]
-
             init_list = np.column_stack([pts, psi])
-            print(init_list)
+
+            # for competition
+            bezier_pts, _ = Bezier.bezier(pts_for_bezier, 50)
+            b_pts = np.vstack([WP[0], bezier_pts])
+            b_dy = b_pts[1:,0] - b_pts[:-1,0]
+            b_dx = b_pts[1:,1] - b_pts[:-1,1]
+            b_psi = np.arctan2(b_dx, b_dy)
+            b_psi = np.r_[b_psi, b_psi[-1]]
+            init_list_b = np.column_stack([b_pts, b_psi])
+
             self.init_list = init_list
+            self.init_list_b = init_list_b
+
             self.show_init_route()
 
     def get_nearest_line(self, pt):
@@ -1128,15 +1142,34 @@ class MakeLine:
         ax = self.ax
         WP = self.way_pts
         list = self.init_list
+        list_b = self.init_list_b
         legends = self.legends
         h_list = []
+        for df in self.df_cap:
+            traj = RealTraj()
+            traj.input_csv(df, self.port_csv)
+            ax.plot(traj.Y, traj.X, 
+                        color = 'gray', ls = '-', marker = 'D',
+                        markersize = 2, alpha = 0.2, lw = 1.0, zorder = 3)
 
         # text
         self.add_text(ax, h_list, wp=True)
 
-        # ship shape
-        ax.plot(WP[:, 1], WP[:, 0], color="blue", alpha=0.5)
+        # ship shape straight
+        ax.plot(WP[:, 1], WP[:, 0], color="red", alpha=0.5)
         for pose in list:
+            shipshape = MplPolygon(
+                ship_shape_poly(
+                pose=pose,
+                L=self.ps.L, B=self.ps.B,
+                ),
+                facecolor='red',
+                alpha=0.7, zorder=6
+            )
+            ax.add_patch(shipshape)
+
+        # ship shape bezier
+        for pose in list_b:
             shipshape = MplPolygon(
                 ship_shape_poly(
                 pose=pose,
@@ -1149,9 +1182,13 @@ class MakeLine:
 
         # setting
         legend_init_path = plt.Line2D([0], [0],
+                                    color = 'red', ls = '-', marker = 'D',
+                                    markersize = 2, lw = 1.0, label="Arc Path")
+        legend_init_path_b = plt.Line2D([0], [0],
                                     color = 'blue', ls = '-', marker = 'D',
-                                    markersize = 2, lw = 1.0, label="Initial Path")
+                                    markersize = 2, lw = 1.0, label="Bezier Path")
         legends.append(legend_init_path)
+        legends.append(legend_init_path_b)
         h = ax.legend(handles=legends)
         h_list.append(h)
 
@@ -1167,7 +1204,6 @@ class MakeLine:
         plt.savefig(os.path.join(f"{self.SAVE_DIR}/卒論", "init path zoom.pdf"),
                     bbox_inches="tight", pad_inches=0.05)
         print("init path saved\n")
-
         for h in h_list:
             h.remove()
 
@@ -1205,7 +1241,7 @@ class MakeLine:
                 textcoords=ann.get("textcoords", "offset points"),
                 ha=ann["ha"],
                 va=ann["va"],
-                fontsize=20,
+                fontsize=15,
                 zorder=10,
             )
 

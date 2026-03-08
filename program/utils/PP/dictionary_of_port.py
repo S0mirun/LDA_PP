@@ -105,9 +105,9 @@ def dictionary():
                 "annotations": {
                     "approach_start": {
                         "text": "approach start",
-                        "xytext": (0, -10),
+                        "xytext": (0, 10),
                         "ha": "center",
-                        "va": "top",
+                        "va": "bottom",
                     },
                     "berth_start": {
                         "text": "phase change",
@@ -274,15 +274,15 @@ def dictionary():
                     },
                     "berth_start": {
                         "text": "phase change",
-                        "xytext": (0, -5),
-                        "ha": "center",
-                        "va": "top",
+                        "xytext": (-5, 0),
+                        "ha": "right",
+                        "va": "center",
                     },
                     "turn_start": {
                         "text": "turning start",
-                        "xytext": (0, 5),
-                        "ha": "center",
-                        "va": "bottom",
+                        "xytext": (-5, 0),
+                        "ha": "right",
+                        "va": "center",
                     },
                     "turn_end": {
                         "text": "berthing end",
