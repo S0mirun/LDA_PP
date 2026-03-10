@@ -34,7 +34,7 @@ theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 9
+        self.port_number: int = 8
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Sakaide, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -693,7 +693,9 @@ class MakeLine:
             mid_2 = (lane_pts[2] + lane_pts[3]) / 2
             theta = cal_angle(mid_1, mid_2)
 
-            mid_1 = mid_1 + np.array([-dist_both_ship * np.sin(theta), dist_both_ship * np.cos(theta)])
+            B_shiplane = np.linalg.norm(lane_pts[1] - lane_pts[0])
+            d = min(B_shiplane / 4, dist_both_ship)
+            mid_1 = mid_1 + np.array([-d * np.sin(theta), d * np.cos(theta)])
             L_lane = Line(fixed_pt=np.array((mid_1)), theta=theta)
             L_lane.extent_fixed_pt()
             lines.append(L_lane)
@@ -834,7 +836,7 @@ class MakeLine:
         nearest_ln = self.get_nearest_line(turn_start_pt)
         theta = nearest_ln.theta # [rad]
         berth_start_pt = turn_start_pt + margin * np.array([np.cos(theta - np.pi), np.sin(theta - np.pi)])
-        pts_for_bezier = np.vstack([WP[1:i+1], berth_start_pt])
+        pts_for_bezier = np.vstack([WP[0:i+1], berth_start_pt])
         straight_pts = np.vstack([berth_start_pt, turn_start_pt])
         curve_pts = np.vstack([turn_start_pt, WP[-1]])
 
@@ -900,8 +902,8 @@ class MakeLine:
 
         elif self.ps.approach_algo == "CIRCLE":
             cal = self.cal
-            # WP2 = WP[:-1]
-            # WP = WP2
+            WP2 = WP[:-1]
+            WP = WP2
             WP[-1] = berth_start_pt
             print(WP)
 
