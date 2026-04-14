@@ -44,7 +44,7 @@ class Setting:
         self.B = 16.0
 
         # approach
-        self.approach_algo = "CIRCLE"
+        self.approach_algo = "ARC"
         self.straight = self.L
 
         # CMA-ES
@@ -354,6 +354,8 @@ class PathPlanning():
         ax.fill_betweenx(map_X, map_Y, facecolor="gray", alpha=0.3, zorder=0)
         ax.plot(map_Y, map_X, color="k", linestyle="--", lw=0.5, alpha=0.8, zorder=0)
 
+        self.df_land = df_land
+
 
     def _draw_shipping_lane(self, fig, ax):
         df_shipping_lane = pd.read_csv(f"outputs/data/Shipping_lane/{self.port["name"]}.csv")
@@ -371,6 +373,8 @@ class PathPlanning():
                 alpha=0.2, zorder=1
             )
             ax.add_patch(patch)
+
+        self.df_shipping_lane = df_shipping_lane
 
 
     def _draw_buoy(self, fig, ax):
@@ -400,8 +404,200 @@ class PathPlanning():
         
 
     def build_lines_by_shipping_lane(self):
-        pass
+        self._setup_lines()
+        self._build_lines_from_berth()
+        self._build_lines_from_shipping_lane()
+        self._build_lines_from_start()
+        self._define_DAG()
 
+    def _setup_lines(self):
+        self.lines = []
+
+        # for crossing algorithm
+        coords_map = self.df_land[["y [m]", "x [m]"]].to_numpy(dtype=float)
+        poly_map = make_valid(Polygon(coords_map))
+        Line.map_poly = poly_map
+        Line.map_poly_prep = prep(poly_map)
+
+
+    def _build_lines_from_berth(self):
+        port = self.port
+
+        theta = 0
+        margin = 2 * self.ps.B
+        if port["psi_end"] == 0:
+            if port["style"] == "head out" and port["side"]== "starboard":
+                theta = 0;    margin = -margin
+            elif port["style"] == "head out" and port["side"]== "port":
+                theta = 0;    margin = margin
+            elif port["style"] == "head in" and port["side"] == "starboard":
+                theta = -170;  margin = -margin
+            elif port["style"] == "head in" and port["side"] == "port":
+                theta = 180; margin = margin
+            theta = np.deg2rad(theta)
+        else:
+            theta = np.deg2rad(port["psi_end"])
+
+        L_berth = Line(fixed_pt=np.array((0.0, margin)), theta=theta)
+        L_berth.swap()
+        self.lines.append(L_berth)
+        self.pp_end = np.array((0.0, margin))
+
+    def _build_lines_from_shipping_lane(self):
+        cal = self.cal
+        lines = self.lines
+
+        lane_polys = []
+        dist_both_ship = 0.5 * self.ps.L + self.ps.B
+        for pid, g in self.df_shipping_lane.groupby("polygon_id", sort=True):
+            lane_pts = g[['y [m]', 'x [m]']].to_numpy()
+
+            mid_1 = (lane_pts[0] + lane_pts[1]) / 2
+            mid_2 = (lane_pts[2] + lane_pts[3]) / 2
+            theta = cal.angle(mid_1, mid_2)
+
+            B_shiplane = np.linalg.norm(lane_pts[1] - lane_pts[0])
+            d = min(B_shiplane / 4, dist_both_ship)
+            mid_1 = mid_1 + np.array([-d * np.sin(theta), d * np.cos(theta)])
+            L_lane = Line(fixed_pt=np.array((mid_1)), theta=theta)
+            L_lane.extent_fixed_pt()
+            lines.append(L_lane)
+
+            # for crossing algorithm
+            poly_lane = Polygon(lane_pts[:, [1, 0]])
+            lane_polys.append(poly_lane)
+            print(f"shipping lane {pid} complete")
+
+        Line.lane = shapely.union_all(lane_polys)
+        lines[:] = lines[1:] + lines[:1]
+
+
+    def _build_lines_from_start(self):
+        port = self.port
+        lines = self.lines
+
+        L_start = Line(fixed_pt=port["start"], theta=np.deg2rad(port["psi_start"]))
+        lines.insert(0, L_start)
+        self.pp_start = port["start"]
+
+
+    def _define_DAG(self):
+        lines = self.lines
+
+        for i in range(len(lines) - 2):
+            lines[i+1].set_parent(lines[i])
+
+
+    def supplement_lines(self):
+        lines = self.lines
+
+        self.base_idx = len(lines) - 1
+        while True:
+            self._seek_nearest_line()
+            if self.cross_line_idx is not None:
+                L_base = lines[self.base_idx]
+                L_base.set_parent(lines[self.cross_line_idx])
+            else:
+                self._supplement_line()
+
+
+    def _seek_nearest_line(self):
+        lines = self.lines
+
+        L_base = lines[self.base_idx]
+        cross_line_idx = None
+
+        if len(lines) == 2:
+            if Line.cross_judge(lines[0], L_base):
+                cross_line_idx = 0
+        elif len(lines) > 2:
+            shortest = np.inf
+            for i in range(1, self.base_idx):
+                if Line.cross_judge(lines[i], L_base):
+                    intersect_pt = Line.intersect(lines[i], L_base)
+                    length = np.linalg.norm(intersect_pt - L_base.end_pt)
+                    if length < shortest:
+                        shortest = length
+                        cross_line_idx = i
+        
+        self.cross_line_idx = cross_line_idx
+
+        
+    def _supplement_line(self):
+        lines = self.lines
+        L_base = lines[self.base_idx]
+
+        mid = (L_base.fixed_pt + L_base.end_pt) / 2
+        if len(lines) == 2:
+            ln = lines[0]
+            self._find_visible_range(ln, mid)
+        elif len(lines) > 2:
+            for ln in lines[-2:0:-1]:
+                self._find_visible_range(ln, mid)
+
+                if self.idx_hit != 99:
+                    break
+
+        self._build_supplement_line(L_base, mid)
+
+    
+    def _find_visible_range(self, ln, mid):
+        def to_xy(p_yx):
+            return (float(p_yx[1]), float(p_yx[0]))
+        
+        pts = np.linspace(ln.end_pt, ln.fixed_pt, 99)
+        
+        idx = 0
+        while idx < 99 and Line.map_poly_prep.intersects(LineString([to_xy(pts[idx]), to_xy(mid)])):
+            idx += 1
+        idx_through = idx
+        while idx < 99 and (not Line.map_poly_prep.intersects(LineString([to_xy(pts[idx]), to_xy(mid)]))):
+            idx += 1
+        idx_hit = idx
+        idx_hit = np.clip(idx_hit, 0, len(pts)-1)
+
+        self.pts = pts
+        self.idx_through = idx_through
+        self.idx_hit = idx_hit
+
+
+    def _build_supplement_line(self, L_base, mid):
+        cal = self.cal
+
+        fixed_pt = (self.pts[self.idx_through] + self.pts[self.idx_hit]) / 2
+        theta = cal.angle(mid, fixed_pt)
+        L_append = Line(fixed_pt=fixed_pt, theta=theta)
+        L_append.swap()
+        L_base.set_parent(L_append)
+        self.lines.insert(self.base_idx, L_append)
+
+    
+    def build_path_from_lines(self):
+        self._get_WP_from_lines()
+        WP = self.way_points
+
+
+        if self.ps.approach_algo == "ARC":
+            for i in range(len(self.way_points)):
+                self._find_best_fillet_arc(WP[i], WP[i+1], WP[i+2])
+
+
+    def _get_WP_from_lines(self):
+        lines = self.lines
+
+        ln = lines[-1]
+        WP_list = []
+        while ln.parent is not None:
+            WP_list.append(np.asarray(ln.fixed_pt))
+            ln = ln.parent
+
+        way_points = np.vstack(WP_list[::-1])
+        
+        self.way_points = way_points
+
+
+    def _find_best_fillet_arc(self, pt1, pt2, pt3):
+        pass
 
 if __name__ == '__main__':
     ps = Setting()
