@@ -93,14 +93,17 @@ def sigmoid(x, a, b, c):
 class ShipDomain:
     def __init__(self):
         SD = ShipDomain_proposal()
-        SD_setup_csv = "outputs/303/mirror5/fitting_parameter.csv"
 
+        SD_setup_csv = "outputs/303/mirror5/fitting_parameter.csv"
         SD.initial_setting(SD_setup_csv, sigmoid)
 
-        SD.a_ave = self.df_debug["a_ave"].values[0]
-        SD.b_ave = self.df_debug["b_ave"].values[0]
-        SD.a_SD = self.df_debug["a_SD"].values[0]
-        SD.b_SD = self.df_debug["b_SD"].values[0]
+        df_debug = pd.read_csv("raw_datas/tmp/GuidelineFit_debug.csv")
+        SD.a_ave = df_debug["a_ave"].values[0]
+        SD.b_ave = df_debug["b_ave"].values[0]
+        SD.a_SD = df_debug["a_SD"].values[0]
+        SD.b_SD = df_debug["b_SD"].values[0]
+
+        print("\nShip Domain setup complete")
 
 
 class Calculator:
@@ -166,7 +169,7 @@ class Line:
     """
     theta : 真上が0 時計回りが負
     """
-    cal:Calculator
+    cal: ClassVar[Calculator] = None
 
     fixed_pt:Tuple[float, float]
     end_pt:Tuple[float, float] = None
@@ -227,12 +230,12 @@ class Line:
         self.fixed_pt = self.intersect(self, ln)
         self.parent = ln
 
-    def cross_judge(self, l1, l2):
+    def cross_judge(self, ln1, ln2):
         """
         l1, l2 : Lineで定義された直線
         """
-        pt1, pt2 = l1.fixed_pt, l1.end_pt
-        pt3, pt4 = l2.fixed_pt, l2.end_pt
+        pt1, pt2 = ln1.fixed_pt, ln1.end_pt
+        pt3, pt4 = ln2.fixed_pt, ln2.end_pt
 
         cross1_34 = self.cal.cross(pt3-pt1, pt4-pt1); cross2_34 = self.cal.cross(pt3-pt2, pt4-pt2)
         cross3_12 = self.cal.cross(pt1-pt3, pt2-pt3); cross4_12 = self.cal.cross(pt1-pt4, pt2-pt4)
@@ -289,10 +292,11 @@ class CostCalculator:
 
 
 class PathPlanning():
-    def __init__(self, ps, sd, cal):
+    def __init__(self, ps, sd, cal, cost_cal):
         self.ps = ps
         self.SD = sd
         self.cal = cal
+        self.cost_cal = cost_cal
 
     def main(self):
         self.preset()
@@ -301,16 +305,20 @@ class PathPlanning():
 
 
     def preset(self):
+        print("\n###  preset start    ###")
         self.set_target_port()
+        self.setup_Line()
         self.setup_figure()
         self.draw_basemap()
+        print("\n###  preset finish    ###")
 
     def make_path(self):
+        print("\n###  make path start    ###")
         self.build_lines_by_shipping_lane()
         self.supplement_lines()
-        self.build_path_from_lines()
         self.generate_path()
-        self.refine_path()
+        # self.refine_path()
+        print("\n###  make path finish    ###")
 
     def save_result(self):
         self.set_save_dir()
@@ -324,6 +332,14 @@ class PathPlanning():
     def set_target_port(self):
         self.port = dictionary()[self.ps.port_number]
         self.port_csv=f"raw_datas/tmp/coordinates_of_port/_{self.port["name"]}.csv"
+        print(f"\ntarget : {self.port["name"]}")
+
+
+    def setup_Line(self):
+        Line.cal = self.cal
+        Line.ver_range = self.port["ver_range"]
+        Line.hor_range = self.port["hor_range"]
+        print("\nLine setup complete")
 
 
     def setup_figure(self):
@@ -336,7 +352,7 @@ class PathPlanning():
         ax.tick_params(axis='both', which='both', labelbottom=False, labelleft=False)
 
         self.fig, self.ax = fig, ax
-
+        print("\nFigure setup complete")
 
     def draw_basemap(self):
         fig, ax = self.fig, self.ax
@@ -345,6 +361,7 @@ class PathPlanning():
         self._draw_shipping_lane(fig, ax)
         self._draw_buoy(fig, ax)
         self._add_compass_image(fig, ax)
+        print("\nDraw basemap complete")
 
 
     def _draw_land(self, fig, ax):
@@ -374,14 +391,14 @@ class PathPlanning():
             )
             ax.add_patch(patch)
 
-        self.df_shipping_lane = df_shipping_lane
+        self.df_shipping_lane = df_lane
 
 
     def _draw_buoy(self, fig, ax):
-        df_buoy = pd.read_csv(buoy_csv = f"outputs/data/buoy/{self.port['name']}.csv")
+        df_buoy = pd.read_csv(f"outputs/data/buoy/{self.port['name']}.csv")
         df_buoy["x [m]"], df_buoy["y [m]"] = convert(df_buoy, self.port_csv, "latitude", "longitude")
 
-        ax.scatter(self.df_buoy["x [m]"].values, self.df_buoy["y [m]"].values,
+        ax.scatter(df_buoy["x [m]"].values, df_buoy["y [m]"].values,
                     color='orange', s=20, zorder=2)
         
         
@@ -513,7 +530,7 @@ class PathPlanning():
         elif len(lines) > 2:
             shortest = np.inf
             for i in range(1, self.base_idx):
-                if Line.cross_judge(lines[i], L_base):
+                if Line.cross_judge(ln1=lines[i], ln2=L_base):
                     intersect_pt = Line.intersect(lines[i], L_base)
                     length = np.linalg.norm(intersect_pt - L_base.end_pt)
                     if length < shortest:
@@ -572,14 +589,17 @@ class PathPlanning():
         self.lines.insert(self.base_idx, L_append)
 
     
-    def build_path_from_lines(self):
+    def generate_path(self):
         self._get_WP_from_lines()
         WP = self.way_points
 
 
         if self.ps.approach_algo == "ARC":
+            arc_list = []
             for i in range(len(self.way_points)):
-                self._find_best_fillet_arc(WP[i], WP[i+1], WP[i+2])
+                self._find_best_fillet_arc(WP[i], WP[i+1], WP[i+2], arc_list)
+            
+            self._asseble_fillet_path(arc_list)
 
 
     def _get_WP_from_lines(self):
@@ -591,18 +611,64 @@ class PathPlanning():
             WP_list.append(np.asarray(ln.fixed_pt))
             ln = ln.parent
 
-        way_points = np.vstack(WP_list[::-1])
-        
-        self.way_points = way_points
+        self.way_points = np.vstack(WP_list[::-1])
 
 
-    def _find_best_fillet_arc(self, pt1, pt2, pt3):
-        pass
+    def _find_best_fillet_arc(self, pt1, pt2, pt3, arc_list):
+        cal = self.cal
+        cost_cal = self.cost_cal
+
+        SD_least = np.inf
+        L1 = np.linalg.norm(pt1 - pt2)
+        L2 = np.linalg.norm(pt2 - pt3)
+        alpha = np.arccos(np.clip(np.dot(cal.unit(pt1-pt2), cal.unit(pt3-pt2)), -1, 1))
+        r_min = (3.3 * self.ps.L * 2) / 2
+        r_max = min(L1, L2, r_min) * np.tan(alpha/2)
+        R_list = np.linspace(r_min, r_max, 51)
+
+        for r in R_list:
+            _, _, arc, psi, _ = fillet(pt1, pt2, pt3, r, n=20)
+            # ship domain
+            SD_cost = 0.0
+            for j in range(len(arc)):
+                SD_cost += cost_cal.SD_penalty(arc[j], psi[j])
+
+            if SD_least > SD_cost:
+                arc_best = arc
+                SD_least = SD_cost
+
+        arc_list.append(arc_best)
+
+
+    def _asseble_fillet_path(self, arc_list):
+        arcs = np.concatenate(arc_list, axis=0)
+        pts = np.vstack([self.pp_start, arcs, self.pp_start])
+        dy = pts[1:,0] - pts[:-1,0]
+        dx = pts[1:,1] - pts[:-1,1]
+        psi = np.arctan2(dx, dy)
+        psi = np.r_[psi, psi[-1]]
+        init_list = np.column_stack([pts, psi])
+
+
+    def set_save_dir(self):
+        SAVE_DIR = f"{DIR}/../../outputs/{dirname}/{self.port["name"]}"
+        os.makedirs(SAVE_DIR, exist_ok=True)
+
+        self.SAVE_DIR = SAVE_DIR
+
+
+    def save_base_map(self):
+        fig, ax = self.fig, self.ax
+        fig.savefig(os.path.join(self.SAVE_DIR, "base_map.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+
+
 
 if __name__ == '__main__':
     ps = Setting()
     sd = ShipDomain()
     cal = Calculator(ps, sd)
+    cost_cal = CostCalculator(ps, sd, cal)
     
-    pp = PathPlanning(ps, sd, cal)
+    pp = PathPlanning(ps, sd, cal, cost_cal)
     pp.main()
