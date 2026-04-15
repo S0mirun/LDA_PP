@@ -262,11 +262,9 @@ class CostCalculator:
         self.SD = sd
         self.cal = cal
 
-        self.lines = None
 
-    def SD_penalty(self, pt, psi):
+    def SD_penalty(self, lines, pt, psi):
         SD = self.SD
-        lines = self.lines
         
         speed = self.cal.speed(pt, lines[-1].end_pt)
         r_list = []
@@ -552,8 +550,11 @@ class PathPlanning:
             if self.cross_line_idx is not None:
                 L_base = lines[self.base_idx]
                 L_base.set_parent(lines[self.cross_line_idx])
+                break
             else:
                 self._supplement_line()
+
+        self._save_lines("line_DAG")
 
 
     def _seek_nearest_line(self):
@@ -629,14 +630,18 @@ class PathPlanning:
     
     def generate_path(self):
         self._get_WP_from_lines()
-        WP = self.way_points
+        self._save_pts(self.way_points, "way_points")
 
+        WP = self.way_points
         if self.ps.approach_algo == "ARC":
+            full_pts = np.vstack([self.pp_start, self.way_points, self.pp_end])
+
             arc_list = []
             for i in range(len(self.way_points)):
-                self._find_best_fillet_arc(WP[i], WP[i+1], WP[i+2], arc_list)
+                self._find_best_fillet_arc(full_pts[i], full_pts[i+1], full_pts[i+2], arc_list)
             
-            self._asseble_fillet_path(arc_list)
+            arcs = np.concatenate(arc_list, axis=0)
+            self._save_pts(arcs, "path_by_arc")
 
 
     def _get_WP_from_lines(self):
@@ -649,6 +654,17 @@ class PathPlanning:
             ln = ln.parent
 
         self.way_points = np.vstack(WP_list[::-1])
+
+
+    def _save_pts(self, pts, name):
+        fig, ax = self.fig, self.ax
+        full_pts = np.vstack([self.pp_start, pts, self.pp_end])
+
+        h1 = ax.scatter(full_pts[:, 1], full_pts[:, 0], c="green", s=20, zorder=10)
+        h2, = ax.plot(full_pts[:, 1], full_pts[:, 0], c="green", ls="--", alpha=0.5, zorder=10)
+        self.handles.extend([h1, h2])
+
+        self._save_fig(fig, name)
 
 
     def _find_best_fillet_arc(self, pt1, pt2, pt3, arc_list):
@@ -668,23 +684,13 @@ class PathPlanning:
             # ship domain
             SD_cost = 0.0
             for j in range(len(arc)):
-                SD_cost += cost_cal.SD_penalty(arc[j], psi[j])
+                SD_cost += cost_cal.SD_penalty(self.lines, arc[j], psi[j])
 
             if SD_least > SD_cost:
                 arc_best = arc
                 SD_least = SD_cost
 
         arc_list.append(arc_best)
-
-
-    def _asseble_fillet_path(self, arc_list):
-        arcs = np.concatenate(arc_list, axis=0)
-        pts = np.vstack([self.pp_start, arcs, self.pp_start])
-        dy = pts[1:,0] - pts[:-1,0]
-        dx = pts[1:,1] - pts[:-1,1]
-        psi = np.arctan2(dx, dy)
-        psi = np.r_[psi, psi[-1]]
-        init_list = np.column_stack([pts, psi])
 
 
 
