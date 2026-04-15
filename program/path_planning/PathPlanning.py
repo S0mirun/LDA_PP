@@ -227,27 +227,27 @@ class Line:
             self.fixed_pt = fixed_pt
 
     def set_parent(self, ln):
-        self.fixed_pt = self.intersect(self, ln)
+        self.fixed_pt = self.intersect(ln)
         self.parent = ln
 
-    def cross_judge(self, ln1, ln2):
+    def cross_judge(self, other):
         """
         l1, l2 : Lineで定義された直線
         """
-        pt1, pt2 = ln1.fixed_pt, ln1.end_pt
-        pt3, pt4 = ln2.fixed_pt, ln2.end_pt
+        p1 = self.fixed_pt; p2 = self.end_pt
+        p3 = other.fixed_pt; p4 = other.end_pt
 
-        cross1_34 = self.cal.cross(pt3-pt1, pt4-pt1); cross2_34 = self.cal.cross(pt3-pt2, pt4-pt2)
-        cross3_12 = self.cal.cross(pt1-pt3, pt2-pt3); cross4_12 = self.cal.cross(pt1-pt4, pt2-pt4)
+        cross1_34 = self.cal.cross(p3-p1, p4-p1); cross2_34 = self.cal.cross(p3-p2, p4-p2)
+        cross3_12 = self.cal.cross(p1-p3, p2-p3); cross4_12 = self.cal.cross(p1-p4, p2-p4)
 
         if (cross1_34 * cross2_34 <= 0) and (cross3_12 * cross4_12 <= 0):
             return True
         
         return False
 
-    def intersect(self, ln1, ln2):
-        p1 = ln1.fixed_pt; p2 = ln1.end_pt
-        p3 = ln2.fixed_pt; p4 = ln2.end_pt
+    def intersect(self, other):
+        p1 = self.fixed_pt; p2 = self.end_pt
+        p3 = other.fixed_pt; p4 = other.end_pt
 
         a = p2 - p1; b = p4 - p3; c = p3 - p1
 
@@ -291,7 +291,7 @@ class CostCalculator:
         return pen
 
 
-class PathPlanning():
+class PathPlanning:
     def __init__(self, ps, sd, cal, cost_cal):
         self.ps = ps
         self.SD = sd
@@ -305,23 +305,21 @@ class PathPlanning():
 
 
     def preset(self):
-        print("\n###  preset start    ###")
+        print("\n######  preset start    ######")
         self.set_target_port()
+        self.setup_save_dir()
         self.setup_Line()
         self.setup_figure()
         self.draw_basemap()
-        print("\n###  preset finish    ###")
 
     def make_path(self):
-        print("\n###  make path start    ###")
+        print("\n######  make path start    #####")
         self.build_lines_by_shipping_lane()
         self.supplement_lines()
         self.generate_path()
         # self.refine_path()
-        print("\n###  make path finish    ###")
 
     def save_result(self):
-        self.set_save_dir()
         self.save_base_map()
         self.save_init_lines()
         self.save_supplied_lines()
@@ -333,6 +331,13 @@ class PathPlanning():
         self.port = dictionary()[self.ps.port_number]
         self.port_csv=f"raw_datas/tmp/coordinates_of_port/_{self.port["name"]}.csv"
         print(f"\ntarget : {self.port["name"]}")
+
+
+    def setup_save_dir(self):
+        SAVE_DIR = f"{DIR}/../../outputs/{dirname}/{self.port["name"]}"
+        os.makedirs(SAVE_DIR, exist_ok=True)
+
+        self.SAVE_DIR = SAVE_DIR
 
 
     def setup_Line(self):
@@ -352,6 +357,7 @@ class PathPlanning():
         ax.tick_params(axis='both', which='both', labelbottom=False, labelleft=False)
 
         self.fig, self.ax = fig, ax
+        self.handles = []
         print("\nFigure setup complete")
 
     def draw_basemap(self):
@@ -361,6 +367,7 @@ class PathPlanning():
         self._draw_shipping_lane(fig, ax)
         self._draw_buoy(fig, ax)
         self._add_compass_image(fig, ax)
+        self._save_fig(fig, "basemap")
         print("\nDraw basemap complete")
 
 
@@ -418,7 +425,20 @@ class PathPlanning():
             pad=0.0,
         )
         ax.add_artist(ab)
+
+    
+    def _save_fig(self, fig, name):
+        fig.savefig(os.path.join(self.SAVE_DIR, f"{name}.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
         
+        if self.handles:
+            for h in list(self.handles):
+                try:
+                    if h is not None and h.axes is not None:
+                        h.remove()
+                except ValueError:
+                    pass
+            self.handles.clear()
 
     def build_lines_by_shipping_lane(self):
         self._setup_lines()
@@ -460,6 +480,21 @@ class PathPlanning():
         self.lines.append(L_berth)
         self.pp_end = np.array((0.0, margin))
 
+        self._save_lines("line_from_berth")
+
+
+    def _save_lines(self, name):
+        fig, ax = self.fig, self.ax
+        lines = self.lines
+
+        for ln in lines:
+            pts = np.vstack([ln.fixed_pt, ln.end_pt])
+            h, = ax.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
+            self.handles.append(h)
+
+        self._save_fig(fig, name)
+
+
     def _build_lines_from_shipping_lane(self):
         cal = self.cal
         lines = self.lines
@@ -484,6 +519,7 @@ class PathPlanning():
             poly_lane = Polygon(lane_pts[:, [1, 0]])
             lane_polys.append(poly_lane)
             print(f"shipping lane {pid} complete")
+            self._save_lines(f"line_from_shipping_lane_{pid}")
 
         Line.lane = shapely.union_all(lane_polys)
         lines[:] = lines[1:] + lines[:1]
@@ -496,6 +532,8 @@ class PathPlanning():
         L_start = Line(fixed_pt=port["start"], theta=np.deg2rad(port["psi_start"]))
         lines.insert(0, L_start)
         self.pp_start = port["start"]
+
+        self._save_lines("line_from_start")
 
 
     def _define_DAG(self):
@@ -530,8 +568,8 @@ class PathPlanning():
         elif len(lines) > 2:
             shortest = np.inf
             for i in range(1, self.base_idx):
-                if Line.cross_judge(ln1=lines[i], ln2=L_base):
-                    intersect_pt = Line.intersect(lines[i], L_base)
+                if L_base.cross_judge(lines[i]):
+                    intersect_pt = L_base.intersect(lines[i])
                     length = np.linalg.norm(intersect_pt - L_base.end_pt)
                     if length < shortest:
                         shortest = length
@@ -593,7 +631,6 @@ class PathPlanning():
         self._get_WP_from_lines()
         WP = self.way_points
 
-
         if self.ps.approach_algo == "ARC":
             arc_list = []
             for i in range(len(self.way_points)):
@@ -648,19 +685,6 @@ class PathPlanning():
         psi = np.arctan2(dx, dy)
         psi = np.r_[psi, psi[-1]]
         init_list = np.column_stack([pts, psi])
-
-
-    def set_save_dir(self):
-        SAVE_DIR = f"{DIR}/../../outputs/{dirname}/{self.port["name"]}"
-        os.makedirs(SAVE_DIR, exist_ok=True)
-
-        self.SAVE_DIR = SAVE_DIR
-
-
-    def save_base_map(self):
-        fig, ax = self.fig, self.ax
-        fig.savefig(os.path.join(self.SAVE_DIR, "base_map.png"),
-                    dpi=400, bbox_inches="tight", pad_inches=0.05)
 
 
 
