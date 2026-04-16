@@ -92,16 +92,16 @@ def sigmoid(x, a, b, c):
 
 class ShipDomain:
     def __init__(self):
-        SD = ShipDomain_proposal()
+        self.SD_p = ShipDomain_proposal()
 
         SD_setup_csv = "outputs/303/mirror5/fitting_parameter.csv"
-        SD.initial_setting(SD_setup_csv, sigmoid)
+        self.SD_p.initial_setting(SD_setup_csv, sigmoid)
 
         df_debug = pd.read_csv("raw_datas/tmp/GuidelineFit_debug.csv")
-        SD.a_ave = df_debug["a_ave"].values[0]
-        SD.b_ave = df_debug["b_ave"].values[0]
-        SD.a_SD = df_debug["a_SD"].values[0]
-        SD.b_SD = df_debug["b_SD"].values[0]
+        self.a_ave = df_debug["a_ave"].values[0]
+        self.b_ave = df_debug["b_ave"].values[0]
+        self.a_SD = df_debug["a_SD"].values[0]
+        self.b_SD = df_debug["b_SD"].values[0]
 
         print("\nShip Domain setup complete")
 
@@ -265,11 +265,12 @@ class CostCalculator:
 
     def SD_penalty(self, lines, pt, psi):
         SD = self.SD
+        SD_p = SD.SD_p
         
         speed = self.cal.speed(pt, lines[-1].end_pt)
         r_list = []
         for theta_i in theta_list:
-            r_list.append(SD.distance(speed, theta_i))
+            r_list.append(SD_p.distance(speed, theta_i))
 
         r = np.asarray(r_list, dtype=float)
         domain_xy = np.column_stack([
