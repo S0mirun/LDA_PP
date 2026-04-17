@@ -35,7 +35,7 @@ theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 0
+        self.port_number: int = 3
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Sakaide, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -429,9 +429,15 @@ class PathPlanning:
             
 
     def _draw_buoy_pair(self, fig, ax, df_buoy):
-        df_pairs, _ = pair_points_min_distance_df(df=df_buoy, x_col="x [m]", y_col="y [m]")
+        df_pairs, _ = pair_points_min_distance_df(df=df_buoy, x_col="x [m]", y_col="y [m]", max_distance=1000)
+
+        self._save_csv(df_pairs)
         print(df_pairs)
         print("a")
+
+    
+    def _save_csv(self, df):
+        pass
 
         
     def _add_compass_image(self, fig, ax):
