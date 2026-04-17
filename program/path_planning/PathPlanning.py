@@ -25,6 +25,7 @@ from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.fillet import fillet
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
 from utils.PP.MultiPlot import RealTraj
+from utils.PP.Seek_pairs import pair_points_min_distance_df
 
 DIR = os.path.dirname(__file__)
 dirname = os.path.splitext(os.path.basename(__file__))[0]
@@ -34,7 +35,7 @@ theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 0
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Sakaide, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -184,7 +185,7 @@ class Line:
 
     def __post_init__(self):
         self.theta = self.theta % (2 * np.pi)
-        if self.end_pt == None:
+        if self.end_pt is None:
             end_pt = self.fixed_pt
             if self.check(end_pt):
                 while self.check(end_pt):
@@ -230,20 +231,28 @@ class Line:
         self.fixed_pt = self.intersect(ln)
         self.parent = ln
 
-    def cross_judge(self, other):
+    def cross_judge(self, other, eps=1e-1):
         """
         l1, l2 : Lineで定義された直線
         """
+        def sgn(x, eps=1e-1):
+            if x > eps:
+                return 1
+            elif x < -eps:
+                return -1
+            else:
+                return 0
+            
         p1 = self.fixed_pt; p2 = self.end_pt
         p3 = other.fixed_pt; p4 = other.end_pt
 
         cross1_34 = self.cal.cross(p3-p1, p4-p1); cross2_34 = self.cal.cross(p3-p2, p4-p2)
         cross3_12 = self.cal.cross(p1-p3, p2-p3); cross4_12 = self.cal.cross(p1-p4, p2-p4)
 
-        if (cross1_34 * cross2_34 <= 0) and (cross3_12 * cross4_12 <= 0):
-            return True
-        
-        return False
+        s1 = sgn(cross1_34, eps); s2 = sgn(cross2_34, eps)
+        s3 = sgn(cross3_12, eps); s4 = sgn(cross4_12, eps)
+
+        return (s1 * s2 <= 0) and (s3 * s4 <= 0)
 
     def intersect(self, other):
         p1 = self.fixed_pt; p2 = self.end_pt
@@ -300,7 +309,7 @@ class PathPlanning:
     def main(self):
         self.preset()
         self.make_path()
-        self.save_result()
+        # self.save_result()
 
 
     def preset(self):
@@ -404,9 +413,26 @@ class PathPlanning:
         df_buoy = pd.read_csv(f"outputs/data/buoy/{self.port['name']}.csv")
         df_buoy["x [m]"], df_buoy["y [m]"] = convert(df_buoy, self.port_csv, "latitude", "longitude")
 
-        ax.scatter(df_buoy["x [m]"].values, df_buoy["y [m]"].values,
-                    color='orange', s=20, zorder=2)
-        
+        ax.scatter(df_buoy["x [m]"].values, df_buoy["y [m]"].values,color='orange', s=20, zorder=2)
+        self._draw_buoy_color(fig, ax, df_buoy)
+        self._draw_buoy_pair(fig, ax, df_buoy)
+
+
+    def _draw_buoy_color(self, fig, ax, df_buoy):
+        df_buoy["COLOUR"] = df_buoy["COLOUR"].astype(str).str.strip()
+        COLOR = ["white", "black", "red", "green", "blue", "yellow"]
+        for i in range(1, 7):
+            ax.scatter(
+                df_buoy.loc[df_buoy["COLOUR"] == str(i), "x [m]"].values,
+                df_buoy.loc[df_buoy["COLOUR"] == str(i), "y [m]"].values,
+                color=COLOR[i-1], s=10, zorder=3)
+            
+
+    def _draw_buoy_pair(self, fig, ax, df_buoy):
+        df_pairs, _ = pair_points_min_distance_df(df=df_buoy, x_col="x [m]", y_col="y [m]")
+        print(df_pairs)
+        print("a")
+
         
     def _add_compass_image(self, fig, ax):
         img = mpimg.imread("raw_datas/compass icon2.png")
@@ -444,6 +470,7 @@ class PathPlanning:
         self._build_lines_from_berth()
         self._build_lines_from_shipping_lane()
         self._build_lines_from_start()
+        print("\nbuilt lines complete")
         self._define_DAG()
 
     def _setup_lines(self):
@@ -541,21 +568,28 @@ class PathPlanning:
         for i in range(len(lines) - 2):
             lines[i+1].set_parent(lines[i])
 
+        self._save_lines("line_DAG")
+
 
     def supplement_lines(self):
         lines = self.lines
 
         self.base_idx = len(lines) - 1
+        self.len_lines = len(lines)
+        idx = 0
         while True:
             self._seek_nearest_line()
             if self.cross_line_idx is not None:
+                print("OK")
                 L_base = lines[self.base_idx]
                 L_base.set_parent(lines[self.cross_line_idx])
                 break
             else:
-                self._supplement_line()
+                print("NOT GOOD")
+                idx += 1
+                self._supplement_line(idx)
 
-        self._save_lines("line_DAG")
+        print("\nsuppliment lines complete")
 
 
     def _seek_nearest_line(self):
@@ -565,9 +599,18 @@ class PathPlanning:
         cross_line_idx = None
 
         if len(lines) == 2:
-            if Line.cross_judge(lines[0], L_base):
+            if L_base.cross_judge(lines[0]):
                 cross_line_idx = 0
-        elif len(lines) > 2:
+        elif len(lines) > 2 and self.len_lines == 2:
+            shortest = np.inf
+            for i in range(0, self.base_idx):
+                if L_base.cross_judge(lines[i]):
+                    intersect_pt = L_base.intersect(lines[i])
+                    length = np.linalg.norm(intersect_pt - L_base.end_pt)
+                    if length < shortest:
+                        shortest = length
+                        cross_line_idx = i
+        elif len(lines) > 2 and self.len_lines > 2:
             shortest = np.inf
             for i in range(1, self.base_idx):
                 if L_base.cross_judge(lines[i]):
@@ -580,7 +623,7 @@ class PathPlanning:
         self.cross_line_idx = cross_line_idx
 
         
-    def _supplement_line(self):
+    def _supplement_line(self, idx):
         lines = self.lines
         L_base = lines[self.base_idx]
 
@@ -592,10 +635,10 @@ class PathPlanning:
             for ln in lines[-2:0:-1]:
                 self._find_visible_range(ln, mid)
 
-                if self.idx_hit != 99:
+                if self.idx_hit != 98:
                     break
 
-        self._build_supplement_line(L_base, mid)
+        self._build_supplement_line(L_base, mid, idx)
 
     
     def _find_visible_range(self, ln, mid):
@@ -618,15 +661,16 @@ class PathPlanning:
         self.idx_hit = idx_hit
 
 
-    def _build_supplement_line(self, L_base, mid):
+    def _build_supplement_line(self, L_base, mid, idx):
         cal = self.cal
 
         fixed_pt = (self.pts[self.idx_through] + self.pts[self.idx_hit]) / 2
-        theta = cal.angle(mid, fixed_pt)
-        L_append = Line(fixed_pt=fixed_pt, theta=theta)
-        L_append.swap()
+        theta = cal.angle(fixed_pt, mid)
+        L_append = Line(fixed_pt=fixed_pt, end_pt=mid, theta=theta)
         L_base.set_parent(L_append)
         self.lines.insert(self.base_idx, L_append)
+
+        self._save_lines(f"lines_suppliment_{idx}")
 
     
     def generate_path(self):
@@ -642,7 +686,7 @@ class PathPlanning:
                 self._find_best_fillet_arc(full_pts[i], full_pts[i+1], full_pts[i+2], arc_list)
             
             arcs = np.concatenate(arc_list, axis=0)
-            self._save_pts(arcs, "path_by_arc")
+            self._save_pts(arcs, "path_by_arc", pt_size=5)
 
 
     def _get_WP_from_lines(self):
@@ -657,15 +701,29 @@ class PathPlanning:
         self.way_points = np.vstack(WP_list[::-1])
 
 
-    def _save_pts(self, pts, name):
+    def _save_pts(self, pts, name, pt_size = 20):
         fig, ax = self.fig, self.ax
         full_pts = np.vstack([self.pp_start, pts, self.pp_end])
 
-        h1 = ax.scatter(full_pts[:, 1], full_pts[:, 0], c="green", s=20, zorder=10)
-        h2, = ax.plot(full_pts[:, 1], full_pts[:, 0], c="green", ls="--", alpha=0.5, zorder=10)
+        self._draw_captain_path(fig, ax)
+
+        h1 = ax.scatter(full_pts[:, 1], full_pts[:, 0], c="blue", s=pt_size, zorder=10)
+        h2, = ax.plot(full_pts[:, 1], full_pts[:, 0], c="blue", ls="--", alpha=0.5, zorder=10)
         self.handles.extend([h1, h2])
 
         self._save_fig(fig, name)
+
+
+    def _draw_captain_path(self, fig, ax):
+        df_captain = glob.glob(f"raw_datas/tmp/_{self.port['name']}/*.csv")
+        for df in df_captain:
+            traj = RealTraj()
+            traj.input_csv(df, self.port_csv)
+            h, = ax.plot(traj.Y, traj.X, 
+                        color = 'gray', ls = '-', marker = 'D',
+                        markersize = 2, alpha = 0.2, lw = 1.0, zorder = 3)
+            
+            self.handles.append(h)
 
 
     def _find_best_fillet_arc(self, pt1, pt2, pt3, arc_list):
