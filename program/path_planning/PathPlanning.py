@@ -2,6 +2,7 @@ import glob
 import os
 
 from dataclasses import dataclass
+from enum import Enum, auto
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
@@ -29,6 +30,10 @@ dirname = os.path.splitext(os.path.basename(__file__))[0]
 theta_list = np.arange(np.deg2rad(0), np.deg2rad(360), np.deg2rad(3))
 
 
+class SupplementMode(Enum):
+    MIDPOINT = auto()
+    ANGLE_BISECTOR = auto()
+
 class Setting:
     def __init__(self):
         # port
@@ -42,6 +47,7 @@ class Setting:
         self.B = 16.0
 
         # approach
+        self.SupplementMode = SupplementMode.MIDPOINT
         self.approach_algo = "ARC"
         self.redraw_by_AI = True
 
@@ -638,12 +644,12 @@ class PathPlanning:
                 self._supplement_line(idx)
                 if self.ps.redraw_by_AI:
                     self._redraw_line_by_buoy(idx)
-                self.lines[-2].set_parent(self.lines[-3])
+                self._set_parent(self.lines[-2])
 
-        print("\nsuppliment lines complete")
+        print("\nsupplement lines complete")
 
 
-    def _seek_nearest_line(self, L_base):
+    def _seek_nearest_line(self, L_base, minus=1):
         lines = self.lines
 
         cross_line_idx = None
@@ -652,7 +658,7 @@ class PathPlanning:
                 cross_line_idx = 0
         elif len(lines) > 2 and self.len_lines == 2:
             shortest = np.inf
-            for i in range(len(lines) - 1):
+            for i in range(len(lines) - minus):
                 if L_base.cross_judge(lines[i]):
                     intersect_pt = L_base.intersect(lines[i])
                     length = np.linalg.norm(intersect_pt - L_base.end_pt)
@@ -661,7 +667,7 @@ class PathPlanning:
                         cross_line_idx = i
         elif len(lines) > 2 and self.len_lines > 2:
             shortest = np.inf
-            for i in range(len(lines) - 1):
+            for i in range(len(lines) - minus):
                 if L_base.cross_judge(lines[i]):
                     intersect_pt = L_base.intersect(lines[i])
                     length = np.linalg.norm(intersect_pt - L_base.end_pt)
@@ -713,12 +719,20 @@ class PathPlanning:
     def _build_supplement_line(self, mid, idx):
         cal = self.cal
 
-        fixed_pt = (self.pts[self.idx_through] + self.pts[self.idx_hit]) / 2
-        theta = cal.angle(fixed_pt, mid)
-        L_append = Line(fixed_pt=fixed_pt, end_pt=mid, theta=theta)
+        if self.ps.SupplementMode == SupplementMode.MIDPOINT:
+            fixed_pt = (self.pts[self.idx_through] + self.pts[self.idx_hit]) / 2
+            theta = cal.angle(fixed_pt, mid)
+            L_append = Line(fixed_pt=fixed_pt, end_pt=mid, theta=theta)
+        elif self.ps.SupplementMode == SupplementMode.ANGLE_BISECTOR:
+            theta_through = cal.angle(mid, self.pts[self.idx_through])
+            theta_hit = cal.angle(mid, self.pts[self.idx_hit])
+            theta = (theta_through + theta_hit) / 2
+            L_append = Line(fixed_pt=mid, theta=theta)
+            L_append.swap()
+
         self.lines.insert(-1, L_append)
 
-        self._save_lines(f"lines_suppliment_{idx}")
+        self._save_lines(f"lines_supplement_{idx}")
 
 
     def _redraw_line_by_buoy(self, idx):
@@ -733,9 +747,14 @@ class PathPlanning:
                 L_replacement.extent_fixed_pt()
                 self.lines[-2] = L_replacement
 
-                self._save_lines(f"lines_suppliment_{idx}(replaced)")
+                self._save_lines(f"lines_supplement_{idx}(replaced)")
                 print(f"redraw Line No.{idx}")
                 break
+
+
+    def _set_parent(self, L_base):
+        self._seek_nearest_line(L_base=L_base, minus=2)
+        L_base.set_parent(self.lines[self.cross_line_idx])
 
     
     def generate_path(self):
