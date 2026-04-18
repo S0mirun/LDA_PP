@@ -1,6 +1,5 @@
 import glob
 import os
-import time
 
 from dataclasses import dataclass
 import matplotlib.image as mpimg
@@ -17,12 +16,9 @@ from shapely.geometry import Polygon, Point, LineString
 from shapely.prepared import prep
 from shapely.validation import make_valid
 from typing import ClassVar, Tuple
-from tqdm.auto import tqdm
 
 from utils.LDA.ship_geometry import *
-from utils.PP import Bezier_curve as Bezier
 from utils.PP.dictionary_of_port import dictionary
-from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.fillet import fillet
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
 from utils.PP.MultiPlot import RealTraj
