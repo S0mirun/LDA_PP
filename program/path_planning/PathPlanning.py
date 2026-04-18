@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from matplotlib.patches import Polygon as MplPolygon
 import numpy as np
+from openpyxl.utils import get_column_letter
 import pandas as pd
 from scipy import ndimage
 import shapely
@@ -67,6 +68,7 @@ class Setting:
         self.increase_popsize_on_restart: bool = False
 
 
+
 def convert(df, port_file, col_lat="lat", col_lon="lon"):
     df_coord = pd.read_csv(port_file)
     LAT_ORIGIN = df_coord["Latitude"].iloc[0]
@@ -87,8 +89,10 @@ def convert(df, port_file, col_lat="lat", col_lon="lon"):
         xs.append(x); ys.append(y)    
     return xs, ys
 
+
 def sigmoid(x, a, b, c):
     return a / (b + np.exp(c * x))
+
 
 
 class ShipDomain:
@@ -164,6 +168,7 @@ class Calculator:
             return self.ps.MIN_SPEED_KTS
         return speed
     
+    
 
 @dataclass
 class Line:
@@ -195,6 +200,7 @@ class Line:
 
             self.end_pt = end_pt
 
+
     def check(self, pt):
         """
         点が画面の外かを判定する。
@@ -214,9 +220,11 @@ class Line:
         
         return False
     
+    
     def swap(self):
         fixed_pt = self.fixed_pt; end_pt = self.end_pt; theta = self.theta
         self.fixed_pt = end_pt; self.end_pt = fixed_pt; self.theta = theta + np.pi
+
 
     def extent_fixed_pt(self):
         fixed_pt = self.fixed_pt
@@ -225,16 +233,16 @@ class Line:
                 fixed_pt = fixed_pt - np.array([np.cos(self.theta), np.sin(self.theta)])
             while not self.check(fixed_pt):
                 fixed_pt = fixed_pt - np.array([np.cos(self.theta), np.sin(self.theta)])
+
             self.fixed_pt = fixed_pt
 
     def set_parent(self, ln):
         self.fixed_pt = self.intersect(ln)
         self.parent = ln
 
+
     def cross_judge(self, other, eps=1e-1):
-        """
-        l1, l2 : Lineで定義された直線
-        """
+
         def sgn(x, eps=1e-1):
             if x > eps:
                 return 1
@@ -253,6 +261,7 @@ class Line:
         s3 = sgn(cross3_12, eps); s4 = sgn(cross4_12, eps)
 
         return (s1 * s2 <= 0) and (s3 * s4 <= 0)
+    
 
     def intersect(self, other):
         p1 = self.fixed_pt; p2 = self.end_pt
@@ -263,6 +272,21 @@ class Line:
         cross_ab = self.cal.cross(a, b); cross_ca = self.cal.cross(c, a)
         u = cross_ca / cross_ab
         return p3 + u * b
+    
+
+    def angle(self, other):
+        p1 = self.fixed_pt; p2 = self.end_pt
+        p3 = other.fixed_pt; p4 = other.end_pt
+
+        v1 = p2 - p1; norm1 = np.linalg.norm(v1)
+        v2 = p4 - p3; norm2 = np.linalg.norm(v2)
+
+        cos_theta = np.dot(v1, v2) / (norm1 * norm2)
+        cos_theta = np.clip(cos_theta, -1.0, 1.0)
+
+        theta = np.arccos(cos_theta)
+        return np.degrees(theta)
+    
     
 
 class CostCalculator:
@@ -299,12 +323,14 @@ class CostCalculator:
         return pen
 
 
+
 class PathPlanning:
     def __init__(self, ps, sd, cal, cost_cal):
         self.ps = ps
         self.SD = sd
         self.cal = cal
         self.cost_cal = cost_cal
+
 
     def main(self):
         self.preset()
@@ -319,6 +345,7 @@ class PathPlanning:
         self.setup_Line()
         self.setup_figure()
         self.draw_basemap()
+
 
     def make_path(self):
         print("\n######  make path start    #####")
@@ -367,6 +394,7 @@ class PathPlanning:
         self.fig, self.ax = fig, ax
         self.handles = []
         print("\nFigure setup complete")
+
 
     def draw_basemap(self):
         fig, ax = self.fig, self.ax
@@ -430,14 +458,45 @@ class PathPlanning:
 
     def _draw_buoy_pair(self, fig, ax, df_buoy):
         df_pairs, _ = pair_points_min_distance_df(df=df_buoy, x_col="x [m]", y_col="y [m]", max_distance=1000)
+        self._save_excel(df_pairs, "buoy_pair")
 
-        self._save_csv(df_pairs)
-        print(df_pairs)
-        print("a")
+        self.buoy_lines = []
+        for _, row in df_pairs[df_pairs["type"] == "pair"].iterrows():
+            ax.plot(
+                [row["x3"], row["x4"]],
+                [row["y3"], row["y4"]],
+                color="orange", lw=3, linestyle="-", zorder=2)
+            
+            self._set_buoy_lines(row["x3"], row["x4"], row["y3"], row["y4"])
 
     
-    def _save_csv(self, df):
-        pass
+    def _save_excel(self, df, name):
+        SAVE_DIR = f"{self.SAVE_DIR}/excel"
+        os.makedirs(SAVE_DIR, exist_ok=True)
+
+        file_path = os.path.join(SAVE_DIR, f"{name}.xlsx")
+
+        with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Sheet1")
+            ws = writer.sheets["Sheet1"]
+
+            for i, col_name in enumerate(df.columns, 1):
+                max_length = max(
+                    len(str(col_name)),
+                    df[col_name].astype(str).map(len).max() if len(df) > 0 else 0
+                )
+                ws.column_dimensions[get_column_letter(i)].width = max_length * 1.5 + 2
+
+
+    def _set_buoy_lines(self, y_red, y_green, x_red, x_green):
+        cal = self.cal
+
+        pt_red = np.array([x_red, y_red])
+        pt_green = np.array([x_green, y_green])
+        theta = cal.angle(pt_red, pt_green)
+        line = Line(fixed_pt=pt_red, end_pt=pt_green, theta=theta)
+
+        self.buoy_lines.append(line)
 
         
     def _add_compass_image(self, fig, ax):
@@ -578,38 +637,35 @@ class PathPlanning:
 
 
     def supplement_lines(self):
-        lines = self.lines
+        L_base = self.lines[-1]
+        self.len_lines = len(self.lines)
 
-        self.base_idx = len(lines) - 1
-        self.len_lines = len(lines)
         idx = 0
         while True:
-            self._seek_nearest_line()
+            self._seek_nearest_line(L_base)
             if self.cross_line_idx is not None:
                 print("OK")
-                L_base = lines[self.base_idx]
-                L_base.set_parent(lines[self.cross_line_idx])
+                L_base.set_parent(self.lines[self.cross_line_idx])
                 break
             else:
                 print("NOT GOOD")
                 idx += 1
                 self._supplement_line(idx)
+                self._redraw_line_by_buoy(idx)
 
         print("\nsuppliment lines complete")
 
 
-    def _seek_nearest_line(self):
+    def _seek_nearest_line(self, L_base):
         lines = self.lines
 
-        L_base = lines[self.base_idx]
         cross_line_idx = None
-
         if len(lines) == 2:
             if L_base.cross_judge(lines[0]):
                 cross_line_idx = 0
         elif len(lines) > 2 and self.len_lines == 2:
             shortest = np.inf
-            for i in range(0, self.base_idx):
+            for i in range(len(lines) - 1):
                 if L_base.cross_judge(lines[i]):
                     intersect_pt = L_base.intersect(lines[i])
                     length = np.linalg.norm(intersect_pt - L_base.end_pt)
@@ -618,7 +674,7 @@ class PathPlanning:
                         cross_line_idx = i
         elif len(lines) > 2 and self.len_lines > 2:
             shortest = np.inf
-            for i in range(1, self.base_idx):
+            for i in range(len(lines) - 1):
                 if L_base.cross_judge(lines[i]):
                     intersect_pt = L_base.intersect(lines[i])
                     length = np.linalg.norm(intersect_pt - L_base.end_pt)
@@ -631,7 +687,7 @@ class PathPlanning:
         
     def _supplement_line(self, idx):
         lines = self.lines
-        L_base = lines[self.base_idx]
+        L_base = lines[-1]
 
         mid = (L_base.fixed_pt + L_base.end_pt) / 2
         if len(lines) == 2:
@@ -644,7 +700,7 @@ class PathPlanning:
                 if self.idx_hit != 98:
                     break
 
-        self._build_supplement_line(L_base, mid, idx)
+        self._build_supplement_line(mid, idx)
 
     
     def _find_visible_range(self, ln, mid):
@@ -667,16 +723,32 @@ class PathPlanning:
         self.idx_hit = idx_hit
 
 
-    def _build_supplement_line(self, L_base, mid, idx):
+    def _build_supplement_line(self, mid, idx):
         cal = self.cal
 
         fixed_pt = (self.pts[self.idx_through] + self.pts[self.idx_hit]) / 2
         theta = cal.angle(fixed_pt, mid)
         L_append = Line(fixed_pt=fixed_pt, end_pt=mid, theta=theta)
-        L_base.set_parent(L_append)
-        self.lines.insert(self.base_idx, L_append)
+        self.lines.insert(-1, L_append)
 
         self._save_lines(f"lines_suppliment_{idx}")
+
+
+    def _redraw_line_by_buoy(self, idx):
+        target_line = self.lines[-2]
+
+        for ln in self.buoy_lines:
+            angle = target_line.angle(ln)
+            if target_line.cross_judge(ln) and abs(angle - 90) > 10:
+                mid = (ln.fixed_pt + ln.end_pt) / 2
+                theta = ln.theta + np.pi / 2
+                L_replacement = Line(fixed_pt=mid, theta=theta)
+                L_replacement.extent_fixed_pt()
+                L_replacement.set_parent(self.lines[-3])
+                self.lines[-2] = L_replacement
+
+                self._save_lines(f"lines_suppliment_{idx}_replaced")
+                break
 
     
     def generate_path(self):
