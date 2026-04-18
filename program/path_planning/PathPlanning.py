@@ -47,7 +47,7 @@ class Setting:
 
         # approach
         self.approach_algo = "ARC"
-        self.straight = self.L
+        self.redraw_by_AI = True
 
         # CMA-ES
         self.seed: int = 42
@@ -57,15 +57,6 @@ class Setting:
         self.MAX_ANGLE_DEG: float = 60  # [deg]
         self.MIN_ANGLE_DEG: float = 0  # [deg]
         self.angle_interval: float = 5
-
-        # weight
-        self.SD = 1.0
-        self.angle = 1.0
-        self.xy = 1.0
-
-        # restart
-        self.restarts: int = 3
-        self.increase_popsize_on_restart: bool = False
 
 
 
@@ -335,7 +326,12 @@ class PathPlanning:
     def main(self):
         self.preset()
         self.make_path()
-        # self.save_result()
+        print(
+            "\n##### All tasks complete #####"
+            f"\ntarget : {self.port["name"]}"
+            f"\nMode   : {self.ps.approach_algo}"
+            f"\nRedraw : {self.ps.redraw_by_AI}"
+        )
 
 
     def preset(self):
@@ -353,13 +349,6 @@ class PathPlanning:
         self.supplement_lines()
         self.generate_path()
         # self.refine_path()
-
-    def save_result(self):
-        self.save_base_map()
-        self.save_init_lines()
-        self.save_supplied_lines()
-        self.save_generated_path()
-        self.save_refined_path()
 
     
     def set_target_port(self):
@@ -648,10 +637,12 @@ class PathPlanning:
                 L_base.set_parent(self.lines[self.cross_line_idx])
                 break
             else:
-                print("NOT GOOD")
+                print("BAD")
                 idx += 1
                 self._supplement_line(idx)
-                self._redraw_line_by_buoy(idx)
+                if self.ps.redraw_by_AI:
+                    self._redraw_line_by_buoy(idx)
+                self.lines[-2].set_parent(self.lines[-3])
 
         print("\nsuppliment lines complete")
 
@@ -744,14 +735,15 @@ class PathPlanning:
                 theta = ln.theta + np.pi / 2
                 L_replacement = Line(fixed_pt=mid, theta=theta)
                 L_replacement.extent_fixed_pt()
-                L_replacement.set_parent(self.lines[-3])
                 self.lines[-2] = L_replacement
 
-                self._save_lines(f"lines_suppliment_{idx}_replaced")
+                self._save_lines(f"lines_suppliment_{idx}(replaced)")
+                print(f"redraw Line No.{idx}")
                 break
 
     
     def generate_path(self):
+        print("\n##### Generate path Start #####")
         self._get_WP_from_lines()
         self._save_pts(self.way_points, "way_points")
 
@@ -765,6 +757,7 @@ class PathPlanning:
             
             arcs = np.concatenate(arc_list, axis=0)
             self._save_pts(arcs, "path_by_arc", pt_size=5)
+            print("\nFillet arc path complete")
 
 
     def _get_WP_from_lines(self):
@@ -777,6 +770,7 @@ class PathPlanning:
             ln = ln.parent
 
         self.way_points = np.vstack(WP_list[::-1])
+        print("\nExtract Way Points complete")
 
 
     def _save_pts(self, pts, name, pt_size = 20):
