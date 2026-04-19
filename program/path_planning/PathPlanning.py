@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from matplotlib.patches import Polygon as MplPolygon
 import numpy as np
@@ -34,10 +35,14 @@ class SupplementMode(Enum):
     MIDPOINT = auto()
     ANGLE_BISECTOR = auto()
 
+class ApproachAlgo(Enum):
+    ARC = auto()
+
+
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 3
+        self.port_number: int = 0
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Sakaide, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -47,8 +52,8 @@ class Setting:
         self.B = 16.0
 
         # approach
+        self.approach_algo = ApproachAlgo.ARC
         self.SupplementMode = SupplementMode.MIDPOINT
-        self.approach_algo = "ARC"
         self.redraw_by_AI = True
 
         # CMA-ES
@@ -328,10 +333,11 @@ class PathPlanning:
     def main(self):
         self.preset()
         self.make_path()
+        self.save_results()
         print(
             "\n##### All tasks complete #####"
             f"\ntarget : {self.port["name"]}"
-            f"\nMode   : {self.ps.approach_algo}"
+            f"\nMode   : {self.ps.approach_algo.name}"
             f"\nRedraw : {self.ps.redraw_by_AI}"
         )
 
@@ -350,7 +356,10 @@ class PathPlanning:
         self.build_lines_by_shipping_lane()
         self.supplement_lines()
         self.generate_path()
-        # self.refine_path()
+
+
+    def save_results(self):
+        self.save_result_fig()
 
     
     def set_target_port(self):
@@ -360,10 +369,19 @@ class PathPlanning:
 
 
     def setup_save_dir(self):
-        SAVE_DIR = f"{DIR}/../../outputs/{dirname}/{self.port["name"]}"
+        self.save_dir_path = f"{DIR}/../../outputs/{dirname}/{self.port["name"]}"
+        folder_name = self._make_folder_name()
+        SAVE_DIR = f"{self.save_dir_path}/{folder_name}"
         os.makedirs(SAVE_DIR, exist_ok=True)
 
         self.SAVE_DIR = SAVE_DIR
+
+
+    def _make_folder_name(self):
+        ApproachAlgo_str = self.ps.approach_algo.name.lower()
+        SupplementMode_str = self.ps.SupplementMode.name.lower()
+        AI_str = "ai_on" if self.ps.redraw_by_AI else "ai_off"
+        return f"{ApproachAlgo_str}_{SupplementMode_str}_{AI_str}"
 
 
     def setup_Line(self):
@@ -432,7 +450,8 @@ class PathPlanning:
         df_buoy = pd.read_csv(f"outputs/data/buoy/{self.port['name']}.csv")
         df_buoy["x [m]"], df_buoy["y [m]"] = convert(df_buoy, self.port_csv, "latitude", "longitude")
 
-        ax.scatter(df_buoy["x [m]"].values, df_buoy["y [m]"].values,color='orange', s=20, zorder=2)
+        ax.scatter(df_buoy["x [m]"].values, df_buoy["y [m]"].values,
+                   color='orange', s=20, zorder=2)
         self._draw_buoy_color(fig, ax, df_buoy)
         self._draw_buoy_pair(fig, ax, df_buoy)
 
@@ -667,7 +686,7 @@ class PathPlanning:
                         cross_line_idx = i
         elif len(lines) > 2 and self.len_lines > 2:
             shortest = np.inf
-            for i in range(len(lines) - minus):
+            for i in range(1, len(lines) - minus):
                 if L_base.cross_judge(lines[i]):
                     intersect_pt = L_base.intersect(lines[i])
                     length = np.linalg.norm(intersect_pt - L_base.end_pt)
@@ -763,7 +782,7 @@ class PathPlanning:
         self._save_pts(self.way_points, "way_points")
 
         WP = self.way_points
-        if self.ps.approach_algo == "ARC":
+        if self.ps.approach_algo == ApproachAlgo.ARC:
             full_pts = np.vstack([self.pp_start, self.way_points, self.pp_end])
 
             arc_list = []
@@ -771,8 +790,10 @@ class PathPlanning:
                 self._find_best_fillet_arc(full_pts[i], full_pts[i+1], full_pts[i+2], arc_list)
             
             arcs = np.concatenate(arc_list, axis=0)
-            self._save_pts(arcs, "path_by_arc", pt_size=5)
+            self.result_pts = arcs
             print("\nFillet arc path complete")
+        
+        self._save_pts(self.result_pts, "generated_path", pt_size=5)
 
 
     def _get_WP_from_lines(self):
@@ -790,10 +811,10 @@ class PathPlanning:
 
     def _save_pts(self, pts, name, pt_size = 20):
         fig, ax = self.fig, self.ax
-        full_pts = np.vstack([self.pp_start, pts, self.pp_end])
 
         self._draw_captain_path(fig, ax)
 
+        full_pts = np.vstack([self.pp_start, pts, self.pp_end])
         h1 = ax.scatter(full_pts[:, 1], full_pts[:, 0], c="blue", s=pt_size, zorder=10)
         h2, = ax.plot(full_pts[:, 1], full_pts[:, 0], c="blue", ls="--", alpha=0.5, zorder=10)
         self.handles.extend([h1, h2])
@@ -803,7 +824,7 @@ class PathPlanning:
 
     def _draw_captain_path(self, fig, ax):
         df_captain = glob.glob(f"raw_datas/tmp/_{self.port['name']}/*.csv")
-        for df in df_captain:
+        for i, df in enumerate(df_captain):
             traj = RealTraj()
             traj.input_csv(df, self.port_csv)
             h, = ax.plot(traj.Y, traj.X, 
@@ -838,6 +859,44 @@ class PathPlanning:
 
         arc_list.append(arc_best)
 
+
+    def save_result_fig(self):
+        fig, ax = self.fig, self.ax
+
+        SAVE_DIR = f"{self.save_dir_path}/results"
+        file_name = self._make_folder_name()
+
+        self._draw_captain_path(fig, ax)
+
+        full_pts = np.vstack([self.pp_start, self.result_pts, self.pp_end])
+        ax.scatter(full_pts[:, 1], full_pts[:, 0], c="blue", s=5, zorder=10)
+        ax.plot(full_pts[:, 1], full_pts[:, 0], c="blue", ls="--", alpha=0.5, zorder=10)
+
+        WP = self.way_points
+        ax.scatter(WP[:, 1], WP[:, 0], c="#8A2BE2", 
+                   marker="X", edgecolors="#8A2BE2", linewidths=0.8, s=20, zorder=10)
+        
+        self._setup_legends()
+        ax.legend(handles=self.legends,
+                  loc='upper center', bbox_to_anchor=(0.5, -0.06), 
+                  ncol=3, fontsize=10, frameon=True, fancybox=False, edgecolor='black')
+
+        os.makedirs(SAVE_DIR, exist_ok=True)
+        fig.savefig(os.path.join(SAVE_DIR, f"{file_name}.png"),
+                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        
+
+    def _setup_legends(self):
+        self.legends = [
+            Line2D([0], [0], label="Buoy", color='none', 
+                   marker='o', markersize=1.5, markerfacecolor='orange', markeredgecolor='orange'),
+            Line2D([0], [0], label="Way points", color='none', 
+                   marker='X', markersize=1.5, markerfacecolor="#8A2BE2", markeredgecolor="#8A2BE2", markeredgewidth=0.8,),
+            Line2D([0], [0], label="Captain's route", color='gray', 
+                   marker='D', markersize=1.5, ls='-', lw=1.0, alpha=0.5),
+            Line2D([0], [0], label="Generated Path", color='blue', 
+                   marker='o', markersize=1.5, ls='--', lw=1.0, alpha=0.5),
+        ]
 
 
 if __name__ == '__main__':
