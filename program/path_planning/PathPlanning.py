@@ -13,7 +13,6 @@ from openpyxl.utils import get_column_letter
 import pandas as pd
 from scipy import ndimage
 import shapely
-from shapely import intersects_xy
 from shapely.geometry import Polygon, Point, LineString
 from shapely.prepared import prep
 from shapely.validation import make_valid
@@ -42,7 +41,7 @@ class ApproachAlgo(Enum):
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 0
+        self.port_number: int = 2
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Sakaide, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -392,7 +391,7 @@ class PathPlanning:
 
 
     def setup_figure(self):
-        fig, ax = plt.subplots(figsize=(7, 7))
+        fig, ax = plt.subplots(figsize=(8, 11))
 
         ax.set_xlim(self.port["hor_range"])
         ax.set_ylim(self.port["ver_range"])
@@ -876,14 +875,25 @@ class PathPlanning:
         ax.scatter(WP[:, 1], WP[:, 0], c="#8A2BE2", 
                    marker="X", edgecolors="#8A2BE2", linewidths=0.8, s=20, zorder=10)
         
+        config_text = self._make_config_text()
+        ax.text(0.5, -0.01, config_text, transform=ax.transAxes, ha='center', va='top', fontsize=12)
+        
         self._setup_legends()
         ax.legend(handles=self.legends,
-                  loc='upper center', bbox_to_anchor=(0.5, -0.06), 
+                  loc='upper center', bbox_to_anchor=(0.5, -0.03), bbox_transform=ax.transAxes, 
                   ncol=3, fontsize=10, frameon=True, fancybox=False, edgecolor='black')
-
+        
+        plt.subplots_adjust(bottom=0.10)
         os.makedirs(SAVE_DIR, exist_ok=True)
         fig.savefig(os.path.join(SAVE_DIR, f"{file_name}.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
+        
+
+    def _make_config_text(self):
+        ApproachAlgo_str = self.ps.approach_algo.name
+        SupplementMode_str = self.ps.SupplementMode.name
+        AI_str = "ON" if self.ps.redraw_by_AI else "OFF"
+        return f"Approach: {ApproachAlgo_str}   /   Supplement: {SupplementMode_str}   /   AI redraw: {AI_str}"
         
 
     def _setup_legends(self):
