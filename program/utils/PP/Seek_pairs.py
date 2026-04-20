@@ -51,7 +51,7 @@ def pair_points_min_distance_df(
                 f"x{colour_b}": df_b.iloc[ib][x_col],
                 f"y{colour_b}": df_b.iloc[ib][y_col],
                 "name1": None,
-                "name2": df_b.iloc[ib]["name"] if "name" in df_b.columns else None,
+                "name2": df_b.iloc[ib]["NOBJNAM"] if "NOBJNAM" in df_b.columns else None,
                 "distance": np.nan,
             })
         return pd.DataFrame(rows), 0.0
@@ -66,7 +66,7 @@ def pair_points_min_distance_df(
                 f"y{colour_a}": df_a.iloc[ia][y_col],
                 f"x{colour_b}": np.nan,
                 f"y{colour_b}": np.nan,
-                "name1": df_a.iloc[ia]["name"] if "name" in df_a.columns else None,
+                "name1": df_a.iloc[ia]["NOBJNAM"] if "NOBJNAM" in df_a.columns else None,
                 "name2": None,
                 "distance": np.nan,
             })
@@ -138,8 +138,8 @@ def pair_points_min_distance_df(
                     f"y{colour_a}": df_a.iloc[r][y_col],
                     f"x{colour_b}": df_b.iloc[c][x_col],
                     f"y{colour_b}": df_b.iloc[c][y_col],
-                    "name1": df_a.iloc[r]["name"] if "name" in df_a.columns else None,
-                    "name2": df_b.iloc[c]["name"] if "name" in df_b.columns else None,
+                    "name1": df_a.iloc[r]["NOBJNAM"] if "NOBJNAM" in df_a.columns else None,
+                    "name2": df_b.iloc[c]["NOBJNAM"] if "NOBJNAM" in df_b.columns else None,
                     "distance": float(d),
                 })
 
@@ -154,7 +154,7 @@ def pair_points_min_distance_df(
                 f"y{colour_a}": df_a.iloc[ia][y_col],
                 f"x{colour_b}": np.nan,
                 f"y{colour_b}": np.nan,
-                "name1": df_a.iloc[ia]["name"] if "name" in df_a.columns else None,
+                "name1": df_a.iloc[ia]["NOBJNAM"] if "NOBJNAM" in df_a.columns else None,
                 "name2": None,
                 "distance": np.nan,
             })
@@ -171,7 +171,7 @@ def pair_points_min_distance_df(
                 f"x{colour_b}": df_b.iloc[ib][x_col],
                 f"y{colour_b}": df_b.iloc[ib][y_col],
                 "name1": None,
-                "name2": df_b.iloc[ib]["name"] if "name" in df_b.columns else None,
+                "name2": df_b.iloc[ib]["NOBJNAM"] if "NOBJNAM" in df_b.columns else None,
                 "distance": np.nan,
             })
 
