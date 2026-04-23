@@ -8,6 +8,15 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from openpyxl import load_workbook
 
+FolderName = ["1-堺", "2-坂出", "3-八戸", "4-鹿島", "5-函館", 
+              "6-青森", "7-釜石", "8-清水", "9-秋田", "10-金沢", 
+              "11-苫小牧", "12-石巻", "13-小名浜", "14-神戸", "15-釧路", 
+              "16-小樽", "17-呉", "18-新潟", "19-境港", "20-鹿児島"]
+PortName = ["Sakai", "Sakaide", "Hachinohe", "Kashima", "Hakodate", 
+            "Aomori", "Kamaishi", "Shimizu", "Akita", "Kanazawa", 
+            "Tomakomai", "Ishinomaki", "Onahama", "Kobe", "Kushiro", 
+            "Otaru", "Kure", "Nigata", "Sakaiminato", "Kagoshima"]
+
 
 OUTPUT_COLUMNS = [
     "BCNSHP",
@@ -203,11 +212,12 @@ def convert_excels_in_folder_to_csv(folder_path: str, csv_name: str) -> Path:
 
 
 if __name__ == "__main__":
-    # ===== ここを書き換えて使ってください =====
-    folder_path = "raw_datas/buoy/4-鹿島"
-    csv_name = "Kashima.csv"
 
-    convert_excels_in_folder_to_csv(
-        folder_path=folder_path,
-        csv_name=csv_name,
-    )
+    for folder_name, port_name in zip(FolderName, PortName):
+        folder_path = f"raw_datas/buoy/{folder_name}"
+        csv_name = f"{port_name}.csv"
+
+        convert_excels_in_folder_to_csv(
+            folder_path=folder_path,
+            csv_name=csv_name,
+        )
