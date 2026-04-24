@@ -77,13 +77,13 @@ def _make_land_polygon(lines):
     merged = unary_union(lines)
     check_polygon(merged)
 
-    # print("\nsnapping...")
-    # snapped = snap(merged, merged, 1e-4)
-    # check_polygon(snapped)
+    print("\nsnapping...")
+    snapped = snap(merged, merged, 1e-4)
+    check_polygon(snapped)
 
     print("\npolygonizing...")
-    polygons = list(polygonize(merged))
-    # polygons = list(polygonize(snapped))
+    # polygons = list(polygonize(merged))
+    polygons = list(polygonize(snapped))
 
     print(f"\npolygons: {len(polygons)}")
     return polygons
