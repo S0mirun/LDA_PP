@@ -16,8 +16,8 @@ JAPAN = True
 BUOY = True
 AIS = True
 
-GRID = True
-ZOOM = False
+GRID = False
+ZOOM = True
 
 
 DIR = os.path.dirname(__file__)
@@ -184,12 +184,11 @@ def _save_fig(fig, ax, name):
     print(f"\n{name} saved")
 
 
-
 def draw_Buoy(fig, ax):
     csv_paths = glob.glob("outputs/data/buoy/*.csv")
 
-    color_map = {"0": "white", "1": "black", "2": "red", 
-                 "3": "green", "4": "blue", "5": "yellow"}
+    color_map = {"1": "white", "2": "black", "3": "red", 
+                 "4": "green", "5": "blue", "6": "yellow"}
 
     for path in csv_paths:
         df = pd.read_csv(path)
@@ -206,7 +205,7 @@ def draw_Buoy(fig, ax):
         ax.scatter( xs, ys, s=20, c="orange",
                    edgecolors="black", linewidths=0.3, zorder=2)
 
-        df["COLOUR"] = df["COLOUR"].astype(str).str.strip()
+        gdf["COLOUR"] = gdf["COLOUR"].astype(str).str.strip()
         for colour, g in gdf.groupby("COLOUR"):
             ax.scatter(g.geometry.x, g.geometry.y, s=10, c=color_map.get(colour), 
                        edgecolors="black", linewidths=0.2, zorder=3)
@@ -215,6 +214,7 @@ def draw_Buoy(fig, ax):
 
 
 def draw_AIS(fig, ax):
+    print("\nAIS reading...")
     csv_path = glob.glob("raw_datas/【秘密情報】航海記録/*/*.csv")
     lines = []
     source_paths = []
@@ -252,10 +252,11 @@ def draw_AIS(fig, ax):
 
 
 def save_grid_fig(fig, ax, xmin=127.5, xmax=146.5, ymin=27.0, ymax=46.0, step=2.5):
+    print("grid fig saving...")
     xs = np.arange(xmin, xmax, step)
     ys = np.arange(ymin, ymax, step)
 
-    save_dir = f"outputs/{dirname}/tile"
+    save_dir = f"outputs/{dirname}/tile_{step}"
     os.makedirs(save_dir, exist_ok=True)
     count = 0
     for y0 in tqdm(ys):
@@ -305,6 +306,7 @@ def save_zoom_fig(fig, ax):
         ax.set_aspect("equal", adjustable="box")
         fig.savefig(os.path.join(save_dir, f"{port_name}.png"), 
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
+        print(f"{port_name} saved")
 
 
 if __name__ == '__main__':
@@ -320,7 +322,7 @@ if __name__ == '__main__':
         draw_AIS(fig, ax)
 
     if GRID:
-        save_grid_fig(fig, ax)
+        save_grid_fig(fig, ax, step=1.5)
 
     if ZOOM:
         save_zoom_fig(fig, ax)
