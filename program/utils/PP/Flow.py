@@ -54,28 +54,40 @@ if __name__ == '__main__':
     # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
     # 10: Tomakomai, 11: KIX
 
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig, ax = plt.subplots(figsize=(6, 6))
 
-    x = np.linspace(-20, 20, 50)
-    y = np.linspace(-20, 20, 50)
+    x = np.linspace(-10, 10, 40)
+    y = np.linspace(-10, 10, 40)
     X, Y = np.meshgrid(x, y)
     U = np.zeros_like(X)
     V = np.zeros_like(Y)
     
     flows = []
     source_params = [
-        {"z0": -9.5 - 9.5j,    "Q": -50.0}, # berth
+        {"z0": 0 - 0j,    "Q": -50.0}, # berth
     ]
+    # source_params = [
+    #     {"z0": -9.5 - 9.5j,    "Q": -50.0}, # berth
+    # ]
 
-    vortex_params = [
-        {"z0": -5 + 2.5j,    "Gamma": 20.0},
-        {"z0":  0 + 5j,      "Gamma": 20.0},
-        {"z0":  9 + 11j,     "Gamma": 20.0},
-        {"z0": -7.5 - 4j,    "Gamma": -20.0},
-        {"z0": -5 - 2.5j,    "Gamma": -20.0},
-        {"z0":  3 + 3j,      "Gamma": -20.0},
-        {"z0": 11 + 8j,      "Gamma": -20.0},
-    ]
+    vortex_params = []
+    # vortex_params = [
+    #     {"z0": 0 + 2j,    "Gamma": 10.0},
+    #     {"z0": 0 - 2j,    "Gamma": -10.0},
+    #     {"z0": 2 + 2j,    "Gamma": 10.0},
+    #     {"z0": 2 - 2j,    "Gamma": -10.0},
+    #     {"z0": -2 + 2j,    "Gamma": 10.0},
+    #     {"z0": -2 - 2j,    "Gamma": -10.0},
+    # ]
+    # vortex_params = [
+        # {"z0": -5 + 2.5j,    "Gamma": 20.0},
+        # {"z0":  0 + 5j,      "Gamma": 20.0},
+        # {"z0":  9 + 11j,     "Gamma": 20.0},
+        # {"z0": -7.5 - 4j,    "Gamma": -20.0},
+        # {"z0": -5 - 2.5j,    "Gamma": -20.0},
+        # {"z0":  3 + 3j,      "Gamma": -20.0},
+        # {"z0": 11 + 8j,      "Gamma": -20.0},
+    # ]
 
     flows = set_flows(flows, source_params, vortex_params)
 
@@ -98,8 +110,8 @@ if __name__ == '__main__':
         ax.scatter(z0.real, z0.imag, 
                 color=color, s=10, marker="o", zorder=5)
 
-    ax.set_xlim(-15, 15)
-    ax.set_ylim(-15, 15)
+    ax.set_xlim(-5, 5)
+    ax.set_ylim(-5, 5)
     ax.set_aspect('equal')
     ax.grid(True)
     plt.show()
