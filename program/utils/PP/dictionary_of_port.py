@@ -9,7 +9,7 @@ def dictionary():
                 "style": "head in",
                 "start": [-3000.0, -1000.0],
                 "turn_start": [-200, -50],
-                "psi_start": 0,
+                "psi_start": -10,
                 "psi_end": 0,
                 "berth_type": 2,
                 "ver_range": [-3200, 500],

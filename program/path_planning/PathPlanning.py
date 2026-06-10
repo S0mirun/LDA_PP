@@ -7,6 +7,7 @@ import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+from matplotlib.patches import Patch
 from matplotlib.patches import Polygon as MplPolygon
 import numpy as np
 from openpyxl.utils import get_column_letter
@@ -41,7 +42,7 @@ class ApproachAlgo(Enum):
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 0
+        self.port_number: int = 3
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Sakaide, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -411,12 +412,14 @@ class PathPlanning:
 
     def draw_basemap(self):
         fig, ax = self.fig, self.ax
+        self.legends = []
 
         self._draw_land(fig, ax)
         self._draw_shipping_lane(fig, ax)
         self._draw_buoy(fig, ax)
         self._add_compass_image(fig, ax)
-        self._save_fig(fig, "basemap")
+        self._plot_pts(fig, ax)
+        self._save_fig(fig, ax, "basemap")
         print("\nDraw basemap complete")
 
 
@@ -448,6 +451,8 @@ class PathPlanning:
             ax.add_patch(patch)
 
         self.df_shipping_lane = df_lane
+        legend_lane = Patch(facecolor='magenta', alpha=0.25, edgecolor='none', label='Shipping Lane')
+        self.legends.append(legend_lane)
 
 
     def _draw_buoy(self, fig, ax):
@@ -456,8 +461,12 @@ class PathPlanning:
 
         ax.scatter(df_buoy["x [m]"].values, df_buoy["y [m]"].values,
                    color='orange', s=20, zorder=2)
+        legend_buoy = Line2D([0], [0], marker='o', color='none', 
+                             markerfacecolor='orange', markeredgecolor='none', markersize=1.5, label='Buoy')
+        self.legends.append(legend_buoy)
         self._draw_buoy_color(fig, ax, df_buoy)
         self._draw_buoy_pair(fig, ax, df_buoy)
+
 
 
     def _draw_buoy_color(self, fig, ax, df_buoy):
@@ -482,6 +491,9 @@ class PathPlanning:
                 color="orange", lw=3, linestyle="-", zorder=2)
             
             self._set_buoy_lines(row["x3"], row["x4"], row["y3"], row["y4"])
+
+        legend_buoy_line = Line2D([0], [0], color='orange', linestyle="-", linewidth=2, label='Buoy line')
+        self.legends.append(legend_buoy_line)
 
     
     def _save_excel(self, df, name):
@@ -530,8 +542,28 @@ class PathPlanning:
         )
         ax.add_artist(ab)
 
-    
-    def _save_fig(self, fig, name):
+
+    def _plot_pts(self, fig, ax):
+        pt_start = self.port["start"]
+        pt_end = [0, 0]
+
+        annotations = self.port["annotations"]
+
+        ax.scatter(pt_start[1], pt_start[0], c="black", s=10, zorder=11)
+        ax.scatter(pt_end[1], pt_end[0], c="black", s=10, zorder=11)
+
+        ann = annotations["approach_start"]
+        ax.annotate("Start", xy=(pt_start[1], pt_start[0]), 
+                    xytext=ann["xytext"], textcoords="offset points", ha=ann["ha"], va=ann["va"], fontsize=25)
+        ann = annotations["turn_end"]
+        ax.annotate("End", xy=(pt_end[1], pt_end[0]), 
+                    xytext=ann["xytext"], textcoords="offset points", ha=ann["ha"], va=ann["va"], fontsize=25)
+
+
+    def _save_fig(self, fig, ax, name):
+        self.handles.extend(self.legends)
+        ax.legend(handles=self.legends, loc='lower right', 
+                  fontsize=20, frameon=True, framealpha=0.9, edgecolor='black')
         fig.savefig(os.path.join(self.SAVE_DIR, f"{name}.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         if self.ps.PDF:
@@ -555,6 +587,7 @@ class PathPlanning:
         print("\nbuilt lines complete")
         self._define_DAG()
 
+
     def _setup_lines(self):
         self.lines = []
 
@@ -563,6 +596,9 @@ class PathPlanning:
         poly_map = make_valid(Polygon(coords_map))
         Line.map_poly = poly_map
         Line.map_poly_prep = prep(poly_map)
+
+        legend_lines = Line2D([0], [0], color='red', linestyle="-", linewidth=2, label='Shipping Lines')
+        self.legends.append(legend_lines)
 
 
     def _build_lines_from_berth(self):
@@ -600,7 +636,7 @@ class PathPlanning:
             h, = ax.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
             self.handles.append(h)
 
-        self._save_fig(fig, name)
+        self._save_fig(fig, ax, name)
 
 
     def _build_lines_from_shipping_lane(self):
@@ -618,7 +654,7 @@ class PathPlanning:
 
             B_shiplane = np.linalg.norm(lane_pts[1] - lane_pts[0])
             d = min(B_shiplane / 4, dist_both_ship)
-            mid_1 = mid_1 + np.array([-d * np.sin(theta), d * np.cos(theta)])
+            # mid_1 = mid_1 + np.array([-d * np.sin(theta), d * np.cos(theta)])
             L_lane = Line(fixed_pt=np.array((mid_1)), theta=theta)
             L_lane.extent_fixed_pt()
             lines.append(L_lane)
@@ -786,6 +822,10 @@ class PathPlanning:
     def generate_path(self):
         print("\n##### Generate path Start #####")
         self._get_WP_from_lines()
+
+        legend_captain = Line2D([0], [0], color='gray', alpha=0.3, 
+                                linewidth=2, marker='D', markersize=1.5, label='Captain Route')
+        self.legends.append(legend_captain)
         self._save_pts(self.way_points, "way_points")
 
         WP = self.way_points
@@ -799,7 +839,10 @@ class PathPlanning:
             arcs = np.concatenate(arc_list, axis=0)
             self.result_pts = arcs
             print("\nFillet arc path complete")
-        
+
+        legend_pts = Line2D([0], [0], color='blue', linestyle='--', 
+                            marker='o', markersize=1.5, linewidth=2.5, label='Planned Path')
+        self.legends.append(legend_pts)
         self._save_pts(self.result_pts, "generated_path", pt_size=5)
 
 
@@ -826,7 +869,7 @@ class PathPlanning:
         h2, = ax.plot(full_pts[:, 1], full_pts[:, 0], c="blue", ls="--", alpha=0.5, zorder=10)
         self.handles.extend([h1, h2])
 
-        self._save_fig(fig, name)
+        self._save_fig(fig, ax, name)
 
 
     def _draw_captain_path(self, fig, ax):
@@ -836,7 +879,7 @@ class PathPlanning:
             traj.input_csv(df, self.port_csv)
             h, = ax.plot(traj.Y, traj.X, 
                         color = 'gray', ls = '-', marker = 'D',
-                        markersize = 2, alpha = 0.2, lw = 1.0, zorder = 3)
+                        markersize = 2, alpha = 0.3, lw = 1.0, zorder = 3)
             
             self.handles.append(h)
 
