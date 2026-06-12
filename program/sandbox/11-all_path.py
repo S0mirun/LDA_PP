@@ -229,7 +229,7 @@ def count_stay_port(ax, df):
 
 if __name__ == "__main__":
     fig, ax = plt.subplots(figsize=(8, 6))
-    fig.patch.set_facecolor("lightcyan")
+    ax.set_facecolor("#e6f7ff")
 
     draw_Japan_Poly(ax)
     #
