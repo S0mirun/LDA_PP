@@ -224,11 +224,13 @@ def count_stay_port(ax, df):
     ax.autoscale()
     ax.set_aspect('equal')
     plt.savefig(os.path.join(SAVE_DIR, "stay_port.png"),
-                dpi=400, bbox_inches="tight", pad_inches=0.05)
+                dpi=400, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.05)
     
 
 if __name__ == "__main__":
     fig, ax = plt.subplots(figsize=(8, 6))
+    fig.patch.set_facecolor("lightcyan")
+
     draw_Japan_Poly(ax)
     #
     df = read_AIS()
