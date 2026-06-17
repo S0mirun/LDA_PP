@@ -57,6 +57,8 @@ def visualize(csv_file, num, save_dir, ax_all=None):
     plt.tight_layout()
 
     fig.savefig(f"{save_dir}/C23-06_{num}-g_curves.png", dpi=300)
+    save_dir2 = "/Users/tokudashintarou/Desktop/東海汽船用/海岸線データ可視化（国交相より）/県ごと"
+    fig.savefig(f"{save_dir2}/C23-06_{num}-g_curves.png", dpi=300)
     plt.close(fig)
 
 
