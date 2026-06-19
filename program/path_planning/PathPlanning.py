@@ -42,7 +42,7 @@ class ApproachAlgo(Enum):
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 3
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Sakaide, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -339,7 +339,7 @@ class PathPlanning:
         self.save_results()
         print(
             "\n##### All tasks complete #####"
-            f"\ntarget : {self.port["name"]}"
+            f"\ntarget : {self.port['name']}"
             f"\nMode   : {self.ps.approach_algo.name}"
             f"\nRedraw : {self.ps.redraw_by_AI}"
         )
@@ -368,7 +368,7 @@ class PathPlanning:
     def set_target_port(self):
         self.port = dictionary()[self.ps.port_number]
         self.port_csv=f"raw_datas/tmp/coordinates_of_port/_{self.port["name"]}.csv"
-        print(f"\ntarget : {self.port["name"]}")
+        print(f"\ntarget : {self.port['name']}")
 
 
     def setup_save_dir(self):
@@ -377,7 +377,7 @@ class PathPlanning:
         SAVE_DIR = f"{self.save_dir_path}/{folder_name}"
         os.makedirs(SAVE_DIR, exist_ok=True)
         if self.ps.PDF:
-            os.makedirs(f"{SAVE_DIR}/pdf", exist_ok=True)
+            os.makedirs(f"{SAVE_DIR}/{self.port["legend"]}", exist_ok=True)
 
         self.SAVE_DIR = SAVE_DIR
 
