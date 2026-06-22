@@ -42,7 +42,7 @@ class ApproachAlgo(Enum):
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 3
+        self.port_number: int = 9
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Sakaide, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -54,7 +54,7 @@ class Setting:
         # approach
         self.approach_algo = ApproachAlgo.ARC
         self.SupplementMode = SupplementMode.MIDPOINT
-        self.redraw_by_AI = True
+        self.redraw_by_AI = False
 
         # CMA-ES
         self.seed: int = 42
@@ -567,7 +567,7 @@ class PathPlanning:
         fig.savefig(os.path.join(self.SAVE_DIR, f"{name}.png"),
                     dpi=400, bbox_inches="tight", pad_inches=0.05)
         if self.ps.PDF:
-            fig.savefig(os.path.join(f"{self.SAVE_DIR}/pdf", f"{name}.pdf"),
+            fig.savefig(os.path.join(f"{self.SAVE_DIR}/{self.port["legend"]}", f"{name}.pdf"),
                         dpi=400, bbox_inches="tight", pad_inches=0.05)
         
         if self.handles:
