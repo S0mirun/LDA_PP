@@ -18,11 +18,6 @@ from matplotlib.patches import Patch
 import numpy as np
 
 
-# ============================================================
-# legend の定義（一元管理）
-# PathPlanning.py の各描画関数は、ここで定義したオブジェクトを
-# self.legends に append するだけでよい。
-# ============================================================
 LEGEND_TRAFFIC_LANE = Patch(facecolor='magenta', alpha=0.25, edgecolor='none', label='Traffic Lane')
 
 LEGEND_BUOY = Line2D([0], [0], marker='o', color='none',
@@ -41,9 +36,6 @@ LEGEND_PLANNED_PATH = Line2D([0], [0], color='blue', linestyle='--',
 LEGEND_SHIP_SHAPE = Line2D([0], [0], color='black', linewidth=1.2, label='Ship shape (1 min interval)')
 
 
-# ============================================================
-# 点群（scatter）の描画スタイルの定義（一元管理）
-# ============================================================
 BUOY_SCATTER_KWARGS = dict(color='orange', s=20, zorder=2)
 
 BUOY_COLOR_LIST = ["white", "black", "red", "green", "blue", "yellow"]

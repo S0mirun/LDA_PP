@@ -42,7 +42,7 @@ class ApproachAlgo(Enum):
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 2
+        self.port_number: int = 0
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Sakaide, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -852,7 +852,6 @@ class PathPlanning:
 
             self.handles.append(h)
 
-        # 1分間隔の船型を毎回一緒に描く
         ship_shapes = self._compute_ship_shapes()
         self.handles.extend(save_figures.draw_ship_shapes(ax, ship_shapes))
 
@@ -902,7 +901,6 @@ class PathPlanning:
             if len(traj.X) < 2:
                 continue
 
-            # 着桟側(=配列の末尾)を起点にして逆順に並べ、そこからの累積距離を測る
             ver_rev = np.asarray(traj.X, dtype=float)[::-1]
             hor_rev = np.asarray(traj.Y, dtype=float)[::-1]
             seg = np.hypot(np.diff(ver_rev), np.diff(hor_rev))
@@ -936,16 +934,18 @@ class PathPlanning:
             avg_pts.append(np.mean(marks, axis=0))
             k += 1
 
-        # points は着桟位置(近い)→遠方の順。実際の船は遠方→着桟位置に向かって進む
-        # ため、psiの計算では「遠い側」を parent(進んできた方向)、「近い側(着桟位置
-        # 寄り)」を child(向かっている方向)として渡し、着桟位置側が終点になるようにする。
-        points = [self.pp_end] + avg_pts
+        points = [np.array([0.0, 0.0])] + avg_pts
         poses = []
         for i in range(1, len(points)):
             current_pt = points[i]
             nearer_pt = points[i - 1]
-            farther_pt = points[i + 1] if i + 1 < len(points) else points[i]
-            psi = self.cal.psi(farther_pt, current_pt, nearer_pt)
+
+            v_out = nearer_pt - current_pt
+            if np.linalg.norm(v_out) < 1e-9:
+                farther_pt = points[i + 1] if i + 1 < len(points) else points[i]
+                v_out = current_pt - farther_pt
+
+            psi = self.cal.angle(np.zeros(2), v_out)
             poses.append((current_pt[0], current_pt[1], psi))
 
         return poses
@@ -956,7 +956,7 @@ class PathPlanning:
         _compute_ship_poses で得た (ver, hor, psi) を、船体多角形(hull)の
         座標列に変換する。返す座標は ax.fill にそのまま渡せる (plot_x, plot_y) 順。
 
-        加えて、着桟位置(self.pp_end)にも船首方位を真上(0度)に固定した船型を1つ追加する。
+        加えて、バース位置(原点)にも船首方位を真上(0度)に固定した船型を1つ追加する。
         """
         shapes = []
 
