@@ -105,7 +105,7 @@ class Honsyu:
             name = 'Onahama'
             num = "07"
 
-        class iwate:
+        class kamaishi:
             minY_lat = 39.235741
             maxY_lat = 39.276861
             minY_long = 141.880832
@@ -113,7 +113,7 @@ class Honsyu:
             name = 'Kamaishi'
             num = "03"
         
-        ALL = [hachinohe, aomori_bay, akita, isinomaki_bay, onahama, iwate]
+        ALL = [hachinohe, aomori_bay, akita, isinomaki_bay, onahama, kamaishi]
     
     class nihonkai:
         class nigata:

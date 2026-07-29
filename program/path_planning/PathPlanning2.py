@@ -1,3 +1,4 @@
+import argparse
 import glob
 import os
 
@@ -5,9 +6,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-from matplotlib.patches import Patch
 from matplotlib.patches import Polygon as MplPolygon
 import numpy as np
 from openpyxl.utils import get_column_letter
@@ -25,6 +24,7 @@ from utils.PP.fillet import fillet
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
 from utils.PP.MultiPlot import RealTraj
 from utils.PP.Seek_pairs import pair_points_min_distance_df
+from utils.PP import save_figures
 
 DIR = os.path.dirname(__file__)
 dirname = os.path.splitext(os.path.basename(__file__))[0]
@@ -42,7 +42,7 @@ class ApproachAlgo(Enum):
 class Setting:
     def __init__(self):
         # port
-        self.port_number: int = 9
+        self.port_number: int = 2
          # 0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Sakaide, 4: Osaka_1B
          # 5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu
          # 10: Tomakomai, 11: KIX
@@ -87,7 +87,7 @@ def convert(df, port_file, col_lat="lat", col_lon="lon"):
             LON_ORIGIN,
             ANGLE_FROM_NORTH,
         )
-        xs.append(x); ys.append(y)    
+        xs.append(x); ys.append(y)
     return xs, ys
 
 
@@ -119,11 +119,11 @@ class Calculator:
 
     def cross(self, u, v):
         return u[0]*v[1] - u[1]*v[0]
-    
+
     def unit(self, v):
         nv = np.linalg.norm(v)
         return v / nv
-    
+
     def angle(self, from_pt, to_pt):
         """
         符号付きの角度
@@ -134,7 +134,7 @@ class Calculator:
         dot = np.dot(u, v)
         cross = self.cross(u, v)
         return np.arctan2(cross, dot)
-    
+
     def psi(self, parent_pt, current_pt, child_pt):
         """
         船首方位角の計算。北が0, 時計回りが正
@@ -159,7 +159,7 @@ class Calculator:
         psi = psi_in - 0.5 * theta
         psi = (psi + np.pi) % (2.0 * np.pi) - np.pi
         return psi
-    
+
     def speed(self, pt, base_pt):
         distance = np.linalg.norm(pt - base_pt)
         speed = self.SD.b_ave * distance ** self.SD.a_ave + self.SD.b_SD * distance ** self.SD.a_SD
@@ -168,8 +168,8 @@ class Calculator:
         if self.ps.MIN_SPEED_KTS > speed:
             return self.ps.MIN_SPEED_KTS
         return speed
-    
-    
+
+
 
 @dataclass
 class Line:
@@ -209,19 +209,19 @@ class Line:
         True : 外, False : 内
         """
         # outside or not
-        outside =  (pt[0] < self.ver_range[0] or self.ver_range[1] < pt[0] 
+        outside =  (pt[0] < self.ver_range[0] or self.ver_range[1] < pt[0]
                     or pt[1] < self.hor_range[0] or self.hor_range[1] < pt[1])
         if outside:
             return True
-        
+
         # in Polygon or not
         x, y = pt[1], pt[0]
         if self.map_poly_prep.intersects(Point(x, y)):
             return True
-        
+
         return False
-    
-    
+
+
     def swap(self):
         fixed_pt = self.fixed_pt; end_pt = self.end_pt; theta = self.theta
         self.fixed_pt = end_pt; self.end_pt = fixed_pt; self.theta = theta + np.pi
@@ -251,7 +251,7 @@ class Line:
                 return -1
             else:
                 return 0
-            
+
         p1 = self.fixed_pt; p2 = self.end_pt
         p3 = other.fixed_pt; p4 = other.end_pt
 
@@ -262,7 +262,7 @@ class Line:
         s3 = sgn(cross3_12, eps); s4 = sgn(cross4_12, eps)
 
         return (s1 * s2 <= 0) and (s3 * s4 <= 0)
-    
+
 
     def intersect(self, other):
         p1 = self.fixed_pt; p2 = self.end_pt
@@ -273,7 +273,7 @@ class Line:
         cross_ab = self.cal.cross(a, b); cross_ca = self.cal.cross(c, a)
         u = cross_ca / cross_ab
         return p3 + u * b
-    
+
 
     def angle(self, other):
         p1 = self.fixed_pt; p2 = self.end_pt
@@ -287,8 +287,8 @@ class Line:
 
         theta = np.arccos(cos_theta)
         return np.degrees(theta)
-    
-    
+
+
 
 class CostCalculator:
     def __init__(self, ps, sd, cal):
@@ -300,7 +300,7 @@ class CostCalculator:
     def SD_penalty(self, lines, pt, psi):
         SD = self.SD
         SD_p = SD.SD_p
-        
+
         speed = self.cal.speed(pt, lines[-1].end_pt)
         r_list = []
         for theta_i in theta_list:
@@ -364,7 +364,7 @@ class PathPlanning:
     def save_results(self):
         self.save_result_fig()
 
-    
+
     def set_target_port(self):
         self.port = dictionary()[self.ps.port_number]
         self.port_csv=f"raw_datas/tmp/coordinates_of_port/_{self.port["name"]}.csv"
@@ -451,8 +451,7 @@ class PathPlanning:
             ax.add_patch(patch)
 
         self.df_shipping_lane = df_lane
-        legend_lane = Patch(facecolor='magenta', alpha=0.25, edgecolor='none', label='Traffic Lane')
-        self.legends.append(legend_lane)
+        self.legends.append(save_figures.LEGEND_TRAFFIC_LANE)
 
 
     def _draw_buoy(self, fig, ax):
@@ -460,10 +459,8 @@ class PathPlanning:
         df_buoy["x [m]"], df_buoy["y [m]"] = convert(df_buoy, self.port_csv, "latitude", "longitude")
 
         ax.scatter(df_buoy["x [m]"].values, df_buoy["y [m]"].values,
-                   color='orange', s=20, zorder=2)
-        legend_buoy = Line2D([0], [0], marker='o', color='none', 
-                             markerfacecolor='orange', markeredgecolor='none', markersize=1.5, label='Buoy')
-        self.legends.append(legend_buoy)
+                   **save_figures.BUOY_SCATTER_KWARGS)
+        self.legends.append(save_figures.LEGEND_BUOY)
         self._draw_buoy_color(fig, ax, df_buoy)
         self._draw_buoy_pair(fig, ax, df_buoy)
 
@@ -471,13 +468,13 @@ class PathPlanning:
 
     def _draw_buoy_color(self, fig, ax, df_buoy):
         df_buoy["COLOUR"] = df_buoy["COLOUR"].astype(str).str.strip()
-        COLOR = ["white", "black", "red", "green", "blue", "yellow"]
+        COLOR = save_figures.BUOY_COLOR_LIST
         for i in range(1, 7):
             ax.scatter(
                 df_buoy.loc[df_buoy["COLOUR"] == str(i), "x [m]"].values,
                 df_buoy.loc[df_buoy["COLOUR"] == str(i), "y [m]"].values,
-                color=COLOR[i-1], s=10, zorder=3)
-            
+                color=COLOR[i-1], **save_figures.BUOY_COLOR_SCATTER_KWARGS)
+
 
     def _draw_buoy_pair(self, fig, ax, df_buoy):
         df_pairs, _ = pair_points_min_distance_df(df=df_buoy, x_col="x [m]", y_col="y [m]", max_distance=1000)
@@ -489,13 +486,12 @@ class PathPlanning:
                 [row["x3"], row["x4"]],
                 [row["y3"], row["y4"]],
                 color="orange", lw=3, linestyle="-", zorder=2)
-            
+
             self._set_buoy_lines(row["x3"], row["x4"], row["y3"], row["y4"])
 
-        legend_buoy_line = Line2D([0], [0], color='orange', linestyle="-", linewidth=2, label='Buoy line')
-        self.legends.append(legend_buoy_line)
+        self.legends.append(save_figures.LEGEND_BUOY_LINE)
 
-    
+
     def _save_excel(self, df, name):
         SAVE_DIR = f"{self.SAVE_DIR}/excel"
         os.makedirs(SAVE_DIR, exist_ok=True)
@@ -524,7 +520,7 @@ class PathPlanning:
 
         self.buoy_lines.append(line)
 
-        
+
     def _add_compass_image(self, fig, ax):
         img = mpimg.imread("raw_datas/compass icon2.png")
         df = pd.read_csv(self.port_csv)
@@ -549,35 +545,23 @@ class PathPlanning:
 
         annotations = self.port["annotations"]
 
-        ax.scatter(pt_start[1], pt_start[0], c="black", s=10, zorder=11)
-        ax.scatter(pt_end[1], pt_end[0], c="black", s=10, zorder=11)
+        ax.scatter(pt_start[1], pt_start[0], **save_figures.START_END_SCATTER_KWARGS)
+        ax.scatter(pt_end[1], pt_end[0], **save_figures.START_END_SCATTER_KWARGS)
 
         ann = annotations["approach_start"]
-        ax.annotate("Start", xy=(pt_start[1], pt_start[0]), 
-                    xytext=ann["xytext"], textcoords="offset points", ha=ann["ha"], va=ann["va"], fontsize=25)
+        ax.annotate("Start", xy=(pt_start[1], pt_start[0]),
+                    xytext=ann["xytext"], textcoords="offset points", ha=ann["ha"], va=ann["va"],
+                    fontsize=save_figures.START_END_ANNOTATE_FONTSIZE)
         ann = annotations["turn_end"]
-        ax.annotate("Goal", xy=(pt_end[1], pt_end[0]), 
-                    xytext=ann["xytext"], textcoords="offset points", ha=ann["ha"], va=ann["va"], fontsize=25)
+        ax.annotate("Goal", xy=(pt_end[1], pt_end[0]),
+                    xytext=ann["xytext"], textcoords="offset points", ha=ann["ha"], va=ann["va"],
+                    fontsize=save_figures.START_END_ANNOTATE_FONTSIZE)
 
 
     def _save_fig(self, fig, ax, name):
-        self.handles.extend(self.legends)
-        ax.legend(handles=self.legends, loc='lower right', 
-                  fontsize=20, frameon=True, framealpha=0.9, edgecolor='black')
-        fig.savefig(os.path.join(self.SAVE_DIR, f"{name}.png"),
-                    dpi=400, bbox_inches="tight", pad_inches=0.05)
-        if self.ps.PDF:
-            fig.savefig(os.path.join(f"{self.SAVE_DIR}/{self.port["legend"]}", f"{name}.pdf"),
-                        dpi=400, bbox_inches="tight", pad_inches=0.05)
-        
-        if self.handles:
-            for h in list(self.handles):
-                try:
-                    if h is not None and h.axes is not None:
-                        h.remove()
-                except ValueError:
-                    pass
-            self.handles.clear()
+        pdf_dir = f"{self.SAVE_DIR}/{self.port["legend"]}" if self.ps.PDF else None
+        save_figures.save_fig(fig, ax, self.SAVE_DIR, name, self.legends, self.handles,
+                               pdf=self.ps.PDF, pdf_dir=pdf_dir)
 
     def build_lines_by_shipping_lane(self):
         self._setup_lines()
@@ -597,8 +581,7 @@ class PathPlanning:
         Line.map_poly = poly_map
         Line.map_poly_prep = prep(poly_map)
 
-        legend_lines = Line2D([0], [0], color='red', linestyle="-", linewidth=2, label='Candidate Line Set')
-        self.legends.append(legend_lines)
+        self.legends.append(save_figures.LEGEND_CANDIDATE_LINES)
 
 
     def _build_lines_from_berth(self):
@@ -627,15 +610,9 @@ class PathPlanning:
 
 
     def _save_lines(self, name):
-        fig, ax = self.fig, self.ax
-        lines = self.lines
-
-        for ln in lines:
-            pts = np.vstack([ln.fixed_pt, ln.end_pt])
-            h, = ax.plot(pts[:, 1], pts[:, 0], color="red", linestyle='-')
-            self.handles.append(h)
-
-        self._save_fig(fig, ax, name)
+        pdf_dir = f"{self.SAVE_DIR}/{self.port["legend"]}" if self.ps.PDF else None
+        save_figures.save_lines(self.fig, self.ax, self.lines, self.handles, self.SAVE_DIR, name,
+                                 self.legends, pdf=self.ps.PDF, pdf_dir=pdf_dir)
 
 
     def _build_lines_from_shipping_lane(self):
@@ -735,10 +712,10 @@ class PathPlanning:
                     if length < shortest:
                         shortest = length
                         cross_line_idx = i
-        
+
         self.cross_line_idx = cross_line_idx
 
-        
+
     def _supplement_line(self, idx):
         lines = self.lines
         L_base = lines[-1]
@@ -756,13 +733,13 @@ class PathPlanning:
 
         self._build_supplement_line(mid, idx)
 
-    
+
     def _find_visible_range(self, ln, mid):
         def to_xy(p_yx):
             return (float(p_yx[1]), float(p_yx[0]))
-        
+
         pts = np.linspace(ln.end_pt, ln.fixed_pt, 99)
-        
+
         idx = 0
         while idx < 99 and Line.map_poly_prep.intersects(LineString([to_xy(pts[idx]), to_xy(mid)])):
             idx += 1
@@ -817,14 +794,13 @@ class PathPlanning:
         self._seek_nearest_line(L_base=L_base, minus=2)
         L_base.set_parent(self.lines[self.cross_line_idx])
 
-    
+
     def generate_path(self):
         print("\n##### Generate path Start #####")
         self._get_WP_from_lines()
 
-        legend_captain = Line2D([0], [0], color='gray', alpha=0.3, 
-                                linewidth=2, marker='D', markersize=1.5, label='Captain Route')
-        self.legends.append(legend_captain)
+        self.legends.append(save_figures.LEGEND_CAPTAIN_ROUTE)
+        self.legends.append(save_figures.LEGEND_SHIP_SHAPE)
         self._save_pts(self.way_points, "way_points")
 
         WP = self.way_points
@@ -834,14 +810,12 @@ class PathPlanning:
             arc_list = []
             for i in range(len(self.way_points)):
                 self._find_best_fillet_arc(full_pts[i], full_pts[i+1], full_pts[i+2], arc_list)
-            
+
             arcs = np.concatenate(arc_list, axis=0)
             self.result_pts = arcs
             print("\nFillet arc path complete")
 
-        legend_pts = Line2D([0], [0], color='blue', linestyle='--', 
-                            marker='o', markersize=1.5, linewidth=2.5, label='Planned Path')
-        self.legends.append(legend_pts)
+        self.legends.append(save_figures.LEGEND_PLANNED_PATH)
         self._save_pts(self.result_pts, "generated_path", pt_size=5)
 
 
@@ -859,16 +833,12 @@ class PathPlanning:
 
 
     def _save_pts(self, pts, name, pt_size = 20):
-        fig, ax = self.fig, self.ax
+        self._draw_captain_path(self.fig, self.ax)
 
-        self._draw_captain_path(fig, ax)
-
-        full_pts = np.vstack([self.pp_start, pts, self.pp_end])
-        h1 = ax.scatter(full_pts[:, 1], full_pts[:, 0], c="blue", s=pt_size, zorder=10)
-        h2, = ax.plot(full_pts[:, 1], full_pts[:, 0], c="blue", ls="--", alpha=0.5, zorder=10)
-        self.handles.extend([h1, h2])
-
-        self._save_fig(fig, ax, name)
+        pdf_dir = f"{self.SAVE_DIR}/{self.port["legend"]}" if self.ps.PDF else None
+        save_figures.save_pts(self.fig, self.ax, pts, self.pp_start, self.pp_end, self.handles,
+                               self.SAVE_DIR, name, self.legends, pdf=self.ps.PDF, pdf_dir=pdf_dir,
+                               pt_size=pt_size)
 
 
     def _draw_captain_path(self, fig, ax):
@@ -876,11 +846,15 @@ class PathPlanning:
         for i, df in enumerate(df_captain):
             traj = RealTraj()
             traj.input_csv(df, self.port_csv)
-            h, = ax.plot(traj.Y, traj.X, 
+            h, = ax.plot(traj.Y, traj.X,
                         color = 'gray', ls = '-', marker = 'D',
                         markersize = 2, alpha = 0.3, lw = 1.0, zorder = 3)
-            
+
             self.handles.append(h)
+
+        # 1分間隔の船型を毎回一緒に描く
+        ship_shapes = self._compute_ship_shapes()
+        self.handles.extend(save_figures.draw_ship_shapes(ax, ship_shapes))
 
 
     def _find_best_fillet_arc(self, pt1, pt2, pt3, arc_list):
@@ -909,61 +883,117 @@ class PathPlanning:
         arc_list.append(arc_best)
 
 
+    def _compute_ship_poses(self, interval_sec=60, dt=1.0, max_markers=500):
+        """
+        着桟位置(self.pp_end)から Calculator.speed に基づいて interval_sec 秒
+        (既定1分)ごとの位置を推定し、複数csv(実航跡)の平均座標として
+        (ver, hor, psi) のリストを返す。
+
+        各csvは配列の末尾が着桟側なので、末尾を起点に逆順へたどりながら
+        累積距離(弧長)を測る。ある時点で到達できたcsvだけを平均に使い、
+        1つも到達できなくなった時点で打ち切る。
+        """
+        traj_files = glob.glob(f"raw_datas/tmp/_{self.port['name']}/*.csv")
+
+        curves = []
+        for file in traj_files:
+            traj = RealTraj()
+            traj.input_csv(file, self.port_csv)
+            if len(traj.X) < 2:
+                continue
+
+            # 着桟側(=配列の末尾)を起点にして逆順に並べ、そこからの累積距離を測る
+            ver_rev = np.asarray(traj.X, dtype=float)[::-1]
+            hor_rev = np.asarray(traj.Y, dtype=float)[::-1]
+            seg = np.hypot(np.diff(ver_rev), np.diff(hor_rev))
+            cum_dist = np.concatenate([[0.0], np.cumsum(seg)])
+            curves.append((cum_dist, ver_rev, hor_rev))
+
+        if not curves:
+            return []
+
+        avg_pts = []
+        k = 1
+        while k <= max_markers:
+            marks = []
+            target_t = k * interval_sec
+            for cum_dist, ver_rev, hor_rev in curves:
+                s, t = 0.0, 0.0
+                max_s = cum_dist[-1]
+                while t < target_t and s < max_s:
+                    pt = np.array([np.interp(s, cum_dist, ver_rev),
+                                   np.interp(s, cum_dist, hor_rev)])
+                    speed_kts = self.cal.speed(pt, self.pp_end)
+                    s += knot_to_ms(speed_kts) * dt
+                    t += dt
+                if t >= target_t:
+                    marks.append([np.interp(s, cum_dist, ver_rev),
+                                  np.interp(s, cum_dist, hor_rev)])
+
+            if not marks:
+                break
+
+            avg_pts.append(np.mean(marks, axis=0))
+            k += 1
+
+        # points は着桟位置(近い)→遠方の順。実際の船は遠方→着桟位置に向かって進む
+        # ため、psiの計算では「遠い側」を parent(進んできた方向)、「近い側(着桟位置
+        # 寄り)」を child(向かっている方向)として渡し、着桟位置側が終点になるようにする。
+        points = [self.pp_end] + avg_pts
+        poses = []
+        for i in range(1, len(points)):
+            current_pt = points[i]
+            nearer_pt = points[i - 1]
+            farther_pt = points[i + 1] if i + 1 < len(points) else points[i]
+            psi = self.cal.psi(farther_pt, current_pt, nearer_pt)
+            poses.append((current_pt[0], current_pt[1], psi))
+
+        return poses
+
+
+    def _compute_ship_shapes(self):
+        """
+        _compute_ship_poses で得た (ver, hor, psi) を、船体多角形(hull)の
+        座標列に変換する。返す座標は ax.fill にそのまま渡せる (plot_x, plot_y) 順。
+
+        加えて、着桟位置(self.pp_end)にも船首方位を真上(0度)に固定した船型を1つ追加する。
+        """
+        shapes = []
+
+        berth_hull = ship_shape_poly((0, 0, 0.0), L=self.ps.L, B=self.ps.B)
+        shapes.append(np.asarray(berth_hull))
+
+        for ver, hor, psi in self._compute_ship_poses():
+            hull = ship_shape_poly((ver, hor, psi), L=self.ps.L, B=self.ps.B)
+            shapes.append(np.asarray(hull))
+        return shapes
+
+
     def save_result_fig(self):
-        fig, ax = self.fig, self.ax
+        self._draw_captain_path(self.fig, self.ax)
 
-        SAVE_DIR = f"{self.save_dir_path}/results"
-        file_name = self._make_folder_name()
-
-        self._draw_captain_path(fig, ax)
-
-        full_pts = np.vstack([self.pp_start, self.result_pts, self.pp_end])
-        ax.scatter(full_pts[:, 1], full_pts[:, 0], c="blue", s=5, zorder=10)
-        ax.plot(full_pts[:, 1], full_pts[:, 0], c="blue", ls="--", alpha=0.5, zorder=10)
-
-        WP = self.way_points
-        ax.scatter(WP[:, 1], WP[:, 0], c="#8A2BE2", 
-                   marker="X", edgecolors="#8A2BE2", linewidths=0.8, s=20, zorder=10)
-        
-        config_text = self._make_config_text()
-        ax.text(0.5, -0.01, config_text, transform=ax.transAxes, ha='center', va='top', fontsize=12)
-        
-        self._setup_legends()
-        ax.legend(handles=self.legends,
-                  loc='upper center', bbox_to_anchor=(0.5, -0.03), bbox_transform=ax.transAxes, 
-                  ncol=3, fontsize=10, frameon=True, fancybox=False, edgecolor='black')
-        
-        plt.subplots_adjust(bottom=0.10)
-        os.makedirs(SAVE_DIR, exist_ok=True)
-        fig.savefig(os.path.join(SAVE_DIR, f"{file_name}.png"),
-                    dpi=400, bbox_inches="tight", pad_inches=0.05)
-        
-
-    def _make_config_text(self):
-        ApproachAlgo_str = self.ps.approach_algo.name
-        SupplementMode_str = self.ps.SupplementMode.name
-        AI_str = "ON" if self.ps.redraw_by_AI else "OFF"
-        return f"Approach: {ApproachAlgo_str}   /   Supplement: {SupplementMode_str}   /   AI redraw: {AI_str}"
-        
-
-    def _setup_legends(self):
-        self.legends = [
-            Line2D([0], [0], label="Buoy", color='none', 
-                   marker='o', markersize=1.5, markerfacecolor='orange', markeredgecolor='orange'),
-            Line2D([0], [0], label="Way points", color='none', 
-                   marker='X', markersize=1.5, markerfacecolor="#8A2BE2", markeredgecolor="#8A2BE2", markeredgewidth=0.8,),
-            Line2D([0], [0], label="Captain's route", color='gray', 
-                   marker='D', markersize=1.5, ls='-', lw=1.0, alpha=0.5),
-            Line2D([0], [0], label="Generated Path", color='blue', 
-                   marker='o', markersize=1.5, ls='--', lw=1.0, alpha=0.5),
-        ]
+        save_figures.save_result_fig(
+            self.fig, self.ax, self.save_dir_path, self._make_folder_name(),
+            self.pp_start, self.pp_end, self.result_pts, self.way_points,
+            self.ps.approach_algo.name, self.ps.SupplementMode.name, self.ps.redraw_by_AI,
+        )
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Path planning for ship berthing approach")
+    parser.add_argument(
+        "port_number", type=int, nargs="?", default=0,
+        help="0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Sakaide, 4: Osaka_1B, "
+             "5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu, "
+             "10: Tomakomai, 11: KIX"
+    )
+    args = parser.parse_args()
+
     ps = Setting()
+    ps.port_number = args.port_number
     sd = ShipDomain()
     cal = Calculator(ps, sd)
     cost_cal = CostCalculator(ps, sd, cal)
-    
+
     pp = PathPlanning(ps, sd, cal, cost_cal)
     pp.main()

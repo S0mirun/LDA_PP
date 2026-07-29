@@ -13,7 +13,7 @@ from utils.PP.stay_ports import Hokkaido, Honsyu
 
 DIR = os.path.dirname(__file__)
 RAW_DATAS = f"{DIR}/../../raw_datas"
-PORT = Honsyu.Pasific.osaka_bay2
+PORT = Honsyu.nihonkai.nigata
 coast_file = f"{RAW_DATAS}/国土交通省/C23-06_{PORT.num}_GML/C23-06_{PORT.num}-g.csv"
 port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/_{PORT.name}.csv"
 port_file = f"{RAW_DATAS}/tmp/coordinates_of_port/_{PORT.name}.csv"
