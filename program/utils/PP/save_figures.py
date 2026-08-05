@@ -17,6 +17,8 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 import numpy as np
 
+from utils.LDA.ship_geometry import *
+
 
 LEGEND_TRAFFIC_LANE = Patch(facecolor='magenta', alpha=0.25, edgecolor='none', label='Traffic Lane')
 
@@ -45,6 +47,9 @@ START_END_SCATTER_KWARGS = dict(c="black", s=10, zorder=11)
 START_END_ANNOTATE_FONTSIZE = 25
 
 SHIP_SHAPE_KWARGS = dict(facecolor='none', edgecolor='black', linewidth=1.2, alpha=0.9, zorder=9)
+
+OPTIMIZATION_LINE_KWARGS = dict(color="red", lw=1.5, zorder=6)
+OPTIMIZATION_SHIP_SHAPE_KWARGS = dict(facecolor="red", edgecolor="red", linewidth=1.0, alpha=1.0, zorder=6)
 
 
 def save_fig(fig, ax, save_dir, name, legends, handles, pdf=False, pdf_dir=None):
@@ -114,6 +119,24 @@ def save_pts(fig, ax, pts, pp_start, pp_end, handles, save_dir, name, legends,
     h1 = ax.scatter(full_pts[:, 1], full_pts[:, 0], **scatter_kwargs)
     h2, = ax.plot(full_pts[:, 1], full_pts[:, 0], **line_kwargs)
     handles.extend([h1, h2])
+
+    save_fig(fig, ax, save_dir, name, legends, handles, pdf=pdf, pdf_dir=pdf_dir)
+
+def save_optimization_fig(fig, ax, pts, phis, boundary_pt, boundary_phi, goal, goal_phi,
+                           handles, save_dir, name, legends, L, B, pdf=False, pdf_dir=None):
+    """
+    最適化の途中経過(restartごとの最良解)や最終結果を描画してから保存する。
+    """
+    full_pts = np.vstack([boundary_pt, pts, goal])
+    full_phis = np.concatenate([[boundary_phi], np.asarray(phis, dtype=float), [goal_phi]])
+
+    h_line, = ax.plot(full_pts[:, 1], full_pts[:, 0], **OPTIMIZATION_LINE_KWARGS)
+    handles.append(h_line)
+
+    for (ver, hor), psi in zip(full_pts, full_phis):
+        hull = np.asarray(ship_shape_poly((ver, hor, psi), L=L, B=B))
+        patch = ax.fill(hull[:, 0], hull[:, 1], **OPTIMIZATION_SHIP_SHAPE_KWARGS)[0]
+        handles.append(patch)
 
     save_fig(fig, ax, save_dir, name, legends, handles, pdf=pdf, pdf_dir=pdf_dir)
 

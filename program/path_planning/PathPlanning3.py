@@ -1188,7 +1188,7 @@ def sample_1min_points(pp, boundary_pt: np.ndarray, segs: List[tuple], calculato
         j = int(np.clip(j, idx + 1, len(dense_path) - 1))
         turning_points.append(dense_path[j].copy())
         idx = j
-        return np.array(turning_points) if turning_points else np.empty((0, 2))
+    return np.array(turning_points) if turning_points else np.empty((0, 2))
 
 
 def _sigmoid(x, a, b, c):
@@ -1350,6 +1350,33 @@ class BerthApproachOptimizer:
             f"[setup] boundary_pt={self.boundary_pt} (phi={np.degrees(self.boundary_phi):.1f}deg), "
             f"内部分割点数={len(interior_pts)}, 次元数N={self.N}"
         )
+        self.opt_save_dir = f"{self.pp.SAVE_DIR}/optimization"
+        os.makedirs(self.opt_save_dir, exist_ok=True)
+        if self.pp.ps.PDF:
+            os.makedirs(f"{self.opt_save_dir}/{self.pp.port['legend']}", exist_ok=True)
+        init_full_path = np.vstack([self.boundary_pt, self.interior_pts, self.goal])
+        self._save_pts_no_captain(init_full_path, "post_optimization", pt_size=5)
+
+    def _save_pts_no_captain(self, pts: np.ndarray, name: str, pt_size: int = 5):
+        pdf_dir = f"{self.opt_save_dir}/{self.pp.port['legend']}" if self.pp.ps.PDF else None
+        save_figures.save_pts(
+            self.pp.fig, self.pp.ax, pts, self.pp.pp_start, self.pp.pp_end, self.pp.handles,
+            self.opt_save_dir, name, self.pp.legends, pdf=self.pp.ps.PDF, pdf_dir=pdf_dir,
+            pt_size=pt_size,
+        )
+
+    def _draw_restart_result(self, best_mean: np.ndarray, restart: int):
+        triplets = best_mean.reshape(-1, 3)
+        pts = triplets[:, :2]
+        phis = _wrap_pi(triplets[:, 2])
+
+        pdf_dir = f"{self.opt_save_dir}/{self.pp.port['legend']}" if self.pp.ps.PDF else None
+        save_figures.save_optimization_fig(
+            self.pp.fig, self.pp.ax, pts, phis,
+            self.boundary_pt, self.boundary_phi, self.goal, self.psi_end,
+            self.pp.handles, self.opt_save_dir, f"restart_{restart}", self.pp.legends,
+            self.pp.ps.L, self.pp.ps.B, pdf=self.pp.ps.PDF, pdf_dir=pdf_dir,
+        )
 
     def _nearest_path_distance(self, pt: np.ndarray, segs: List[tuple]) -> float:
         best = None
@@ -1504,6 +1531,9 @@ class BerthApproachOptimizer:
             print(f"[run] restart {restart} terminated: {condition}")
             total_neval += ddcma.neval
 
+            if best_dict[restart]["best_mean_sofar"] is not None:
+                self._draw_restart_result(best_dict[restart]["best_mean_sofar"], restart)
+
             if restart < self.os.restarts - 1 and total_neval < NEVAL_STANDARD:
                 popsize = ddcma.lam if not self.os.increase_popsize_on_restart else ddcma.lam * 2
                 cur_seed *= 2
@@ -1539,8 +1569,11 @@ class BerthApproachOptimizer:
         pts = self.optimized_pts
         phis = self.optimized_phi
 
+        full_pts = np.vstack([self.boundary_pt, pts, self.goal])
+        full_phis = np.concatenate([[self.boundary_phi], phis, [self.psi_end]])
+
         ax.scatter(pts[:, 1], pts[:, 0], color="red", s=25, zorder=6)
-        for (ver, hor), psi in zip(pts, phis):
+        for (ver, hor), psi in zip(full_pts, full_phis):
             hull = np.asarray(ship_shape_poly((ver, hor, psi), L=self.pp.ps.L, B=self.pp.ps.B))
             ax.fill(hull[:, 0], hull[:, 1], facecolor="red", alpha=0.3,
                     edgecolor="red", linewidth=1.0, zorder=6)
