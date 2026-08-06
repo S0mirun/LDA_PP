@@ -16,11 +16,14 @@ import shapely
 from shapely.geometry import Polygon, Point, LineString
 from shapely.prepared import prep
 from shapely.validation import make_valid
-from typing import ClassVar, Tuple
+import time
+from typing import ClassVar, Tuple, List, Optional
 
 from utils.LDA.ship_geometry import *
 from utils.PP.dictionary_of_port import dictionary
+from utils.PP.E_ddCMA import DdCma, Checker, Logger
 from utils.PP.fillet import fillet
+from utils.PP.Filtered_Dict import new_filtered_dict
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
 from utils.PP.MultiPlot import RealTraj
 from utils.PP.Seek_pairs import pair_points_min_distance_df
@@ -984,14 +987,7 @@ class PathPlanning:
         )
 
 
-import time
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
-
-import numpy as np
-
-from utils.PP.E_ddCMA import DdCma, Checker, Logger
-from utils.PP.Filtered_Dict import new_filtered_dict
+##########   optimization    ##########
 
 
 def _segment_psi(p_from: np.ndarray, p_to: np.ndarray) -> float:
@@ -1191,10 +1187,6 @@ def sample_1min_points(pp, boundary_pt: np.ndarray, segs: List[tuple], calculato
     return np.array(turning_points) if turning_points else np.empty((0, 2))
 
 
-def _sigmoid(x, a, b, c):
-    return a / (b + np.exp(c * x))
-
-
 class BerthCostCalculator:
     def __init__(self, ps, cal, base_cost_cal):
         self.ps = ps
@@ -1279,8 +1271,8 @@ class BerthCostCalculator:
         progress = dist_c / dist_total if dist_total > 1e-9 else 0.0
 
         alpha = 0.3
-        w_boundary = _sigmoid(progress - alpha, a=angle_deg_s, b=1.0, c=30.0)
-        w_end = _sigmoid(progress - (1 - alpha), a=angle_deg_e, b=1.0, c=30.0)
+        w_boundary = sigmoid(progress - alpha, a=angle_deg_s, b=1.0, c=30.0)
+        w_end = sigmoid(progress - (1 - alpha), a=angle_deg_e, b=1.0, c=30.0)
 
         return -(w_boundary + w_end)
 
@@ -1292,12 +1284,12 @@ class BerthCostCalculator:
 @dataclass
 class BerthOptimizerSettings:
     seed: int = 42
-    restarts: int = 3
+    restarts: int = 5
     increase_popsize_on_restart: bool = False
 
     SD_ratio: float = 0.5
     element_ratio: float = 1.0
-    distance_ratio: float = 0.2
+    distance_ratio: float = 1.0
     angle_diff_ratio: float = 1.5
     deviation_ratio: float = 1.0
 
@@ -1502,7 +1494,7 @@ class BerthApproachOptimizer:
         checker = Checker(ddcma)
 
         NEVAL_STANDARD = ddcma.lam * 5000
-        print(f"[run] population size={ddcma.lam}, dimension={ddcma.N}, "
+        print(f"\n[run] population size={ddcma.lam}, dimension={ddcma.N}, "
               f"NEVAL_STANDARD={NEVAL_STANDARD}")
 
         total_neval = 0
@@ -1525,10 +1517,10 @@ class BerthApproachOptimizer:
                 is_satisfied, condition = checker()
 
                 if ddcma.t % 10 == 0:
-                    print(f"restart={restart} t={ddcma.t} neval={ddcma.neval} "
+                    print(f"t={ddcma.t} neval={ddcma.neval} "
                           f"best={best_dict[restart]['best_cost_so_far']:.6g}")
 
-            print(f"[run] restart {restart} terminated: {condition}")
+            print(f"\n[run] restart {restart} terminated: {condition}")
             total_neval += ddcma.neval
 
             if best_dict[restart]["best_mean_sofar"] is not None:
@@ -1554,7 +1546,7 @@ class BerthApproachOptimizer:
         self.optimized_full_path = np.vstack([self.boundary_pt, self.optimized_pts, self.goal])
 
         print(
-            f"[run] 完了(所要時間 {self.cma_caltime:.1f}s)。"
+            f"\n[run] 完了(所要時間 {self.cma_caltime:.1f}s)。"
             f"best_cost={best_dict[self.best_key]['best_cost_so_far']:.6g}"
         )
         return self.optimized_full_path, self.optimized_phi
@@ -1575,7 +1567,7 @@ class BerthApproachOptimizer:
         ax.scatter(pts[:, 1], pts[:, 0], color="red", s=25, zorder=6)
         for (ver, hor), psi in zip(full_pts, full_phis):
             hull = np.asarray(ship_shape_poly((ver, hor, psi), L=self.pp.ps.L, B=self.pp.ps.B))
-            ax.fill(hull[:, 0], hull[:, 1], facecolor="red", alpha=0.3,
+            ax.fill(hull[:, 0], hull[:, 1], facecolor="red", alpha=0.5,
                     edgecolor="red", linewidth=1.0, zorder=6)
 
 

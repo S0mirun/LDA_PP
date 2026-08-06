@@ -49,7 +49,7 @@ START_END_ANNOTATE_FONTSIZE = 25
 SHIP_SHAPE_KWARGS = dict(facecolor='none', edgecolor='black', linewidth=1.2, alpha=0.9, zorder=9)
 
 OPTIMIZATION_LINE_KWARGS = dict(color="red", lw=1.5, zorder=6)
-OPTIMIZATION_SHIP_SHAPE_KWARGS = dict(facecolor="red", edgecolor="red", linewidth=1.0, alpha=1.0, zorder=6)
+OPTIMIZATION_SHIP_SHAPE_KWARGS = dict(facecolor="red", edgecolor="red", linewidth=1.0, alpha=0.5, zorder=6)
 
 
 def save_fig(fig, ax, save_dir, name, legends, handles, pdf=False, pdf_dir=None):
@@ -170,7 +170,6 @@ def save_result_fig(fig, ax, save_dir_path, file_name, pp_start, pp_end, result_
                      approach_algo_name, supplement_mode_name, redraw_by_AI):
     """
     最終的な経路結果を1枚の図として保存する。
-    船型は _draw_captain_path 側で毎回描画されるため、ここでは扱わない。
     """
     scatter_kwargs = dict(c="blue", s=5, zorder=10)
     line_kwargs = dict(c="blue", ls="--", alpha=0.5, zorder=10)
