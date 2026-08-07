@@ -19,6 +19,7 @@ from shapely.validation import make_valid
 from typing import ClassVar, Tuple
 
 from utils.LDA.ship_geometry import *
+from utils.PP.clothoid import build_biclothoid, check_constraints, compute_corner_geometry
 from utils.PP.dictionary_of_port import dictionary
 from utils.PP.fillet import fillet
 from utils.PP.graph_by_taneichi import ShipDomain_proposal
@@ -37,6 +38,7 @@ class SupplementMode(Enum):
 
 class ApproachAlgo(Enum):
     ARC = auto()
+    CLOTHOID = auto()
 
 
 class Setting:
@@ -56,6 +58,18 @@ class Setting:
         self.SupplementMode = SupplementMode.MIDPOINT
         self.redraw_by_AI = True
 
+        # clothoid (bi-clothoid corner connection; see クロソイド曲線導入方針)
+        self.MIN_TURN_RADIUS_COEF: float = 3.0    # r_min = MIN_TURN_RADIUS_COEF * L  (旧ARC版は3.3)
+        self.MAX_YAW_ACCEL_DEGS2: float = 5.0      # [deg/s^2] 許容ヨー角加速度 dr/dt の目安値。
+                                                    # 具体的な運動性能データが無いため暫定値。
+                                                    # sigma_max = deg2rad(MAX_YAW_ACCEL_DEGS2) / U^2 として使用。
+                                                    # 実際の旋回試験値等が判明したら要更新。
+        self.DELTA_S: float = 5.0                  # [m] クロソイド対のSD評価・出力サンプリング間隔
+        self.LC_GRID_N: int = 51                    # クロソイド合計長 Lc の走査点数 (ARCのR_listに合わせて51)
+        self.CLOTHOID_ETA: float = 0.5              # 非対称率 eta = Lin/Lc (今回は左右対称に固定)
+        self.W_SD: float = 1.0                      # 評価関数の重み: J = W_SD*J_SD + W_L*J_L
+        self.W_L: float = 0.0                       # 経路長側の重み。0ならARC版と同じ基準(SDのみ)で比較可能
+
         # CMA-ES
         self.seed: int = 42
         self.MAX_SPEED_KTS: float = 9.5  # [knots]
@@ -67,6 +81,13 @@ class Setting:
 
         # others
         self.PDF = True
+
+    def min_turn_radius(self) -> float:
+        """
+        最小旋回半径 R_min。ARC(円弧フィレット)・CLOTHOID(クロソイド対)の
+        両アルゴリズムで共有する (クロソイド曲線導入方針 7.1節, A-1)。
+        """
+        return self.MIN_TURN_RADIUS_COEF * self.L
 
 
 
@@ -815,6 +836,17 @@ class PathPlanning:
             self.result_pts = arcs
             print("\nFillet arc path complete")
 
+        elif self.ps.approach_algo == ApproachAlgo.CLOTHOID:
+            full_pts = np.vstack([self.pp_start, self.way_points, self.pp_end])
+
+            arc_list = []
+            for i in range(len(self.way_points)):
+                self._find_best_clothoid_pair(full_pts[i], full_pts[i+1], full_pts[i+2], arc_list)
+
+            arcs = np.concatenate(arc_list, axis=0)
+            self.result_pts = arcs
+            print("\nClothoid pair path complete")
+
         self.legends.append(save_figures.LEGEND_PLANNED_PATH)
         self._save_pts(self.result_pts, "generated_path", pt_size=5)
 
@@ -864,7 +896,7 @@ class PathPlanning:
         L1 = np.linalg.norm(pt1 - pt2)
         L2 = np.linalg.norm(pt2 - pt3)
         alpha = np.arccos(np.clip(np.dot(cal.unit(pt1-pt2), cal.unit(pt3-pt2)), -1, 1))
-        r_min = (3.3 * self.ps.L * 2) / 2
+        r_min = self.ps.min_turn_radius()
         r_max = min(L1, L2, r_min) * np.tan(alpha/2)
         R_list = np.linspace(r_min, r_max, 51)
 
@@ -880,6 +912,107 @@ class PathPlanning:
                 SD_least = SD_cost
 
         arc_list.append(arc_best)
+
+
+    def _find_best_clothoid_pair(self, pt1, pt2, pt3, arc_list):
+        """
+        円弧フィレット(_find_best_fillet_arc)のクロソイド版。
+        クロソイド曲線導入方針 13.2節「現在の半径走査を長さ走査へ置換」に対応。
+
+        入出力は _find_best_fillet_arc と同じ (ver, hor) 座標系・compass方位系。
+        クロソイド内部計算のみ (x,y)=(hor,ver)・CCW正の標準座標系に変換して行い
+        (11節)、結果を (ver, hor) / compass psi へ変換して戻す。
+        """
+        ps = self.ps
+        cal = self.cal
+        cost_cal = self.cost_cal
+
+        pt1 = np.asarray(pt1, dtype=float)
+        pt2 = np.asarray(pt2, dtype=float)
+        pt3 = np.asarray(pt3, dtype=float)
+
+        # (ver, hor) -> (x, y) = (hor, ver)  [クロソイド内部座標系へ変換; 11節]
+        pt1_xy = pt1[::-1]
+        pt2_xy = pt2[::-1]
+        pt3_xy = pt3[::-1]
+
+        geom = compute_corner_geometry(pt1_xy, pt2_xy, pt3_xy)
+        L1, L2, dpsi = geom.L1, geom.L2, geom.dpsi
+
+        if abs(dpsi) < 1e-9:
+            # 変針がほぼ無いため、クロソイドを配置せず屈曲点をそのまま経路点とする
+            arc_list.append(pt2.reshape(1, 2))
+            return
+
+        R_min = ps.min_turn_radius()
+        eta = ps.CLOTHOID_ETA
+
+        # Lc探索範囲 (7.1節の最大曲率制約から下限を逆算; 13.2節)
+        Lc_max = min(L1, L2)
+        Lc_min = 2.0 * abs(dpsi) * R_min
+
+        if Lc_min > Lc_max:
+            print(f"[clothoid] warning: pt2={pt2} で最大曲率制約(7.1節)を満たすLcが"
+                  f"線分長を超過 (Lc_min={Lc_min:.2f} > Lc_max={Lc_max:.2f})。"
+                  f"Lc=Lc_max近傍のみを候補とします(曲率制約が緩和される可能性あり)。")
+            Lc_min = Lc_max * 0.999
+
+        Lc_list = np.linspace(Lc_min, Lc_max, ps.LC_GRID_N)
+
+        # 船速U (pt2地点, SD_penaltyと同じ基準点lines[-1].end_ptを使用; A-2)
+        U_kts = cal.speed(pt2, self.lines[-1].end_pt)
+        U_ms = knot_to_ms(U_kts)
+        sigma_max = np.deg2rad(ps.MAX_YAW_ACCEL_DEGS2) / (U_ms ** 2)
+
+        J_least = np.inf
+        best_pts_verhor = None
+
+        for Lc in Lc_list:
+            Lin = eta * Lc
+            Lout = (1.0 - eta) * Lc
+
+            try:
+                result = build_biclothoid(pt1_xy, pt2_xy, pt3_xy, Lin, Lout)
+            except ValueError:
+                continue
+
+            cons = check_constraints(result, min_turn_radius=R_min, sigma_max=sigma_max)
+            if not (cons["max_curvature_ok"] and cons["sigma_in_ok"] and cons["sigma_out_ok"]
+                    and cons["din_in_range"] and cons["dout_in_range"]):
+                continue
+
+            # 弧長 Delta_s 間隔で再サンプリング (9節)。内部積分自体は精度確保のため
+            # build_biclothoid のデフォルト分点(細かい)のままとし、評価・出力用にのみ
+            # 弧長間隔で引き直す。
+            s_total = result.s[-1]
+            n_samples = max(2, int(np.ceil(s_total / ps.DELTA_S)) + 1)
+            s_samples = np.linspace(0.0, s_total, n_samples)
+            x_samples = np.interp(s_samples, result.s, result.p[:, 0])
+            y_samples = np.interp(s_samples, result.s, result.p[:, 1])
+            theta_samples = np.interp(s_samples, result.s, result.psi)  # CCW標準系の方位
+
+            # (x, y) -> (ver, hor),  theta_ccw -> psi_compass (北0, 時計回り正; 11節)
+            pts_verhor = np.column_stack([y_samples, x_samples])
+            psi_compass = np.pi / 2 - theta_samples
+            psi_compass = (psi_compass + np.pi) % (2.0 * np.pi) - np.pi
+
+            SD_cost = 0.0
+            for j in range(len(pts_verhor)):
+                SD_cost += cost_cal.SD_penalty(self.lines, pts_verhor[j], psi_compass[j])
+
+            J = ps.W_SD * SD_cost + ps.W_L * Lc
+
+            if J < J_least:
+                J_least = J
+                best_pts_verhor = pts_verhor
+
+        if best_pts_verhor is None:
+            print(f"[clothoid] warning: pt2={pt2} で制約を満たすクロソイド対が見つからなかったため、"
+                  f"円弧フィレットにフォールバックします。")
+            self._find_best_fillet_arc(pt1, pt2, pt3, arc_list)
+            return
+
+        arc_list.append(best_pts_verhor)
 
 
     def _compute_ship_poses(self, interval_sec=60, dt=1.0, max_markers=500):
