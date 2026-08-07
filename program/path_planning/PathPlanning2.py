@@ -58,14 +58,23 @@ class Setting:
         self.SupplementMode = SupplementMode.MIDPOINT
         self.redraw_by_AI = True
 
-        # clothoid 
-        self.MIN_TURN_RADIUS_COEF: float = 3.0
-        self.MAX_YAW_ACCEL_DEGS2: float = 5.0
-        self.DELTA_S: float = 5.0
-        self.LC_GRID_N: int = 51
-        self.CLOTHOID_ETA: float = 0.5
-        self.W_SD: float = 1.0
-        self.W_L: float = 0.0
+        # clothoid (bi-clothoid corner connection; see クロソイド曲線導入方針)
+        self.MIN_TURN_RADIUS_COEF: float = 3.0    # r_min = MIN_TURN_RADIUS_COEF * L  (旧ARC版は3.3)
+        self.MAX_YAW_ACCEL_DEGS2: float = 5.0      # [deg/s^2] 許容ヨー角加速度 dr/dt の目安値。
+                                                    # 具体的な運動性能データが無いため暫定値。
+                                                    # sigma_max = deg2rad(MAX_YAW_ACCEL_DEGS2) / U^2 として使用。
+                                                    # 実際の旋回試験値等が判明したら要更新。
+        self.DELTA_S: float = 5.0                  # [m] クロソイド対のSD評価・出力サンプリング間隔
+        self.LC_GRID_N: int = 51                    # クロソイド合計長 Lc の走査点数 (ARCのR_listに合わせて51)
+        self.CLOTHOID_ETA: float = 0.5              # 非対称率 eta = Lin/Lc (単独探索では左右対称に固定)
+        self.W_SD: float = 1.0                      # 評価関数の重み: J = W_SD*J_SD + W_L*J_L
+        self.W_L: float = 0.0                       # 経路長側の重み。0ならARC版と同じ基準(SDのみ)で比較可能
+
+        # clothoid: 複数屈曲点の結合 (13.3節 / G-10まとめ実装)
+        self.MAX_RESOLVE_ITERS: int = 5             # 重複解消の反復上限
+        self.JOINT_LC_GRID_N: int = 5                # 隣接ペア共同再最適化時のLc走査点数(単独探索より粗い)
+        self.ETA_GRID: list = [0.3, 0.4, 0.5, 0.6, 0.7]
+                                                     # 共同再最適化時のeta候補
 
         # CMA-ES
         self.seed: int = 42
@@ -186,6 +195,21 @@ class Calculator:
         if self.ps.MIN_SPEED_KTS > speed:
             return self.ps.MIN_SPEED_KTS
         return speed
+
+
+
+@dataclass
+class _CornerResult:
+    """
+    1つの屈曲点における経路(円弧 or クロソイド対)の探索結果。
+    座標はすべて既存コードと同じ (ver, hor) 順。
+    """
+    entry_point: np.ndarray    # 進入直線とのタンジェント点 (円弧: t1, クロソイド: Qin)
+    exit_point: np.ndarray     # 退出直線とのタンジェント点 (円弧: t2, クロソイド: Qout)
+    din: float                  # 屈曲点から entry_point までの距離 (進入直線側の消費量)
+    dout: float                 # 屈曲点から exit_point までの距離 (退出直線側の消費量)
+    curve_points: np.ndarray   # (N,2) 経路点列 (ver,hor)。entry_point -> exit_point
+    is_arc: bool = False        # True: 円弧フィレットへフォールバックした屈曲点
 
 
 
@@ -834,15 +858,9 @@ class PathPlanning:
             print("\nFillet arc path complete")
 
         elif self.ps.approach_algo == ApproachAlgo.CLOTHOID:
-            full_pts = np.vstack([self.pp_start, self.way_points, self.pp_end])
-
-            arc_list = []
-            for i in range(len(self.way_points)):
-                self._find_best_clothoid_pair(full_pts[i], full_pts[i+1], full_pts[i+2], arc_list)
-
-            arcs = np.concatenate(arc_list, axis=0)
-            self.result_pts = arcs
-            print("\nClothoid pair path complete")
+            corners, full_seq = self._resolve_and_generate_clothoid_path()
+            self.result_pts = self._assemble_full_path(corners, full_seq)
+            print("\nClothoid pair path complete (multi-corner resolved)")
 
         self.legends.append(save_figures.LEGEND_PLANNED_PATH)
         self._save_pts(self.result_pts, "generated_path", pt_size=5)
@@ -885,7 +903,11 @@ class PathPlanning:
         self.handles.extend(save_figures.draw_ship_shapes(ax, ship_shapes))
 
 
-    def _find_best_fillet_arc(self, pt1, pt2, pt3, arc_list):
+    def _search_arc_corner(self, pt1, pt2, pt3):
+        """
+        円弧フィレットの半径走査を行い、最良候補を _CornerResult として返す。
+        _find_best_fillet_arc と _joint系/_resolve系 の双方から共通利用する。
+        """
         cal = self.cal
         cost_cal = self.cost_cal
 
@@ -897,119 +919,322 @@ class PathPlanning:
         r_max = min(L1, L2, r_min) * np.tan(alpha/2)
         R_list = np.linspace(r_min, r_max, 51)
 
+        best = None
         for r in R_list:
-            _, _, arc, psi, _ = fillet(pt1, pt2, pt3, r, n=20)
-            # ship domain
+            t1, t2, arc, psi, _ = fillet(pt1, pt2, pt3, r, n=20)
             SD_cost = 0.0
             for j in range(len(arc)):
                 SD_cost += cost_cal.SD_penalty(self.lines, arc[j], psi[j])
 
-            if SD_least > SD_cost:
-                arc_best = arc
+            if SD_cost < SD_least:
                 SD_least = SD_cost
+                best = _CornerResult(
+                    entry_point=t1, exit_point=t2,
+                    din=float(np.linalg.norm(pt2 - t1)),
+                    dout=float(np.linalg.norm(t2 - pt2)),
+                    curve_points=arc, is_arc=True,
+                )
+        return best
 
-        arc_list.append(arc_best)
+
+    def _find_best_fillet_arc(self, pt1, pt2, pt3, arc_list):
+        best = self._search_arc_corner(pt1, pt2, pt3)
+        arc_list.append(best.curve_points)
 
 
-    def _find_best_clothoid_pair(self, pt1, pt2, pt3, arc_list):
+    def _build_and_score_clothoid(self, pt1_xy, pt2_xy, pt3_xy, Lin, Lout, R_min, sigma_max):
         """
-        円弧フィレット(_find_best_fillet_arc)のクロソイド版。
-        クロソイド曲線導入方針 13.2節「現在の半径走査を長さ走査へ置換」に対応。
-
-        入出力は _find_best_fillet_arc と同じ (ver, hor) 座標系・compass方位系。
-        クロソイド内部計算のみ (x,y)=(hor,ver)・CCW正の標準座標系に変換して行い
-        (11節)、結果を (ver, hor) / compass psi へ変換して戻す。
+        1組の(Lin, Lout)候補についてクロソイド対を構築し、制約判定・Delta_sサンプリング・
+        SDコスト評価を行う。合格しなければ (None, inf) を返す。
+        戻り値の _CornerResult の座標は (ver, hor) に変換済み。
         """
         ps = self.ps
-        cal = self.cal
-        cost_cal = self.cost_cal
+        try:
+            result = build_biclothoid(pt1_xy, pt2_xy, pt3_xy, Lin, Lout)
+        except ValueError:
+            return None, np.inf
+
+        cons = check_constraints(result, min_turn_radius=R_min, sigma_max=sigma_max)
+        if not (cons["max_curvature_ok"] and cons["sigma_in_ok"] and cons["sigma_out_ok"]
+                and cons["din_in_range"] and cons["dout_in_range"]):
+            return None, np.inf
+
+        # 弧長Delta_s間隔で再サンプリング (9節)。内部積分自体は精度確保のため
+        # build_biclothoid のデフォルト分点(細かい)のままとし、評価・出力用にのみ
+        # 弧長間隔で引き直す。
+        s_total = result.s[-1]
+        n_samples = max(2, int(np.ceil(s_total / ps.DELTA_S)) + 1)
+        s_samples = np.linspace(0.0, s_total, n_samples)
+        x_samples = np.interp(s_samples, result.s, result.p[:, 0])
+        y_samples = np.interp(s_samples, result.s, result.p[:, 1])
+        theta_samples = np.interp(s_samples, result.s, result.psi)  # CCW標準系の方位
+
+        # (x, y) -> (ver, hor),  theta_ccw -> psi_compass (北0, 時計回り正; 11節)
+        pts_verhor = np.column_stack([y_samples, x_samples])
+        psi_compass = np.pi / 2 - theta_samples
+        psi_compass = (psi_compass + np.pi) % (2.0 * np.pi) - np.pi
+
+        SD_cost = 0.0
+        for j in range(len(pts_verhor)):
+            SD_cost += self.cost_cal.SD_penalty(self.lines, pts_verhor[j], psi_compass[j])
+
+        Lc = Lin + Lout
+        J = ps.W_SD * SD_cost + ps.W_L * Lc
+
+        cr = _CornerResult(
+            entry_point=result.entry_point[::-1],  # (x,y) -> (ver,hor)
+            exit_point=result.exit_point[::-1],
+            din=result.din, dout=result.dout,
+            curve_points=pts_verhor, is_arc=False,
+        )
+        return cr, J
+
+
+    def _search_clothoid_corner(self, pt1, pt2, pt3, eta_list=None, lc_grid_n=None):
+        """
+        単一屈曲点についてクロソイド対の最良候補を探索する。
+        制約(7.1節)を満たすLcが存在しない場合は None を返す(呼び出し側でARCへフォールバック)。
+        """
+        ps = self.ps
+        if eta_list is None:
+            eta_list = [ps.CLOTHOID_ETA]
+        if lc_grid_n is None:
+            lc_grid_n = ps.LC_GRID_N
 
         pt1 = np.asarray(pt1, dtype=float)
         pt2 = np.asarray(pt2, dtype=float)
         pt3 = np.asarray(pt3, dtype=float)
 
         # (ver, hor) -> (x, y) = (hor, ver)  [クロソイド内部座標系へ変換; 11節]
-        pt1_xy = pt1[::-1]
-        pt2_xy = pt2[::-1]
-        pt3_xy = pt3[::-1]
+        pt1_xy, pt2_xy, pt3_xy = pt1[::-1], pt2[::-1], pt3[::-1]
 
         geom = compute_corner_geometry(pt1_xy, pt2_xy, pt3_xy)
         L1, L2, dpsi = geom.L1, geom.L2, geom.dpsi
 
         if abs(dpsi) < 1e-9:
             # 変針がほぼ無いため、クロソイドを配置せず屈曲点をそのまま経路点とする
-            arc_list.append(pt2.reshape(1, 2))
-            return
+            return _CornerResult(
+                entry_point=pt2.copy(), exit_point=pt2.copy(),
+                din=0.0, dout=0.0, curve_points=pt2.reshape(1, 2), is_arc=False,
+            )
 
         R_min = ps.min_turn_radius()
-        eta = ps.CLOTHOID_ETA
 
         # Lc探索範囲 (7.1節の最大曲率制約から下限を逆算; 13.2節)
         Lc_max = min(L1, L2)
         Lc_min = 2.0 * abs(dpsi) * R_min
 
         if Lc_min > Lc_max:
-            print(f"[clothoid] warning: pt2={pt2} で最大曲率制約(7.1節)を満たすLcが"
-                  f"線分長を超過 (Lc_min={Lc_min:.2f} > Lc_max={Lc_max:.2f})。"
-                  f"Lc=Lc_max近傍のみを候補とします(曲率制約が緩和される可能性あり)。")
-            Lc_min = Lc_max * 0.999
+            # この屈曲点は両側の直線長だけでは制約(7.1節)を満たせない = 単独では解決不能。
+            # 隣接屈曲点との共同再最適化(_joint_reoptimize_pair)に委ねるため None を返す。
+            return None
 
-        Lc_list = np.linspace(Lc_min, Lc_max, ps.LC_GRID_N)
+        Lc_list = np.linspace(Lc_min, Lc_max, lc_grid_n)
 
         # 船速U (pt2地点, SD_penaltyと同じ基準点lines[-1].end_ptを使用; A-2)
-        U_kts = cal.speed(pt2, self.lines[-1].end_pt)
+        U_kts = self.cal.speed(pt2, self.lines[-1].end_pt)
         U_ms = knot_to_ms(U_kts)
         sigma_max = np.deg2rad(ps.MAX_YAW_ACCEL_DEGS2) / (U_ms ** 2)
 
         J_least = np.inf
-        best_pts_verhor = None
-
+        best = None
         for Lc in Lc_list:
-            Lin = eta * Lc
-            Lout = (1.0 - eta) * Lc
+            for eta in eta_list:
+                cr, J = self._build_and_score_clothoid(
+                    pt1_xy, pt2_xy, pt3_xy, eta * Lc, (1.0 - eta) * Lc, R_min, sigma_max)
+                if cr is not None and J < J_least:
+                    J_least = J
+                    best = cr
 
-            try:
-                result = build_biclothoid(pt1_xy, pt2_xy, pt3_xy, Lin, Lout)
-            except ValueError:
+        return best
+
+
+    def _point_line_deviation(self, pt, line_a, line_b):
+        """
+        点pt から 直線(line_a, line_b) への垂線距離。WP削除候補の選定(Stage3)に使用。
+        """
+        pt = np.asarray(pt, dtype=float)
+        line_a = np.asarray(line_a, dtype=float)
+        line_b = np.asarray(line_b, dtype=float)
+        d = line_b - line_a
+        norm_d = np.linalg.norm(d)
+        if norm_d < 1e-9:
+            return float(np.linalg.norm(pt - line_a))
+        t = np.dot(pt - line_a, d) / (norm_d ** 2)
+        proj = line_a + t * d
+        return float(np.linalg.norm(pt - proj))
+
+
+    def _joint_reoptimize_pair(self, p0, p1, p2, p3):
+        """
+        隣接する2屈曲点(頂点p1, p2)を、trimトリム距離の重複
+        (dout_1 + din_2 <= |p2-p1|) を満たすように共同で再探索する(Stage2; G-10の②④相当)。
+        eta方向にも探索するため、片側だけ曲率を強める/弱めることで重複を解消できる。
+        見つからなければ None を返す(呼び出し側でStage3: WP削除、へ進む)。
+        """
+        ps = self.ps
+        p0 = np.asarray(p0, dtype=float); p1 = np.asarray(p1, dtype=float)
+        p2 = np.asarray(p2, dtype=float); p3 = np.asarray(p3, dtype=float)
+        L_shared = np.linalg.norm(p2 - p1)
+
+        p0_xy, p1_xy, p2_xy, p3_xy = p0[::-1], p1[::-1], p2[::-1], p3[::-1]
+        geom_a = compute_corner_geometry(p0_xy, p1_xy, p2_xy)
+        geom_b = compute_corner_geometry(p1_xy, p2_xy, p3_xy)
+        R_min = ps.min_turn_radius()
+
+        Lc_max_a = min(geom_a.L1, geom_a.L2)
+        Lc_min_a = 2.0 * abs(geom_a.dpsi) * R_min
+        Lc_max_b = min(geom_b.L1, geom_b.L2)
+        Lc_min_b = 2.0 * abs(geom_b.dpsi) * R_min
+
+        if Lc_min_a > Lc_max_a or Lc_min_b > Lc_max_b:
+            # どちらかの屈曲点が自身の両直線長だけで既に制約(7.1節)を満たせない
+            # -> 共同再最適化では解決不能 (eta/Lc配分の問題ではなく絶対的な長さ不足)
+            return None
+
+        U_a = knot_to_ms(self.cal.speed(p1, self.lines[-1].end_pt))
+        U_b = knot_to_ms(self.cal.speed(p2, self.lines[-1].end_pt))
+        sigma_max_a = np.deg2rad(ps.MAX_YAW_ACCEL_DEGS2) / (U_a ** 2)
+        sigma_max_b = np.deg2rad(ps.MAX_YAW_ACCEL_DEGS2) / (U_b ** 2)
+
+        Lc_list_a = np.linspace(Lc_min_a, Lc_max_a, ps.JOINT_LC_GRID_N)
+        Lc_list_b = np.linspace(Lc_min_b, Lc_max_b, ps.JOINT_LC_GRID_N)
+
+        # 候補を先に個別に計算しておき、後で総当たりで組み合わせる(計算量削減)
+        cand_a = []
+        for Lc_a in Lc_list_a:
+            for eta_a in ps.ETA_GRID:
+                cr_a, J_a = self._build_and_score_clothoid(
+                    p0_xy, p1_xy, p2_xy, eta_a * Lc_a, (1.0 - eta_a) * Lc_a, R_min, sigma_max_a)
+                if cr_a is not None:
+                    cand_a.append((cr_a, J_a))
+
+        cand_b = []
+        for Lc_b in Lc_list_b:
+            for eta_b in ps.ETA_GRID:
+                cr_b, J_b = self._build_and_score_clothoid(
+                    p1_xy, p2_xy, p3_xy, eta_b * Lc_b, (1.0 - eta_b) * Lc_b, R_min, sigma_max_b)
+                if cr_b is not None:
+                    cand_b.append((cr_b, J_b))
+
+        J_least = np.inf
+        best = None
+        for cr_a, J_a in cand_a:
+            for cr_b, J_b in cand_b:
+                if cr_a.dout + cr_b.din > L_shared:
+                    continue
+                J = J_a + J_b
+                if J < J_least:
+                    J_least = J
+                    best = (cr_a, cr_b)
+
+        return best
+
+
+    def _resolve_and_generate_clothoid_path(self):
+        """
+        全屈曲点についてクロソイド対を探索し、隣接ペアのトリム距離重複(7.3節)を
+        Stage2(共同再最適化) -> Stage3(WP削除) -> Stage4(強制ARC) の順で解消する。
+        (13.3節 複数屈曲点の結合 / G-10まとめ実装)
+        """
+        ps = self.ps
+        way_points_list = [np.asarray(p, dtype=float) for p in self.way_points]
+
+        corners = None
+        full_seq = None
+
+        for iteration in range(ps.MAX_RESOLVE_ITERS):
+            full_seq = [self.pp_start] + way_points_list + [self.pp_end]
+            n = len(way_points_list)
+            corners = [None] * n
+            forced_arc = [False] * n
+
+            # Stage 1: 各屈曲点を独立に探索
+            for k in range(n):
+                res = self._search_clothoid_corner(full_seq[k], full_seq[k+1], full_seq[k+2])
+                if res is None:
+                    corners[k] = self._search_arc_corner(full_seq[k], full_seq[k+1], full_seq[k+2])
+                    forced_arc[k] = True
+                else:
+                    corners[k] = res
+
+            # 隣接ペアのトリム距離重複を検出。
+            # (検証の結果、eta=0.5固定の単独クロソイド探索は Lc<=min(L1,L2)<=L_shared という
+            #  性質上、クロソイド同士では原理的に重複しない。重複が生じるのは、どちらか一方が
+            #  ARCへフォールバックした場合のみ(ARC側のr_min/r_max順序が反転する鋭角ケースで、
+            #  既存コードにも内在する挙動)。そのためARC側も検査対象に含める。)
+            conflicts = []
+            for k in range(n - 1):
+                L_shared = np.linalg.norm(full_seq[k+2] - full_seq[k+1])
+                if corners[k].dout + corners[k+1].din > L_shared:
+                    conflicts.append(k)
+
+            if not conflicts:
+                break
+
+            resolved_by_removal = False
+            for k in conflicts:
+                joint = self._joint_reoptimize_pair(
+                    full_seq[k], full_seq[k+1], full_seq[k+2], full_seq[k+3])
+                if joint is not None:
+                    corners[k], corners[k+1] = joint
+                    continue
+
+                # Stage3: WP削除 (閾値なし; 逸脱distanceが小さい方を削除)
+                d_k = self._point_line_deviation(full_seq[k+1], full_seq[k], full_seq[k+2])
+                d_k1 = self._point_line_deviation(full_seq[k+2], full_seq[k+1], full_seq[k+3])
+                remove_local_idx = k if d_k <= d_k1 else (k + 1)
+                print(f"[clothoid] pt={way_points_list[remove_local_idx]} を削除して"
+                      f"trim重複を解消します (d={min(d_k, d_k1):.2f})。")
+                del way_points_list[remove_local_idx]
+                resolved_by_removal = True
+                break
+
+            if resolved_by_removal:
                 continue
+            # 全conflictがjointで解消済み(削除なし) -> 次iterationで再検証
+        else:
+            print(f"[clothoid] warning: MAX_RESOLVE_ITERS({ps.MAX_RESOLVE_ITERS})に到達。"
+                  f"残存する重複を強制的にARCへ切替えます(Stage4)。")
+            full_seq = [self.pp_start] + way_points_list + [self.pp_end]
+            n = len(way_points_list)
+            for k in range(n - 1):
+                L_shared = np.linalg.norm(full_seq[k+2] - full_seq[k+1])
+                if corners[k].dout + corners[k+1].din > L_shared:
+                    corners[k] = self._search_arc_corner(full_seq[k], full_seq[k+1], full_seq[k+2])
+                    corners[k+1] = self._search_arc_corner(full_seq[k+1], full_seq[k+2], full_seq[k+3])
 
-            cons = check_constraints(result, min_turn_radius=R_min, sigma_max=sigma_max)
-            if not (cons["max_curvature_ok"] and cons["sigma_in_ok"] and cons["sigma_out_ok"]
-                    and cons["din_in_range"] and cons["dout_in_range"]):
-                continue
+        self.way_points = np.vstack(way_points_list) if way_points_list else self.way_points
+        return corners, full_seq
 
-            # 弧長 Delta_s 間隔で再サンプリング (9節)。内部積分自体は精度確保のため
-            # build_biclothoid のデフォルト分点(細かい)のままとし、評価・出力用にのみ
-            # 弧長間隔で引き直す。
-            s_total = result.s[-1]
-            n_samples = max(2, int(np.ceil(s_total / ps.DELTA_S)) + 1)
-            s_samples = np.linspace(0.0, s_total, n_samples)
-            x_samples = np.interp(s_samples, result.s, result.p[:, 0])
-            y_samples = np.interp(s_samples, result.s, result.p[:, 1])
-            theta_samples = np.interp(s_samples, result.s, result.psi)  # CCW標準系の方位
 
-            # (x, y) -> (ver, hor),  theta_ccw -> psi_compass (北0, 時計回り正; 11節)
-            pts_verhor = np.column_stack([y_samples, x_samples])
-            psi_compass = np.pi / 2 - theta_samples
-            psi_compass = (psi_compass + np.pi) % (2.0 * np.pi) - np.pi
+    def _assemble_full_path(self, corners, full_seq):
+        """
+        Start -> 直線 -> 屈曲点0の曲線 -> 直線 -> ... -> 直線 -> Goal
+        の順で経路全体を明示的に組み立てる (8節)。直線区間もDelta_s間隔でサンプリングする。
+        """
+        ps = self.ps
 
-            SD_cost = 0.0
-            for j in range(len(pts_verhor)):
-                SD_cost += cost_cal.SD_penalty(self.lines, pts_verhor[j], psi_compass[j])
+        def sample_line(a, b):
+            a = np.asarray(a, dtype=float); b = np.asarray(b, dtype=float)
+            L = np.linalg.norm(b - a)
+            if L < 1e-9:
+                return a.reshape(1, 2)
+            n_pts = max(2, int(np.ceil(L / ps.DELTA_S)) + 1)
+            t = np.linspace(0.0, 1.0, n_pts).reshape(-1, 1)
+            return a + t * (b - a)
 
-            J = ps.W_SD * SD_cost + ps.W_L * Lc
+        segments = []
+        prev_point = full_seq[0]  # pp_start
+        for corner in corners:
+            segments.append(sample_line(prev_point, corner.entry_point))
+            segments.append(corner.curve_points)
+            prev_point = corner.exit_point
+        segments.append(sample_line(prev_point, full_seq[-1]))  # -> pp_end
 
-            if J < J_least:
-                J_least = J
-                best_pts_verhor = pts_verhor
+        return np.concatenate(segments, axis=0)
 
-        if best_pts_verhor is None:
-            print(f"[clothoid] warning: pt2={pt2} で制約を満たすクロソイド対が見つからなかったため、"
-                  f"円弧フィレットにフォールバックします。")
-            self._find_best_fillet_arc(pt1, pt2, pt3, arc_list)
-            return
 
-        arc_list.append(best_pts_verhor)
 
 
     def _compute_ship_poses(self, interval_sec=60, dt=1.0, max_markers=500):
