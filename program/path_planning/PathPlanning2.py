@@ -54,21 +54,18 @@ class Setting:
         self.B = 16.0
 
         # approach
-        self.approach_algo = ApproachAlgo.ARC
+        self.approach_algo = ApproachAlgo.CLOTHOID
         self.SupplementMode = SupplementMode.MIDPOINT
         self.redraw_by_AI = True
 
-        # clothoid (bi-clothoid corner connection; see クロソイド曲線導入方針)
-        self.MIN_TURN_RADIUS_COEF: float = 3.0    # r_min = MIN_TURN_RADIUS_COEF * L  (旧ARC版は3.3)
-        self.MAX_YAW_ACCEL_DEGS2: float = 5.0      # [deg/s^2] 許容ヨー角加速度 dr/dt の目安値。
-                                                    # 具体的な運動性能データが無いため暫定値。
-                                                    # sigma_max = deg2rad(MAX_YAW_ACCEL_DEGS2) / U^2 として使用。
-                                                    # 実際の旋回試験値等が判明したら要更新。
-        self.DELTA_S: float = 5.0                  # [m] クロソイド対のSD評価・出力サンプリング間隔
-        self.LC_GRID_N: int = 51                    # クロソイド合計長 Lc の走査点数 (ARCのR_listに合わせて51)
-        self.CLOTHOID_ETA: float = 0.5              # 非対称率 eta = Lin/Lc (今回は左右対称に固定)
-        self.W_SD: float = 1.0                      # 評価関数の重み: J = W_SD*J_SD + W_L*J_L
-        self.W_L: float = 0.0                       # 経路長側の重み。0ならARC版と同じ基準(SDのみ)で比較可能
+        # clothoid 
+        self.MIN_TURN_RADIUS_COEF: float = 3.0
+        self.MAX_YAW_ACCEL_DEGS2: float = 5.0
+        self.DELTA_S: float = 5.0
+        self.LC_GRID_N: int = 51
+        self.CLOTHOID_ETA: float = 0.5
+        self.W_SD: float = 1.0
+        self.W_L: float = 0.0
 
         # CMA-ES
         self.seed: int = 42

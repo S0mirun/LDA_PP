@@ -306,8 +306,8 @@ def dictionary():
                 "psi_start": 120,
                 "psi_end": 0,
                 "berth_type": 2,
-                "ver_range": [-500, 2500],
-                "hor_range": [-3000, 500],
+                "ver_range": [-500, 3000],
+                "hor_range": [-3000, 1000],
                 "annotations": {
                     "approach_start": {
                         "text": "approach start",
