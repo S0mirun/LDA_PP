@@ -1,20 +1,9 @@
-"""
-描画結果の保存を担当するモジュール。
-
-PathPlanning.py から import して使用する。
-図のサイズ・軸範囲など figure 自体のセットアップは PathPlanning.py 側の
-setup_figure() の仕様に従う（本モジュールでは新たに figure を作成しない）。
-
-各図の legend・点群の描画スタイル・text・fontsize・savename などの
-「見た目」に関する要素はこのファイル内で一元管理する。
-PathPlanning.py 側は、ここで定義した定数・関数を名前で参照するだけでよい。
-"""
-
 import os
 
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+from matplotlib.transforms import Bbox
 import numpy as np
 
 from utils.LDA.ship_geometry import *
@@ -37,6 +26,79 @@ LEGEND_PLANNED_PATH = Line2D([0], [0], color='blue', linestyle='--',
 
 LEGEND_SHIP_SHAPE = Line2D([0], [0], color='black', linewidth=1.2, label='Ship shape (1 min interval)')
 
+BBOX_PAD_IN = 0.03  # 保存画像の外周に残す最小余白（インチ）。小さいほど余白が減る。
+
+
+def _axes_only_width_in(fig, ax):
+    """
+    legend を除いた ax 自体（目盛りラベル等を含む）の描画幅を inch 単位で返す。
+    legend の横幅をこの値以下に収めるための基準として使う。
+    """
+    legend = ax.get_legend()
+    was_visible = legend is not None and legend.get_visible()
+    if legend is not None:
+        legend.set_visible(False)
+
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    bbox_in = ax.get_tightbbox(renderer=renderer).transformed(fig.dpi_scale_trans.inverted())
+
+    if legend is not None:
+        legend.set_visible(was_visible)
+    return bbox_in.x1 - bbox_in.x0
+
+
+def _place_legend_fit_width(fig, ax, legends, fontsize, ncol_max, anchor_y=-0.02, min_ncol=1):
+    """
+    legends を ax の下部中央に配置する。
+    legend の横幅が ax 本体の横幅を超える場合は、ncol_max から min_ncol まで
+    ncol を自動的に減らしながら再配置し、「legend 幅 <= ax 幅」になる
+    （または min_ncol まで減らしても収まらない場合はそこで諦める）
+    ncol を採用する。
+
+    既存の legend があれば作り直す前に取り除く。
+    """
+    old_legend = ax.get_legend()
+    if old_legend is not None:
+        old_legend.remove()
+
+    if not legends:
+        return None
+
+    max_width_in = _axes_only_width_in(fig, ax)
+    legend_kwargs = dict(loc='upper center', bbox_to_anchor=(0.5, anchor_y),
+                         fontsize=fontsize, frameon=True, framealpha=0.9, edgecolor='black')
+
+    ncol_start = max(min_ncol, min(ncol_max, len(legends)))
+    legend = None
+    for ncol in range(ncol_start, min_ncol - 1, -1):
+        if legend is not None:
+            legend.remove()
+        legend = ax.legend(handles=legends, bbox_transform=ax.transAxes, ncol=ncol, **legend_kwargs)
+
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        width_in = legend.get_window_extent(renderer=renderer) \
+                         .transformed(fig.dpi_scale_trans.inverted()).width
+        if width_in <= max_width_in or ncol == min_ncol:
+            break
+    return legend
+
+
+def _compute_save_bbox(fig, ax, pad_in=BBOX_PAD_IN):
+    """
+    ax（+ 現在表示されている legend や text 等の子artist）の
+    実際の描画結果をそのまま tight に囲む bbox を返す。
+    legend が ax 幅を超えないように配置されている前提なので、
+    横幅は常に ax 本体の幅で決まり、複数の図を並べたときの
+    メイン画像サイズが揃う。
+    """
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    bbox_in = ax.get_tightbbox(renderer=renderer).transformed(fig.dpi_scale_trans.inverted())
+    return Bbox.from_extents(bbox_in.x0 - pad_in, bbox_in.y0 - pad_in,
+                              bbox_in.x1 + pad_in, bbox_in.y1 + pad_in)
+
 
 BUOY_SCATTER_KWARGS = dict(color='orange', s=20, zorder=2)
 
@@ -52,24 +114,16 @@ OPTIMIZATION_LINE_KWARGS = dict(color="red", lw=1.5, zorder=6)
 OPTIMIZATION_SHIP_SHAPE_KWARGS = dict(facecolor="red", edgecolor="red", linewidth=1.0, alpha=0.5, zorder=6)
 
 
-def save_fig(fig, ax, save_dir, name, legends, handles, pdf=False, pdf_dir=None):
-    """
-    現在の legends/handles を使って凡例を描画し、png（必要なら pdf も）に保存する。
-    保存後、handles に登録された描画物（デバッグ用の一時的な線や点）は figure から取り除く。
-
-    legend は項目数が増えても経路の描画と重ならないよう、図の外(下)に配置する。
-    """
-    legend_kwargs = dict(loc='upper center', bbox_to_anchor=(0.5, -0.02), ncol=4,
-                          fontsize=12, frameon=True, framealpha=0.9, edgecolor='black')
-
+def save_fig(fig, ax, save_dir, name, legends, handles, pdf=False, pdf_dir=None,
+             fontsize=12, ncol_max=4):
     handles.extend(legends)
-    ax.legend(handles=legends, bbox_transform=ax.transAxes, **legend_kwargs)
 
-    fig.savefig(os.path.join(save_dir, f"{name}.png"),
-                dpi=400, bbox_inches="tight", pad_inches=0.05)
+    _place_legend_fit_width(fig, ax, legends, fontsize=fontsize, ncol_max=ncol_max)
+
+    bbox = _compute_save_bbox(fig, ax)
+    fig.savefig(os.path.join(save_dir, f"{name}.png"), dpi=400, bbox_inches=bbox)
     if pdf and pdf_dir is not None:
-        fig.savefig(os.path.join(pdf_dir, f"{name}.pdf"),
-                    dpi=400, bbox_inches="tight", pad_inches=0.05)
+        fig.savefig(os.path.join(pdf_dir, f"{name}.pdf"), dpi=400, bbox_inches=bbox)
 
     if handles:
         for h in list(handles):
@@ -167,7 +221,8 @@ def setup_result_legends():
 
 
 def save_result_fig(fig, ax, save_dir_path, file_name, pp_start, pp_end, result_pts, way_points,
-                     approach_algo_name, supplement_mode_name, redraw_by_AI):
+                     approach_algo_name, supplement_mode_name, redraw_by_AI,
+                     fontsize=10, ncol_max=3):
     """
     最終的な経路結果を1枚の図として保存する。
     """
@@ -176,8 +231,6 @@ def save_result_fig(fig, ax, save_dir_path, file_name, pp_start, pp_end, result_
     wp_scatter_kwargs = dict(c="#8A2BE2", marker="X", edgecolors="#8A2BE2", linewidths=0.8, s=20, zorder=10)
     text_pos = (0.5, -0.01)
     text_kwargs = dict(ha='center', va='top', fontsize=12)
-    legend_kwargs = dict(loc='upper center', bbox_to_anchor=(0.5, -0.03), ncol=3,
-                          fontsize=10, frameon=True, fancybox=False, edgecolor='black')
 
     SAVE_DIR = f"{save_dir_path}/results"
 
@@ -191,9 +244,9 @@ def save_result_fig(fig, ax, save_dir_path, file_name, pp_start, pp_end, result_
     ax.text(text_pos[0], text_pos[1], config_text, transform=ax.transAxes, **text_kwargs)
 
     legends = setup_result_legends()
-    ax.legend(handles=legends, bbox_transform=ax.transAxes, **legend_kwargs)
+    # config_text は legend よりさらに下にあるので、legend の anchor を少し高めにしておく
+    _place_legend_fit_width(fig, ax, legends, fontsize=fontsize, ncol_max=ncol_max, anchor_y=-0.03)
 
-    plt.subplots_adjust(bottom=0.10)
+    bbox = _compute_save_bbox(fig, ax)
     os.makedirs(SAVE_DIR, exist_ok=True)
-    fig.savefig(os.path.join(SAVE_DIR, f"{file_name}.png"),
-                dpi=400, bbox_inches="tight", pad_inches=0.05)
+    fig.savefig(os.path.join(SAVE_DIR, f"{file_name}.png"), dpi=400, bbox_inches=bbox)
