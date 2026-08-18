@@ -1,6 +1,7 @@
 import argparse
 import glob
 import os
+import time
 
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -16,6 +17,7 @@ import shapely
 from shapely.geometry import Polygon, Point, LineString
 from shapely.prepared import prep
 from shapely.validation import make_valid
+from tqdm.auto import tqdm
 from typing import ClassVar, Tuple
 
 from utils.LDA.ship_geometry import *
@@ -55,25 +57,25 @@ class Setting:
         self.B = 16.0
 
         # approach
-        self.approach_algo = ApproachAlgo.ARC
+        self.approach_algo = ApproachAlgo.CLOTHOID
         self.SupplementMode = SupplementMode.MIDPOINT
-        self.redraw_by_AI = False
+        self.redraw_by_AI = True
 
-        # clothoid
+        # clothoid (bi-clothoid corner connection)
         self.MIN_TURN_RADIUS_COEF: float = 3.0
         self.MAX_YAW_ACCEL_DEGS2: float = 5.0
         self.DELTA_S: float = 5.0
         self.LC_GRID_N: int = 51
         self.CLOTHOID_ETA: float = 0.5
         self.W_SD: float = 1.0
-        self.W_L: float = 0.0
+        self.W_L: float = 1.0
 
-        # clothoid: 複数屈曲点の結合
+        # clothoid: multi-corner resolution
         self.MAX_RESOLVE_ITERS: int = 5
         self.JOINT_LC_GRID_N: int = 5
         self.ETA_GRID: list = [0.3, 0.4, 0.5, 0.6, 0.7]
 
-        # clothoid: CMA-ES最適化
+        # clothoid: CMA-ES optimization
         self.CLOTHOID_OPTIMIZER: str = "cma-es"        # "grid" or "cma-es"
         self.CMA_SEED: int = 42
         self.CMA_RESTARTS: int = 3
@@ -94,16 +96,12 @@ class Setting:
         self.angle_interval: float = 5
 
         # display toggles
-        self.SHOW_SHIP_SHAPES: bool = False
+        self.SHOW_SHIP_SHAPES: bool = True
 
         # others
         self.PDF = True
 
     def min_turn_radius(self) -> float:
-        """
-        最小旋回半径 R_min。ARC(円弧フィレット)・CLOTHOID(クロソイド対)の
-        両アルゴリズムで共有する (クロソイド曲線導入方針 7.1節, A-1)。
-        """
         return self.MIN_TURN_RADIUS_COEF * self.L
 
 
@@ -868,7 +866,6 @@ class PathPlanning:
             print("\nFillet arc path complete")
 
         elif self.ps.approach_algo == ApproachAlgo.CLOTHOID:
-            print("\nClothoid pair path start")
             corners, full_seq = self._resolve_and_generate_clothoid_path()
             if self.ps.CLOTHOID_OPTIMIZER == "cma-es":
                 corners = self._optimize_clothoid_cma_es(corners, full_seq)
@@ -979,10 +976,12 @@ class PathPlanning:
         psi_compass = np.pi / 2 - theta_samples
         psi_compass = (psi_compass + np.pi) % (2.0 * np.pi) - np.pi
 
+        # ship domain コスト
         SD_cost = 0.0
         for j in range(len(pts_verhor)):
             SD_cost += self.cost_cal.SD_penalty(self.lines, pts_verhor[j], psi_compass[j])
 
+        # 経路長コスト
         Lc = Lin + Lout
         J = ps.W_SD * SD_cost + ps.W_L * Lc
 
@@ -1122,6 +1121,14 @@ class PathPlanning:
 
 
     def _resolve_and_generate_clothoid_path(self):
+        """
+        Stage1(単独探索) -> Stage2(隣接ペア共同再最適化) -> Stage3(WP削除)
+        -> Stage4(強制ARC) の順で隣接屈曲点間のトリム距離重複を解消する。
+
+        注: eta=0.5固定のクロソイド単独探索は Lc<=min(L1,L2)<=L_shared という
+        性質上、クロソイド同士では原理的に重複しない。重複が起きるのはARCへ
+        フォールバックした場合のみ(ARCのr_min/r_maxが鋭角で逆転するケース)。
+        """
         ps = self.ps
         way_points_list = [np.asarray(p, dtype=float) for p in self.way_points]
 
@@ -1129,7 +1136,6 @@ class PathPlanning:
         full_seq = None
 
         for iteration in range(ps.MAX_RESOLVE_ITERS):
-            print(f"iteration {iteration} running...")
             full_seq = [self.pp_start] + way_points_list + [self.pp_end]
             n = len(way_points_list)
             corners = [None] * n
@@ -1309,18 +1315,43 @@ class PathPlanning:
         return costs if batched else float(costs[0])
 
 
+    def _save_cma_restart_fig(self, restart, best_x, opt_indices, contexts, corners_fixed, full_seq):
+        cma_dir = f"{self.SAVE_DIR}/cma"
+        os.makedirs(cma_dir, exist_ok=True)
+
+        best_vec = self._clip_clothoid_vars(best_x).reshape(len(opt_indices), 2)
+        corners_snapshot = list(corners_fixed)
+        for i, k in enumerate(opt_indices):
+            Lc, eta = best_vec[i]
+            ctx = contexts[k]
+            cr, _ = self._build_and_score_clothoid(
+                ctx["pt1_xy"], ctx["pt2_xy"], ctx["pt3_xy"],
+                eta * Lc, (1.0 - eta) * Lc, ctx["R_min"], ctx["sigma_max"])
+            if cr is not None:
+                corners_snapshot[k] = cr
+
+        path_pts = self._assemble_full_path(corners_snapshot, full_seq)
+        way_pts = np.vstack(full_seq)
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.plot(path_pts[:, 1], path_pts[:, 0], color="tab:blue", lw=2.0, label="path")
+        ax.scatter(way_pts[:, 1], way_pts[:, 0], color="tab:orange", zorder=5, s=20, label="way points")
+        ax.set_aspect("equal", adjustable="datalim")
+        ax.grid(alpha=0.3)
+        ax.legend(loc="best")
+        ax.set_title(f"CMA-ES restart {restart}")
+        fig.tight_layout()
+        fig.savefig(f"{cma_dir}/restart_{restart:02d}.png", dpi=150)
+        plt.close(fig)
+
+
     def _optimize_clothoid_cma_es(self, corners, full_seq):
-        """
-        PDF 13.4節: 屈曲点ごとの (Lc, eta) をCMA-ES(DdCma)で最適化する。
-        Way Point位置・ARCフォールバック屈曲点は固定し、決定変数はクロソイド
-        屈曲点の (Lc,eta) のみ。utils.PP.E_ddCMA(DdCma/Checker/Logger)を使用。
-        """
         ps = self.ps
         contexts, optimizable, L_shared = self._clothoid_corner_contexts(corners, full_seq)
         opt_indices = [k for k, opt in enumerate(optimizable) if opt]
 
         if not opt_indices:
-            print("[clothoid-cma] 最適化対象の屈曲点が無いためスキップします。")
+            print("[clothoid-cma] no optimizable corners, skipping")
             return corners
 
         self._cma_contexts = contexts
@@ -1335,25 +1366,64 @@ class PathPlanning:
         logger = Logger(ddcma, prefix=f"{self.SAVE_DIR}/clothoid_cma_log")
 
         NEVAL_STANDARD = ddcma.lam * 5000
+        print(f"[clothoid-cma] dimension N={ddcma.N}  population lam={ddcma.lam}  "
+              f"NEVAL_STANDARD={NEVAL_STANDARD}")
+
         total_neval = 0
         cur_seed = int(ps.CMA_SEED)
         best_cost = np.inf
         best_x = x0.copy()
+        time_start = time.time()
 
         for restart in range(ps.CMA_RESTARTS):
             is_satisfied = False
+            t0 = time.time()
+
+            pbar = tqdm(
+                total=NEVAL_STANDARD,
+                desc=f"Restart {restart}",
+                dynamic_ncols=True,
+                bar_format="{desc}: {percentage:.0f}%|{bar}| {postfix}",
+                mininterval=0.2,
+                smoothing=0.1,
+            )
+            last_neval = ddcma.neval
+
+            def _refresh_postfix():
+                rate = pbar.format_dict.get("rate")
+                eval_per_s = f"{rate:.1f}" if rate is not None else "-"
+                pbar.set_postfix_str(
+                    f"eval/s={eval_per_s}  neval={ddcma.neval}  best={best_cost:.6g}"
+                )
+
             while not is_satisfied:
                 ddcma.onestep(func=self._clothoid_cma_objective, check=self._clip_clothoid_vars)
+
                 cur_best = float(np.min(ddcma.arf))
                 if cur_best < best_cost:
                     best_cost = cur_best
                     best_x = ddcma.arx[int(ddcma.idx[0])].copy()
+
                 is_satisfied, condition = checker()
 
+                if ddcma.neval > last_neval:
+                    pbar.update(ddcma.neval - last_neval)
+                    last_neval = ddcma.neval
+                    _refresh_postfix()
+
+                if ddcma.t % 10 == 0:
+                    pbar.write(f"neval:{ddcma.neval:<6}  cost:{cur_best:<10.6g}  best:{best_cost:<10.6g}")
+
+            _refresh_postfix()
+            pbar.close()
+
             logger(condition)
+            elapsed = time.time() - t0
             total_neval += ddcma.neval
-            print(f"[clothoid-cma] restart {restart}: best_cost={best_cost:.6g} "
-                  f"neval={ddcma.neval} condition={condition}")
+            print(f"[clothoid-cma] restart {restart} terminated: condition={condition}  "
+                  f"best_cost={best_cost:.6g}  neval={ddcma.neval}  time={elapsed:.2f}s")
+
+            self._save_cma_restart_fig(restart, best_x, opt_indices, contexts, corners, full_seq)
 
             if total_neval < NEVAL_STANDARD:
                 popsize = ddcma.lam if not ps.CMA_INCREASE_POPSIZE_ON_RESTART else ddcma.lam * 2
@@ -1361,8 +1431,12 @@ class PathPlanning:
                 ddcma = DdCma(xmean0=x0, sigma0=sigma0, lam=popsize, seed=cur_seed)
                 checker = Checker(ddcma)
                 logger.setcma(ddcma)
+                print(f"[clothoid-cma] restarting with popsize={ddcma.lam}")
             else:
                 break
+
+        print(f"[clothoid-cma] optimization complete in {time.time() - time_start:.2f}s  "
+              f"total_neval={total_neval}  best_cost={best_cost:.6g}")
 
         best_vec = self._clip_clothoid_vars(best_x).reshape(len(opt_indices), 2)
 
