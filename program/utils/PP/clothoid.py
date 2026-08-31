@@ -177,18 +177,7 @@ def solve_trim_distances(t_in, t_out, delta_p_c):
 
 def build_biclothoid(pt1, pt2, pt3, Lin: float, Lout: float, n_per_segment: int = 200) -> BiClothoidResult:
     """
-    PDF 4, 5節に基づき、屈曲点(pt1, pt2, pt3)に対して
     進入クロソイド長Lin・退出クロソイド長Loutのbi-clothoidを生成する。
-
-    手順:
-      1. 変針角 dpsi を計算 (3節)
-      2. kappa_peak = 2*dpsi / (Lin+Lout) (4節)
-      3. 局所座標(原点・方位0・曲率0)を起点にクロソイド対を積分し、
-         終端での局所変位・局所方位変化を得る
-      4. 局所変位を進入方向tinの向きだけ回転させ、大域座標での相対変位 delta_p_c を得る
-      5. delta_p_c = din*t_in + dout*t_out を解いて din, dout を求める (5節)
-      6. Qin = pt2 - din*t_in, Qout = pt2 + dout*t_out を計算し、
-         局所クロソイド座標列を回転・並行移動して大域座標に変換する
     """
     if Lin <= 0.0 or Lout <= 0.0:
         raise ValueError("Lin, Lout は正の値である必要があります")

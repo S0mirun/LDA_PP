@@ -220,7 +220,7 @@ def setup_result_legends():
     ]
 
 
-def save_result_fig(fig, ax, save_dir_path, file_name, pp_start, pp_end, result_pts, way_points,
+def save_result_fig(fig, ax, save_dir_path, file_name, full_pts, way_points,
                      approach_algo_name, supplement_mode_name, redraw_by_AI,
                      fontsize=10, ncol_max=3):
     """
@@ -234,7 +234,6 @@ def save_result_fig(fig, ax, save_dir_path, file_name, pp_start, pp_end, result_
 
     SAVE_DIR = f"{save_dir_path}/results"
 
-    full_pts = np.vstack([pp_start, result_pts, pp_end])
     ax.scatter(full_pts[:, 1], full_pts[:, 0], **scatter_kwargs)
     ax.plot(full_pts[:, 1], full_pts[:, 0], **line_kwargs)
 
@@ -250,3 +249,4 @@ def save_result_fig(fig, ax, save_dir_path, file_name, pp_start, pp_end, result_
     bbox = _compute_save_bbox(fig, ax)
     os.makedirs(SAVE_DIR, exist_ok=True)
     fig.savefig(os.path.join(SAVE_DIR, f"{file_name}.png"), dpi=400, bbox_inches=bbox)
+    

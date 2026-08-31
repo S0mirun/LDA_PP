@@ -57,7 +57,7 @@ class Setting:
         self.B = 16.0
 
         # approach
-        self.approach_algo = ApproachAlgo.CLOTHOID
+        self.approach_algo = ApproachAlgo.ARC
         self.SupplementMode = SupplementMode.MIDPOINT
         self.redraw_by_AI = True
 
@@ -1543,9 +1543,14 @@ class PathPlanning:
     def save_result_fig(self):
         self._draw_captain_path(self.fig, self.ax)
 
+        full_pts = np.vstack([self.pp_start, self.result_pts, self.pp_end])
+        df = pd.DataFrame(full_pts, columns=["x[m]", "y[m]"])
+        SAVE_DIR = f"{self.SAVE_DIR}/excel"
+        df.to_excel(os.path.join(SAVE_DIR, "full_pts.xlsx"), index=False)
+
         save_figures.save_result_fig(
             self.fig, self.ax, self.save_dir_path, self._make_folder_name(),
-            self.pp_start, self.pp_end, self.result_pts, self.way_points,
+            full_pts, self.way_points,
             self.ps.approach_algo.name, self.ps.SupplementMode.name, self.ps.redraw_by_AI,
         )
 
