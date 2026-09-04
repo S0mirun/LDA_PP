@@ -1546,7 +1546,7 @@ class PathPlanning:
         full_pts = np.vstack([self.pp_start, self.result_pts, self.pp_end])
         df = pd.DataFrame(full_pts, columns=["x[m]", "y[m]"])
         SAVE_DIR = f"{self.SAVE_DIR}/excel"
-        df.to_excel(os.path.join(SAVE_DIR, "full_pts.xlsx"), index=False)
+        df.to_csv(os.path.join(SAVE_DIR, "full_pts.csv"), index=False)
 
         save_figures.save_result_fig(
             self.fig, self.ax, self.save_dir_path, self._make_folder_name(),
