@@ -639,13 +639,13 @@ class PathPlanning:
         theta = 0
         if port["psi_end"] == 0:
             if port["style"] == "head out" and port["side"]== "starboard":
-                theta = 0;    margin = -self.ps.L
+                theta = 0;    margin = -(self.ps.L + 20)
             elif port["style"] == "head out" and port["side"]== "port":
-                theta = 0;    margin = self.ps.L
+                theta = 0;    margin = (self.ps.L + 20)
             elif port["style"] == "head in" and port["side"] == "starboard":
-                theta = -180;  margin = -2 * self.ps.B
+                theta = -180;  margin = -(2 * self.ps.B + 20)
             elif port["style"] == "head in" and port["side"] == "port":
-                theta = 180; margin = 2 * self.ps.B
+                theta = 180; margin = (2 * self.ps.B + 20)
             theta = np.deg2rad(theta)
         else:
             theta = np.deg2rad(port["psi_end"]); margin = 2 * self.ps.B
@@ -1555,21 +1555,41 @@ class PathPlanning:
         )
 
 
+
+def port_number_type(value):
+    if value.strip().upper() == "ALL":
+        return "ALL"
+    try:
+        return int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"port_number must be an integer or 'ALL' (got: {value!r})"
+        )
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Path planning for ship berthing approach")
     parser.add_argument(
-        "port_number", type=int, nargs="?", default=0,
+        "port_number", type=port_number_type, nargs="?", default=0,
         help="0: Osaka_1A, 1: Tokyo_2C, 2: Yokkaichi_2B, 3: Sakaide, 4: Osaka_1B, "
              "5: Else_2, 6: Kashima, 7: Aomori, 8: Hachinohe, 9: Shimizu, "
-             "10: Tomakomai, 11: KIX"
+             "10: Tomakomai, 11: KIX, ALL: run 0,2,3,6,7,8,9 in sequence"
     )
     args = parser.parse_args()
 
-    ps = Setting()
-    ps.port_number = args.port_number
-    sd = ShipDomain()
-    cal = Calculator(ps, sd)
-    cost_cal = CostCalculator(ps, sd, cal)
+    TARGET_PORTS = [0, 2, 3, 6, 7, 8, 9]
+    port_numbers = TARGET_PORTS if args.port_number == "ALL" else [args.port_number]
 
-    pp = PathPlanning(ps, sd, cal, cost_cal)
-    pp.main()
+    for port_number in port_numbers:
+        print(f"[port_number={port_number}] start")
+
+        ps = Setting()
+        ps.port_number = port_number
+        sd = ShipDomain()
+        cal = Calculator(ps, sd)
+        cost_cal = CostCalculator(ps, sd, cal)
+
+        pp = PathPlanning(ps, sd, cal, cost_cal)
+        pp.main()
+
+        print(f"[port_number={port_number}] done")
