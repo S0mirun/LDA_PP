@@ -107,33 +107,68 @@ for port_number, port in port_items:
 distance_df = pd.DataFrame(all_records).sort_values("distance").reset_index(drop=True)
 distance_df.to_csv(os.path.join(savedir, "nearest_distances.csv"), index=False, encoding="utf-8-sig")
 
-distances = distance_df["distance"].to_numpy()
 
-max_bin_edge = (int(distances.max() // BIN_WIDTH) + 1) * BIN_WIDTH
-bin_edges = np.arange(0, max_bin_edge + BIN_WIDTH, BIN_WIDTH)
+def summarize_and_plot(distances, title, file_prefix):
+    distances = np.asarray(distances)
 
-counts, _ = np.histogram(distances, bins=bin_edges)
-histogram_df = pd.DataFrame({
-    "bin_start": bin_edges[:-1],
-    "bin_end": bin_edges[1:],
-    "count": counts,
-})
-histogram_df["percentage"] = histogram_df["count"] / len(distances) * 100
-histogram_df["cumulative_percentage"] = histogram_df["percentage"].cumsum()
+    max_bin_edge = (int(distances.max() // BIN_WIDTH) + 1) * BIN_WIDTH
+    bin_edges = np.arange(0, max_bin_edge + BIN_WIDTH, BIN_WIDTH)
 
-histogram_df.to_csv(os.path.join(savedir, "nearest_distance_histogram.csv"), index=False, encoding="utf-8-sig")
+    counts, _ = np.histogram(distances, bins=bin_edges)
+    histogram_df = pd.DataFrame({
+        "bin_start": bin_edges[:-1],
+        "bin_end": bin_edges[1:],
+        "count": counts,
+    })
+    histogram_df["percentage"] = histogram_df["count"] / len(distances) * 100
+    histogram_df["cumulative_percentage"] = histogram_df["percentage"].cumsum()
 
-print(histogram_df.to_string(index=False))
+    histogram_df.to_csv(
+        os.path.join(savedir, f"{file_prefix}_histogram.csv"), index=False, encoding="utf-8-sig"
+    )
 
-for threshold_pct in (90, 95, 99):
-    row = histogram_df.loc[histogram_df["cumulative_percentage"] >= threshold_pct].iloc[0]
-    print(f"累積 {threshold_pct}% は {int(row['bin_end'])} m 以下")
+    print(f"\n=== {title} (n={len(distances)}) ===")
+    print(histogram_df.to_string(index=False))
 
-fig, ax = plt.subplots(figsize=(8, 5))
-ax.bar(histogram_df["bin_start"], histogram_df["count"], width=BIN_WIDTH * 0.9, align="edge")
-ax.set_xlabel("nearest opposite-colour distance [m]")
-ax.set_ylabel("count")
-ax.set_title("Distribution of nearest opposite-colour marker distance")
-ax.grid(alpha=0.3)
-plt.tight_layout()
-plt.savefig(os.path.join(savedir, "nearest_distance_histogram.png"), dpi=150)
+    for threshold_pct in (90, 95, 99):
+        row = histogram_df.loc[histogram_df["cumulative_percentage"] >= threshold_pct].iloc[0]
+        print(f"累積 {threshold_pct}% は {int(row['bin_end'])} m 以下")
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.bar(histogram_df["bin_start"], histogram_df["count"], width=BIN_WIDTH * 0.9, align="edge")
+    ax.set_xlabel("nearest opposite-colour distance [m]")
+    ax.set_ylabel("count")
+    ax.set_title(title)
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(savedir, f"{file_prefix}_histogram.png"), dpi=150)
+    plt.savefig(os.path.join(savedir, f"{file_prefix}_histogram.pdf"), dpi=150)
+    plt.close(fig)
+
+    return histogram_df
+
+
+# --- 全ての標識 -------------------------------------------------------
+summarize_and_plot(
+    distance_df["distance"],
+    title="Distribution of nearest opposite-colour marker distance (all markers)",
+    file_prefix="nearest_distance_all",
+)
+
+# --- 名前に「第」を含む標識のみ（対をなす側面標識に限定）--------------
+NAME_FILTER_SUBSTR = "第"
+distance_df_dai = distance_df.loc[
+    distance_df["name"].astype(str).str.contains(NAME_FILTER_SUBSTR, na=False)
+]
+distance_df_dai.to_csv(
+    os.path.join(savedir, "nearest_distances_dai_only.csv"), index=False, encoding="utf-8-sig"
+)
+
+if len(distance_df_dai) > 0:
+    summarize_and_plot(
+        distance_df_dai["distance"],
+        title=f'Distribution of nearest opposite-colour marker distance',
+        file_prefix="nearest_distance_dai_only",
+    )
+else:
+    print(f'\n"{NAME_FILTER_SUBSTR}" を含む標識が見つかりませんでした。')
